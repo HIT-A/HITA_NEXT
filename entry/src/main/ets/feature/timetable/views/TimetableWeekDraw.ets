@@ -153,6 +153,9 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   const hoursInDay: number = AXIS_END_HOUR - AXIS_START_HOUR;
   const hourH: number = gridH / hoursInDay;
   const colW: number = (w - gridLeft) / 7;
+  // Canvas uses backing pixels while the rest of ArkUI uses vp. On a phone
+  // the backing canvas is commonly about 3x wider than the visible surface.
+  const pxScale: number = Math.max(1, Math.min(4, w / 450));
   const weekMonday: number = timetable.startTime + (weekNumber - 1) * WEEK_MILLIS;
   const todayDow: number = EasTimetable.dowOfMs(Date.now());
 
@@ -164,21 +167,23 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.fillStyle = isToday ? '#E6F0FC' : '#FFFFFF';
     ctx.fillRect(x, gridTop - headerH + 4, colW, headerH - 4);
     ctx.fillStyle = isToday ? TimetableDrawStyle.todayHeadBg : TimetableDrawStyle.textMain;
-    ctx.font = isToday ? 'bold 21px sans-serif' : 'bold 20px sans-serif';
+    const dowFontSize: number = Math.round((isToday ? 21 : 20) * pxScale);
+    ctx.font = 'bold ' + dowFontSize.toString() + 'px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(DOW_NAMES[d], x + colW / 2, gridTop - headerH / 2 - 11);
+    ctx.fillText(DOW_NAMES[d], x + colW / 2, gridTop - headerH / 2 - Math.round(11 * pxScale));
     const date: Date = new Date(weekMonday + d * DAY_MILLIS);
-    ctx.font = '18px sans-serif';
+    ctx.font = Math.round(18 * pxScale).toString() + 'px sans-serif';
     ctx.fillStyle = isToday ? TimetableDrawStyle.todayHeadBg : TimetableDrawStyle.textSub;
-    ctx.fillText(date.getDate().toString(), x + colW / 2, gridTop - headerH / 2 + 18);
+    ctx.fillText(date.getDate().toString(), x + colW / 2, gridTop - headerH / 2 + Math.round(18 * pxScale));
     ctx.textAlign = 'start';
   }
   // 月份标签（左侧时间轴上方，安卓端以月份替代重复周数）。
   const firstDay: Date = new Date(weekMonday);
   ctx.fillStyle = TimetableDrawStyle.textSub;
-  ctx.font = 'bold 19px sans-serif';
+  ctx.font = 'bold ' + Math.round(19 * pxScale).toString() + 'px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText((firstDay.getMonth() + 1).toString() + '月', gutterW / 2, gridTop - headerH / 2 + 18);
+  ctx.fillText((firstDay.getMonth() + 1).toString() + '月', gutterW / 2,
+    gridTop - headerH / 2 + Math.round(18 * pxScale));
   ctx.textAlign = 'start';
 
   // 今日列整列遮罩（仅当前周）
@@ -197,13 +202,13 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.lineTo(w, y);
     ctx.stroke();
   }
-  ctx.font = '18px sans-serif';
+  ctx.font = Math.round(18 * pxScale).toString() + 'px sans-serif';
   ctx.fillStyle = TimetableDrawStyle.textSub;
   for (let hour = AXIS_START_HOUR; hour < AXIS_END_HOUR; hour++) {
     const y: number = gridTop + (hour - AXIS_START_HOUR) * hourH;
     const label: string = hour.toString() + ':00';
     ctx.textAlign = 'right';
-    ctx.fillText(label, gridLeft - 8, y);
+    ctx.fillText(label, gridLeft - Math.round(8 * pxScale), y);
     ctx.textAlign = 'start';
   }
   // 列分隔
@@ -291,32 +296,37 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.lineWidth = 1;
     roundedRectPath(ctx, x, y, bw, bh, radius);
     ctx.stroke();
-    const titleFont: number = Math.max(14, Math.min(19, Math.floor(laneW / 3)));
-    const titleLineHeight: number = titleFont + 3;
-    const titleMaxChars: number = Math.max(2, Math.floor((bw - 10) / titleFont * 1.12));
+    const titleBaseFont: number = Math.max(14, Math.min(19, Math.floor(laneW / 3)));
+    const titleFont: number = Math.round(titleBaseFont * pxScale);
+    const titleLineHeight: number = titleFont + Math.round(3 * pxScale);
+    const titleMaxChars: number = Math.max(2,
+      Math.floor((bw - Math.round(10 * pxScale)) / titleFont * 1.12));
     const titleLines: string[] = TimetableDrawStyle.wrap(ev.name === 'NULL' ? '' : ev.name,
       titleMaxChars, bh >= 74 ? 3 : 2);
     ctx.font = 'bold ' + titleFont.toString() + 'px sans-serif';
     ctx.fillStyle = '#FFFFFF';
     ctx.textAlign = 'start';
     if (titleLines.length > 0) {
-      const titleAreaBottom: number = ev.place.length > 0 && bh >= 52 ? y + bh - 17 : y + bh - 8;
-      const titleAreaTop: number = y + 12;
+      const titleAreaBottom: number = ev.place.length > 0 && bh >= 52 ?
+        y + bh - Math.round(17 * pxScale) : y + bh - Math.round(8 * pxScale);
+      const titleAreaTop: number = y + Math.round(12 * pxScale);
       const titleHeight: number = titleLines.length * titleLineHeight;
       let titleY: number = titleAreaTop + Math.max(0, (titleAreaBottom - titleAreaTop - titleHeight) / 2);
       for (let line = 0; line < titleLines.length; line++) {
         if (titleY + titleLineHeight > titleAreaBottom + titleLineHeight) {
           break;
         }
-        ctx.fillText(titleLines[line], x + 6, titleY);
+        ctx.fillText(titleLines[line], x + Math.round(6 * pxScale), titleY);
         titleY += titleLineHeight;
       }
     }
     if (ev.place.length > 0 && bh >= 38) {
       ctx.fillStyle = 'rgba(255,255,255,0.78)';
-      ctx.font = '13px sans-serif';
-      ctx.fillText(TimetableDrawStyle.compact(ev.place, Math.max(3, Math.floor((bw - 10) / 13))),
-        x + 6, y + bh - 9);
+      const placeFont: number = Math.round(13 * pxScale);
+      ctx.font = placeFont.toString() + 'px sans-serif';
+      ctx.fillText(TimetableDrawStyle.compact(ev.place,
+        Math.max(3, Math.floor((bw - Math.round(10 * pxScale)) / placeFont))),
+        x + Math.round(6 * pxScale), y + bh - Math.round(9 * pxScale));
     }
   }
 

@@ -975,23 +975,29 @@ struct Home {
   tabTimetable() {
     Column() {
       Row() {
-        Text(this.currentTimetable === undefined ? '时间表' :
-          '第' + this.timetableWeek.toString() + '周')
-          .fontSize(34)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(COLOR_TEXT_PRIMARY)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.timetableCampusTerm())
-          .fontSize(19)
-          .fontColor(COLOR_TEXT_SECONDARY)
-          .margin({ left: 18, top: 5 })
-          .layoutWeight(1)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Column() {
+          Text(this.currentTimetable === undefined ? '时间表' :
+            '第' + this.timetableWeek.toString() + '周')
+            .fontSize(34)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(COLOR_TEXT_PRIMARY)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(this.timetableCampusTerm())
+            .fontSize(15)
+            .fontColor(COLOR_TEXT_SECONDARY)
+            .backgroundColor(COLOR_CARD)
+            .borderRadius(12)
+            .padding({ left: 11, right: 11, top: 5, bottom: 5 })
+            .margin({ top: 7 })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
       }
       .width('100%')
-      .padding({ left: 20, right: 18, top: 24, bottom: 12 })
+      .padding({ left: 20, right: 18, top: 16, bottom: 10 })
       .alignItems(VerticalAlign.Center)
 
       if (this.currentTimetable === undefined) {
