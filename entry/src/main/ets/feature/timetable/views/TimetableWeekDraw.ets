@@ -26,23 +26,23 @@ export const AXIS_START_HOUR: number = 8;
 export const AXIS_END_HOUR: number = 24;
 
 export class TimetableDrawStyle {
-  static bg: string = '#F6F7FA';
-  static gridLine: string = '#E7EBF0';
-  static textMain: string = '#1A1A1A';
-  static textSub: string = '#7E8998';
-  static todayHeadBg: string = '#3390EC';
+  static bg: string = '#F4F7FC';
+  static gridLine: string = '#D3DBE7';
+  static textMain: string = '#14213D';
+  static textSub: string = '#6B7A90';
+  static todayHeadBg: string = '#2E86E8';
   /** 今日列整列遮罩（源 ~#10000000）。 */
-  static todayMask: string = 'rgba(0,0,0,0.06)';
+  static todayMask: string = 'rgba(46,134,232,0.06)';
   /** 顶栏最低/占比。 */
-  static headerMin: number = 28;
-  static headerRatio: number = 0.055;
+  static headerMin: number = 42;
+  static headerRatio: number = 0.065;
   /** 左侧整点标签列最低/占比。 */
-  static gutterMin: number = 40;
-  static gutterRatio: number = 0.075;
+  static gutterMin: number = 36;
+  static gutterRatio: number = 0.09;
   /** 块外边距（源 1dp 量级，比例化）。 */
   static blockMargin: number = 2;
-  /** 块填充不透明度（源 ~95%）。 */
-  static blockOpacity: number = 0.94;
+  /** 课程块使用浅色底，文字保留科目色，接近安卓端的轻量卡片。 */
+  static blockOpacity: number = 0.16;
 
   static compact(value: string, maxChars: number): string {
     if (value.length <= maxChars) {
@@ -140,7 +140,7 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   for (let d = 0; d < 7; d++) {
     const x: number = gridLeft + d * colW;
     const isToday: boolean = isCurrentWeek && todayDow === d + 1;
-    ctx.fillStyle = isToday ? '#EAF4FD' : '#FFFFFF';
+    ctx.fillStyle = isToday ? '#E6F0FC' : '#FFFFFF';
     ctx.fillRect(x, gridTop - headerH + 4, colW, headerH - 4);
     ctx.fillStyle = isToday ? TimetableDrawStyle.todayHeadBg : TimetableDrawStyle.textMain;
     ctx.font = isToday ? 'bold 12px sans-serif' : '12px sans-serif';
@@ -260,15 +260,16 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     const x: number = gridLeft + (dow - 1) * colW + layout.lane * laneW + m;
     const bw: number = Math.max(12, laneW - m * 2);
     const radius: number = Math.max(4, Math.min(10, bw * 0.12));
-    const color: string = argbToCss(ev.color, TimetableDrawStyle.blockOpacity);
+    const eventColor: number = ev.color === 0 ? 0xFF2E86E8 : ev.color;
+    const color: string = argbToCss(eventColor, TimetableDrawStyle.blockOpacity);
     ctx.fillStyle = color;
     roundedRectPath(ctx, x, y, bw, bh, radius);
     ctx.fill();
-    ctx.strokeStyle = argbToCss(ev.color, 0.82);
+    ctx.strokeStyle = argbToCss(eventColor, 0.42);
     ctx.lineWidth = 1;
     roundedRectPath(ctx, x, y, bw, bh, radius);
     ctx.stroke();
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = argbToCss(eventColor, 0.95);
     ctx.beginPath();
     ctx.arc(x + 9, y + 9, 3, 0, Math.PI * 2);
     ctx.fill();
@@ -278,7 +279,7 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
       ctx.fillText(TimetableDrawStyle.compact(ev.name, bw < 52 ? 5 : 9), x + 5, y + 20);
     }
     if (ev.place.length > 0 && bh >= 38) {
-      ctx.fillStyle = 'rgba(255,255,255,0.78)';
+      ctx.fillStyle = argbToCss(eventColor, 0.78);
       ctx.font = '9px sans-serif';
       ctx.fillText(TimetableDrawStyle.compact(ev.place, bw < 52 ? 5 : 10), x + 5, y + 33);
     }
@@ -292,13 +293,13 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     const axisEnd: number = AXIS_END_HOUR * 60;
     if (minute >= axisStart && minute <= axisEnd) {
       const nowY: number = gridTop + ((minute - axisStart) / (axisEnd - axisStart)) * gridH;
-      ctx.strokeStyle = '#D93025';
+      ctx.strokeStyle = '#2E86E8';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(gridLeft, nowY);
       ctx.lineTo(w, nowY);
       ctx.stroke();
-      ctx.fillStyle = '#D93025';
+      ctx.fillStyle = '#2E86E8';
       ctx.beginPath();
       ctx.arc(gridLeft, nowY, 3.5, 0, Math.PI * 2);
       ctx.fill();

@@ -83,7 +83,7 @@ struct TimetablePreview {
     if (t === EasEventType.TAG) {
       return 0xFF26A69A;
     }
-    return 0xFF3390EC;
+    return 0xFF2E86E8;
   }
 
   aboutToDisappear(): void {
@@ -159,7 +159,7 @@ struct TimetablePreview {
       Row() {
         Text('‹')
           .fontSize(30)
-          .fontColor('#1A1A1A')
+          .fontColor('#14213D')
           .width(44)
           .height(44)
           .textAlign(TextAlign.Center)
@@ -171,10 +171,10 @@ struct TimetablePreview {
           Text('课表周视图')
             .fontSize(20)
             .fontWeight(FontWeight.Bold)
-            .fontColor('#1A1A1A')
+            .fontColor('#14213D')
           Text(this.demo.timetable.name)
             .fontSize(11)
-            .fontColor('#667085')
+            .fontColor('#6B7A90')
             .margin({ top: 3 })
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -185,32 +185,32 @@ struct TimetablePreview {
 
         Text('⇩')
           .fontSize(22)
-          .fontColor('#3390EC')
+          .fontColor('#2E86E8')
           .width(42)
           .height(42)
           .textAlign(TextAlign.Center)
           .borderRadius(21)
-          .backgroundColor('#EBF4FC')
+          .backgroundColor('#E3EEFC')
           .onClick(() => {
             this.exportIcs();
           })
       }
       .width('100%')
-      .padding({ left: 8, right: 12, top: 8, bottom: 8 })
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
       .backgroundColor('#FFFFFF')
-      .border({ width: { bottom: 1 }, color: '#EAECF0' })
+      .border({ width: { bottom: 1 }, color: '#D3DBE7' })
       .alignItems(VerticalAlign.Center)
 
       Row() {
         Text('‹')
           .fontSize(23)
-          .fontColor('#667085')
+          .fontColor('#6B7A90')
           .width(38)
           .height(34)
           .textAlign(TextAlign.Center)
           .borderRadius(17)
           .backgroundColor('#FFFFFF')
-          .border({ width: 1, color: '#EAECF0' })
+          .border({ width: 1, color: '#D3DBE7' })
           .onClick(() => {
             this.shiftWeek(-1);
           })
@@ -221,7 +221,7 @@ struct TimetablePreview {
           .fontColor('#FFFFFF')
           .height(34)
           .padding({ left: 16, right: 16 })
-          .backgroundColor('#3390EC')
+          .backgroundColor('#2E86E8')
           .borderRadius(17)
           .textAlign(TextAlign.Center)
           .onClick(() => {
@@ -230,27 +230,27 @@ struct TimetablePreview {
 
         Text('›')
           .fontSize(23)
-          .fontColor('#667085')
+          .fontColor('#6B7A90')
           .width(38)
           .height(34)
           .textAlign(TextAlign.Center)
           .borderRadius(17)
           .backgroundColor('#FFFFFF')
-          .border({ width: 1, color: '#EAECF0' })
+          .border({ width: 1, color: '#D3DBE7' })
           .onClick(() => {
             this.shiftWeek(1);
           })
         Blank()
         Text(this.week === this.demo.timetable.getWeekNumber(Date.now()) ? '本周' : this.label)
           .fontSize(11)
-          .fontColor('#667085')
+          .fontColor('#6B7A90')
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
       .width('100%')
-      .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+      .padding({ left: 14, right: 14, top: 11, bottom: 11 })
       .alignItems(VerticalAlign.Center)
-      .backgroundColor('#F6F7FA')
+      .backgroundColor('#F4F7FC')
 
       Column() {
         Canvas(this.ctx)
@@ -275,18 +275,18 @@ struct TimetablePreview {
       }
       .width('100%')
       .layoutWeight(1)
-      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-      .backgroundColor('#F6F7FA')
+      .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+      .backgroundColor('#F4F7FC')
 
       Text('左右滑动切换周 · 点击右上角可导出 ICS')
         .fontSize(11)
-        .fontColor('#98A2B3')
-        .padding({ left: 12, right: 12, bottom: 12, top: 6 })
+        .fontColor('#8A96A8')
+        .padding({ left: 14, right: 14, bottom: 14, top: 8 })
         .textAlign(TextAlign.Start)
         .width('100%')
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F6F7FA')
+    .backgroundColor('#F4F7FC')
   }
 }
