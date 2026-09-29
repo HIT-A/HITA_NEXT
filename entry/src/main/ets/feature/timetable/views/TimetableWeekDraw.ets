@@ -9,7 +9,7 @@
  *  - 今日高亮 = 本周页对今日列整列叠加 ~#10000000 遮罩；
  *  - 源码 NowLine 实为死代码（未实例化），故不绘制；
  *  - 左侧标签画 08:00..23:00 整点；
- *  - 周切换在源为 ViewPager 环形窗口（WINDOW_SIZE=5）→ ArkTS 先用按钮切周，手势后续。
+ *  - 周切换由宿主页面按安卓 ViewPager 手势逻辑处理：跟手平移、阈值切换与回弹动画。
  */
 import {
   DAY_MILLIS,
@@ -153,9 +153,9 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   const hoursInDay: number = AXIS_END_HOUR - AXIS_START_HOUR;
   const hourH: number = gridH / hoursInDay;
   const colW: number = (w - gridLeft) / 7;
-  // Canvas uses backing pixels while the rest of ArkUI uses vp. On a phone
-  // the backing canvas is commonly about 3x wider than the visible surface.
-  const pxScale: number = Math.max(1, Math.min(4, w / 450));
+  // Keep the geometry in the same coordinates as the measured Canvas area.
+  // Text is assigned in vp below so it remains readable across device density.
+  const fontUnit: string = 'vp sans-serif';
   const weekMonday: number = timetable.startTime + (weekNumber - 1) * WEEK_MILLIS;
   const todayDow: number = EasTimetable.dowOfMs(Date.now());
 
@@ -167,23 +167,23 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.fillStyle = isToday ? '#E6F0FC' : '#FFFFFF';
     ctx.fillRect(x, gridTop - headerH + 4, colW, headerH - 4);
     ctx.fillStyle = isToday ? TimetableDrawStyle.todayHeadBg : TimetableDrawStyle.textMain;
-    const dowFontSize: number = Math.round((isToday ? 21 : 20) * pxScale);
-    ctx.font = 'bold ' + dowFontSize.toString() + 'px sans-serif';
+    const dowFontSize: number = isToday ? 21 : 20;
+    ctx.font = 'bold ' + dowFontSize.toString() + fontUnit;
     ctx.textAlign = 'center';
-    ctx.fillText(DOW_NAMES[d], x + colW / 2, gridTop - headerH / 2 - Math.round(11 * pxScale));
+    ctx.fillText(DOW_NAMES[d], x + colW / 2, gridTop - headerH / 2 - 11);
     const date: Date = new Date(weekMonday + d * DAY_MILLIS);
-    ctx.font = Math.round(18 * pxScale).toString() + 'px sans-serif';
+    ctx.font = '18' + fontUnit;
     ctx.fillStyle = isToday ? TimetableDrawStyle.todayHeadBg : TimetableDrawStyle.textSub;
-    ctx.fillText(date.getDate().toString(), x + colW / 2, gridTop - headerH / 2 + Math.round(18 * pxScale));
+    ctx.fillText(date.getDate().toString(), x + colW / 2, gridTop - headerH / 2 + 18);
     ctx.textAlign = 'start';
   }
   // 月份标签（左侧时间轴上方，安卓端以月份替代重复周数）。
   const firstDay: Date = new Date(weekMonday);
   ctx.fillStyle = TimetableDrawStyle.textSub;
-  ctx.font = 'bold ' + Math.round(19 * pxScale).toString() + 'px sans-serif';
+  ctx.font = 'bold 19' + fontUnit;
   ctx.textAlign = 'center';
   ctx.fillText((firstDay.getMonth() + 1).toString() + '月', gutterW / 2,
-    gridTop - headerH / 2 + Math.round(18 * pxScale));
+    gridTop - headerH / 2 + 18);
   ctx.textAlign = 'start';
 
   // 今日列整列遮罩（仅当前周）
@@ -202,13 +202,13 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.lineTo(w, y);
     ctx.stroke();
   }
-  ctx.font = Math.round(18 * pxScale).toString() + 'px sans-serif';
+  ctx.font = '18' + fontUnit;
   ctx.fillStyle = TimetableDrawStyle.textSub;
   for (let hour = AXIS_START_HOUR; hour < AXIS_END_HOUR; hour++) {
     const y: number = gridTop + (hour - AXIS_START_HOUR) * hourH;
     const label: string = hour.toString() + ':00';
     ctx.textAlign = 'right';
-    ctx.fillText(label, gridLeft - Math.round(8 * pxScale), y);
+    ctx.fillText(label, gridLeft - 8, y);
     ctx.textAlign = 'start';
   }
   // 列分隔
@@ -296,37 +296,61 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.lineWidth = 1;
     roundedRectPath(ctx, x, y, bw, bh, radius);
     ctx.stroke();
-    const titleBaseFont: number = Math.max(14, Math.min(19, Math.floor(laneW / 3)));
-    const titleFont: number = Math.round(titleBaseFont * pxScale);
-    const titleLineHeight: number = titleFont + Math.round(3 * pxScale);
+    const cardWidthScreen: number = bw;
+    const cardHeightScreen: number = bh;
+    const textScale: number = layout.lanes > 1 ? 0.9 : 1;
+    const marginScale: number = layout.lanes > 1 ? 0.85 : 1;
+    const nameLength: number = ev.name.trim().length;
+    // Match the Android card's adaptive title sizing, but keep a larger
+    // readable floor on HarmonyOS so long Chinese names still remain legible.
+    const lengthScale: number = nameLength <= 4 ? 1.15 :
+      (nameLength <= 6 ? 0.92 : (nameLength <= 8 ? 0.75 : 0.62));
+    const hasPlace: boolean = ev.place.trim().length > 0;
+    const titlePaddingScreen: number = 5 * marginScale;
+    const placePaddingScreen: number = hasPlace ? 14 * textScale : 0;
+    const titleAvailableScreen: number = Math.max(10,
+      cardHeightScreen - titlePaddingScreen * 2 - placePaddingScreen);
+    const maxTitleLines: number = cardHeightScreen < 40 ? 1 :
+      (cardHeightScreen < 60 ? 2 : 3);
+    const maxTitleFromSpace: number = Math.min(18, titleAvailableScreen / 1.2);
+    const titleScreen: number = Math.max(10,
+      Math.min(maxTitleFromSpace, 15 * textScale * lengthScale));
+    const titleFont: number = Math.max(1, Math.round(titleScreen));
+    const titleLineHeight: number = Math.max(1, Math.round(titleScreen * 1.2));
+    // Chinese glyphs are close to one em wide.  A small allowance lets a
+    // three-line card retain the full subject name instead of truncating at
+    // only two characters on narrow day columns.
     const titleMaxChars: number = Math.max(2,
-      Math.floor((bw - Math.round(10 * pxScale)) / titleFont * 1.12));
+      Math.floor((cardWidthScreen - titlePaddingScreen * 2) / titleScreen * 1.18));
     const titleLines: string[] = TimetableDrawStyle.wrap(ev.name === 'NULL' ? '' : ev.name,
-      titleMaxChars, bh >= 74 ? 3 : 2);
-    ctx.font = 'bold ' + titleFont.toString() + 'px sans-serif';
+      titleMaxChars, maxTitleLines);
+    ctx.font = 'bold ' + titleFont.toString() + fontUnit;
     ctx.fillStyle = '#FFFFFF';
-    ctx.textAlign = 'start';
+    ctx.textAlign = 'center';
     if (titleLines.length > 0) {
-      const titleAreaBottom: number = ev.place.length > 0 && bh >= 52 ?
-        y + bh - Math.round(17 * pxScale) : y + bh - Math.round(8 * pxScale);
-      const titleAreaTop: number = y + Math.round(12 * pxScale);
+      const titleAreaBottom: number = hasPlace && cardHeightScreen >= 38 ?
+        y + bh - 17 : y + bh - 8;
+      const titleAreaTop: number = y + Math.round(titlePaddingScreen);
       const titleHeight: number = titleLines.length * titleLineHeight;
       let titleY: number = titleAreaTop + Math.max(0, (titleAreaBottom - titleAreaTop - titleHeight) / 2);
       for (let line = 0; line < titleLines.length; line++) {
         if (titleY + titleLineHeight > titleAreaBottom + titleLineHeight) {
           break;
         }
-        ctx.fillText(titleLines[line], x + Math.round(6 * pxScale), titleY);
+        ctx.fillText(titleLines[line], x + bw / 2, titleY);
         titleY += titleLineHeight;
       }
     }
-    if (ev.place.length > 0 && bh >= 38) {
+    if (hasPlace && cardHeightScreen >= 38) {
       ctx.fillStyle = 'rgba(255,255,255,0.78)';
-      const placeFont: number = Math.round(13 * pxScale);
-      ctx.font = placeFont.toString() + 'px sans-serif';
+      const placeFont: number = Math.round(10 * textScale);
+      ctx.font = placeFont.toString() + fontUnit;
+      ctx.textAlign = 'center';
       ctx.fillText(TimetableDrawStyle.compact(ev.place,
-        Math.max(3, Math.floor((bw - Math.round(10 * pxScale)) / placeFont))),
-        x + Math.round(6 * pxScale), y + bh - Math.round(9 * pxScale));
+        Math.max(3, Math.floor((cardWidthScreen - titlePaddingScreen * 2) /
+          placeFont))),
+        x + bw / 2, y + bh - 9);
+      ctx.textAlign = 'start';
     }
   }
 

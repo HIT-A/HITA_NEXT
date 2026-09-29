@@ -67,8 +67,14 @@ struct Home {
   @State sessionInfo: EasSession | undefined = undefined;
   @State timetableEvents: EasEventItem[] = [];
   @State timetableWeek: number = 1;
+  // Week paging follows the Android timetable: drag the page with the finger,
+  // then slide it out/in around the week data swap.
+  @State timetableDragOffset: number = 0;
+  @State timetableAnimationDuration: number = 0;
+  @State timetableAnimating: boolean = false;
   private importRequested: boolean = false;
   private clockTimer: number = -1;
+  private timetableAnimationTimer: number = -1;
   private dayKey: string = EasTimeTools.printDate(Date.now());
   private timetableCanvas: CanvasRenderingContext2D =
     new CanvasRenderingContext2D(new RenderingContextSettings(true));
@@ -91,6 +97,10 @@ struct Home {
     if (this.clockTimer >= 0) {
       clearInterval(this.clockTimer);
       this.clockTimer = -1;
+    }
+    if (this.timetableAnimationTimer >= 0) {
+      clearTimeout(this.timetableAnimationTimer);
+      this.timetableAnimationTimer = -1;
     }
   }
 
@@ -229,6 +239,87 @@ struct Home {
     }
     this.timetableWeek = next;
     this.drawTimetableNow();
+  }
+
+  private timetableDragLimit(): number {
+    return Math.max(1, this.timetableAreaW);
+  }
+
+  private timetableOpacity(): number {
+    const ratio: number = Math.abs(this.timetableDragOffset) / this.timetableDragLimit();
+    // Android uses alpha = 1 - abs(offset) / pageWidth while paging.
+    return 1 - Math.min(1, ratio);
+  }
+
+  private resetTimetableAnimationState(): void {
+    this.timetableAnimationDuration = 0;
+    this.timetableDragOffset = 0;
+    this.timetableAnimating = false;
+    this.timetableAnimationTimer = -1;
+  }
+
+  private animateTimetableSnapBack(): void {
+    this.timetableAnimating = true;
+    this.timetableAnimationDuration = 150;
+    this.timetableDragOffset = 0;
+    this.timetableAnimationTimer = setTimeout(() => {
+      this.resetTimetableAnimationState();
+    }, 170);
+  }
+
+  private animateTimetableWeek(delta: number): void {
+    if (this.timetableAnimating) {
+      return;
+    }
+    const width: number = this.timetableDragLimit();
+    const exitOffset: number = delta > 0 ? -width : width;
+    const entryOffset: number = -exitOffset;
+    this.timetableAnimating = true;
+    this.timetableAnimationDuration = 150;
+    this.timetableDragOffset = exitOffset;
+
+    // Swap the week after the outgoing page has left, then bring the new page
+    // in from the opposite edge. A zero-duration reposition prevents a reverse
+    // animation through the center between the two 150ms legs.
+    this.timetableAnimationTimer = setTimeout(() => {
+      this.timetableAnimationDuration = 0;
+      this.shiftTimetableWeek(delta);
+      this.timetableDragOffset = entryOffset;
+      this.timetableAnimationTimer = setTimeout(() => {
+        this.timetableAnimationDuration = 150;
+        this.timetableDragOffset = 0;
+        this.timetableAnimationTimer = setTimeout(() => {
+          this.resetTimetableAnimationState();
+        }, 170);
+      }, 20);
+    }, 160);
+  }
+
+  private handleTimetablePanUpdate(event: GestureEvent): void {
+    if (this.timetableAnimating) {
+      return;
+    }
+    const width: number = this.timetableDragLimit();
+    this.timetableAnimationDuration = 0;
+    this.timetableDragOffset = Math.max(-width, Math.min(width, event.offsetX));
+  }
+
+  private handleTimetablePanEnd(event: GestureEvent): void {
+    if (this.timetableAnimating) {
+      return;
+    }
+    const width: number = this.timetableDragLimit();
+    const threshold: number = width * 0.15;
+    const offset: number = event.offsetX;
+    if (offset < -threshold && this.timetableWeek < this.maxTimetableWeek()) {
+      this.animateTimetableWeek(1);
+    } else if (offset > threshold && this.timetableWeek > 1) {
+      this.animateTimetableWeek(-1);
+    } else if (Math.abs(offset) > 0) {
+      this.animateTimetableSnapBack();
+    } else {
+      this.resetTimetableAnimationState();
+    }
   }
 
   private gotoCurrentTimetableWeek(): void {
@@ -1050,21 +1141,23 @@ struct Home {
             .onAreaChange((oldValue: Area, newValue: Area) => {
               this.onTimetableArea(newValue.width as number, newValue.height as number);
             })
-            .gesture(
-              PanGesture({ direction: PanDirection.Horizontal, distance: 10 })
-                .onActionEnd((event: GestureEvent) => {
-                  if (event.offsetX < -48) {
-                    this.shiftTimetableWeek(1);
-                  } else if (event.offsetX > 48) {
-                    this.shiftTimetableWeek(-1);
-                  }
-                })
-            )
         }
         .width('100%')
         .layoutWeight(1)
         .padding({ left: 8, right: 8, top: 2, bottom: 4 })
-        .backgroundColor(COLOR_SURFACE);
+        .backgroundColor(COLOR_SURFACE)
+        .translate({ x: this.timetableDragOffset, y: 0 })
+        .opacity(this.timetableOpacity())
+        .animation({ duration: this.timetableAnimationDuration, curve: Curve.EaseOut })
+        .gesture(
+          PanGesture({ direction: PanDirection.Horizontal, distance: 10 })
+            .onActionUpdate((event: GestureEvent) => {
+              this.handleTimetablePanUpdate(event);
+            })
+            .onActionEnd((event: GestureEvent) => {
+              this.handleTimetablePanEnd(event);
+            })
+        );
       }
     }
     .width('100%')
