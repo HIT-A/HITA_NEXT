@@ -168,12 +168,12 @@ struct TimetablePreview {
           })
 
         Column() {
-          Text('课表周视图')
-            .fontSize(20)
+          Text('第' + this.week.toString() + '周')
+            .fontSize(30)
             .fontWeight(FontWeight.Bold)
             .fontColor('#14213D')
           Text(this.demo.timetable.name)
-            .fontSize(11)
+            .fontSize(17)
             .fontColor('#6B7A90')
             .margin({ top: 3 })
             .maxLines(1)
@@ -201,57 +201,6 @@ struct TimetablePreview {
       .border({ width: { bottom: 1 }, color: '#D3DBE7' })
       .alignItems(VerticalAlign.Center)
 
-      Row() {
-        Text('‹')
-          .fontSize(23)
-          .fontColor('#6B7A90')
-          .width(38)
-          .height(34)
-          .textAlign(TextAlign.Center)
-          .borderRadius(17)
-          .backgroundColor('#FFFFFF')
-          .border({ width: 1, color: '#D3DBE7' })
-          .onClick(() => {
-            this.shiftWeek(-1);
-          })
-
-        Text('第 ' + this.week.toString() + ' 周')
-          .fontSize(13)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-          .height(34)
-          .padding({ left: 16, right: 16 })
-          .backgroundColor('#2E86E8')
-          .borderRadius(17)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            this.gotoToday();
-          })
-
-        Text('›')
-          .fontSize(23)
-          .fontColor('#6B7A90')
-          .width(38)
-          .height(34)
-          .textAlign(TextAlign.Center)
-          .borderRadius(17)
-          .backgroundColor('#FFFFFF')
-          .border({ width: 1, color: '#D3DBE7' })
-          .onClick(() => {
-            this.shiftWeek(1);
-          })
-        Blank()
-        Text(this.week === this.demo.timetable.getWeekNumber(Date.now()) ? '本周' : this.label)
-          .fontSize(11)
-          .fontColor('#6B7A90')
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-      }
-      .width('100%')
-      .padding({ left: 14, right: 14, top: 11, bottom: 11 })
-      .alignItems(VerticalAlign.Center)
-      .backgroundColor('#F4F7FC')
-
       Column() {
         Canvas(this.ctx)
           .width('100%')
@@ -263,11 +212,11 @@ struct TimetablePreview {
             this.onArea(newValue.width as number, newValue.height as number);
           })
           .gesture(
-            SwipeGesture({ direction: SwipeDirection.Horizontal, speed: 120 })
-              .onAction((event: GestureEvent) => {
-                if (event.offsetX < -60) {
+            PanGesture({ direction: PanDirection.Horizontal, distance: 10 })
+              .onActionEnd((event: GestureEvent) => {
+                if (event.offsetX < -48) {
                   this.shiftWeek(1);   // 左滑 → 下周
-                } else if (event.offsetX > 60) {
+                } else if (event.offsetX > 48) {
                   this.shiftWeek(-1);  // 右滑 → 上周
                 }
               })
@@ -278,12 +227,6 @@ struct TimetablePreview {
       .padding({ left: 10, right: 10, top: 6, bottom: 6 })
       .backgroundColor('#F4F7FC')
 
-      Text('左右滑动切换周 · 点击右上角可导出 ICS')
-        .fontSize(11)
-        .fontColor('#8A96A8')
-        .padding({ left: 14, right: 14, bottom: 14, top: 8 })
-        .textAlign(TextAlign.Start)
-        .width('100%')
     }
     .width('100%')
     .height('100%')

@@ -26,29 +26,50 @@ export const AXIS_START_HOUR: number = 8;
 export const AXIS_END_HOUR: number = 24;
 
 export class TimetableDrawStyle {
-  static bg: string = '#F4F7FC';
-  static gridLine: string = '#D3DBE7';
-  static textMain: string = '#14213D';
-  static textSub: string = '#6B7A90';
+  static bg: string = '#FBFCFE';
+  static gridLine: string = '#D7DEE8';
+  static textMain: string = '#111827';
+  static textSub: string = '#566276';
   static todayHeadBg: string = '#2E86E8';
   /** 今日列整列遮罩（源 ~#10000000）。 */
   static todayMask: string = 'rgba(46,134,232,0.06)';
   /** 顶栏最低/占比。 */
-  static headerMin: number = 42;
-  static headerRatio: number = 0.065;
+  static headerMin: number = 90;
+  static headerRatio: number = 0.12;
   /** 左侧整点标签列最低/占比。 */
-  static gutterMin: number = 36;
-  static gutterRatio: number = 0.09;
+  static gutterMin: number = 62;
+  static gutterRatio: number = 0.14;
   /** 块外边距（源 1dp 量级，比例化）。 */
-  static blockMargin: number = 2;
-  /** 课程块使用浅色底，文字保留科目色，接近安卓端的轻量卡片。 */
-  static blockOpacity: number = 0.16;
+  static blockMargin: number = 3;
+  /** 安卓端使用高对比度实色课程卡片，标题与地点均使用白色。 */
+  static blockOpacity: number = 0.88;
 
   static compact(value: string, maxChars: number): string {
     if (value.length <= maxChars) {
       return value;
     }
     return value.substring(0, Math.max(1, maxChars - 1)) + '…';
+  }
+
+  static wrap(value: string, maxChars: number, maxLines: number): string[] {
+    const clean: string = value.trim();
+    if (clean.length === 0 || maxChars <= 0 || maxLines <= 0) {
+      return [];
+    }
+    const lines: string[] = [];
+    let cursor: number = 0;
+    while (cursor < clean.length && lines.length < maxLines) {
+      const remaining: number = clean.length - cursor;
+      const take: number = Math.min(maxChars, remaining);
+      let line: string = clean.substring(cursor, cursor + take);
+      cursor += take;
+      if (cursor < clean.length && lines.length === maxLines - 1) {
+        line = line.substring(0, Math.max(1, line.length - 1)) + '…';
+        cursor = clean.length;
+      }
+      lines.push(line);
+    }
+    return lines;
   }
 }
 
@@ -143,20 +164,21 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.fillStyle = isToday ? '#E6F0FC' : '#FFFFFF';
     ctx.fillRect(x, gridTop - headerH + 4, colW, headerH - 4);
     ctx.fillStyle = isToday ? TimetableDrawStyle.todayHeadBg : TimetableDrawStyle.textMain;
-    ctx.font = isToday ? 'bold 14px sans-serif' : '14px sans-serif';
+    ctx.font = isToday ? 'bold 21px sans-serif' : 'bold 20px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(DOW_NAMES[d], x + colW / 2, gridTop - headerH / 2 - 3);
+    ctx.fillText(DOW_NAMES[d], x + colW / 2, gridTop - headerH / 2 - 11);
     const date: Date = new Date(weekMonday + d * DAY_MILLIS);
-    ctx.font = '12px sans-serif';
+    ctx.font = '18px sans-serif';
     ctx.fillStyle = isToday ? TimetableDrawStyle.todayHeadBg : TimetableDrawStyle.textSub;
-    ctx.fillText(date.getDate().toString(), x + colW / 2, gridTop - headerH / 2 + 10);
+    ctx.fillText(date.getDate().toString(), x + colW / 2, gridTop - headerH / 2 + 18);
     ctx.textAlign = 'start';
   }
-  // 周标题（左侧 gutter 上）
+  // 月份标签（左侧时间轴上方，安卓端以月份替代重复周数）。
+  const firstDay: Date = new Date(weekMonday);
   ctx.fillStyle = TimetableDrawStyle.textSub;
-  ctx.font = '12px sans-serif';
+  ctx.font = 'bold 19px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('第' + weekNumber.toString() + '周', gutterW / 2, gridTop - headerH / 2 + 2);
+  ctx.fillText((firstDay.getMonth() + 1).toString() + '月', gutterW / 2, gridTop - headerH / 2 + 18);
   ctx.textAlign = 'start';
 
   // 今日列整列遮罩（仅当前周）
@@ -175,13 +197,13 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.lineTo(w, y);
     ctx.stroke();
   }
-  ctx.font = '11px sans-serif';
+  ctx.font = '18px sans-serif';
   ctx.fillStyle = TimetableDrawStyle.textSub;
   for (let hour = AXIS_START_HOUR; hour < AXIS_END_HOUR; hour++) {
     const y: number = gridTop + (hour - AXIS_START_HOUR) * hourH;
     const label: string = hour.toString() + ':00';
     ctx.textAlign = 'right';
-    ctx.fillText(label, gridLeft - 3, y);
+    ctx.fillText(label, gridLeft - 8, y);
     ctx.textAlign = 'start';
   }
   // 列分隔
@@ -259,29 +281,42 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     const laneW: number = colW / layout.lanes;
     const x: number = gridLeft + (dow - 1) * colW + layout.lane * laneW + m;
     const bw: number = Math.max(12, laneW - m * 2);
-    const radius: number = Math.max(4, Math.min(10, bw * 0.12));
+    const radius: number = Math.max(8, Math.min(18, bw * 0.22));
     const eventColor: number = ev.color === 0 ? 0xFF2E86E8 : ev.color;
     const color: string = argbToCss(eventColor, TimetableDrawStyle.blockOpacity);
     ctx.fillStyle = color;
     roundedRectPath(ctx, x, y, bw, bh, radius);
     ctx.fill();
-    ctx.strokeStyle = argbToCss(eventColor, 0.42);
+    ctx.strokeStyle = argbToCss(eventColor, 0.98);
     ctx.lineWidth = 1;
     roundedRectPath(ctx, x, y, bw, bh, radius);
     ctx.stroke();
-    ctx.fillStyle = argbToCss(eventColor, 0.95);
-    ctx.beginPath();
-    ctx.arc(x + 9, y + 9, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.font = Math.max(11, Math.min(14, Math.floor(laneW / 3.5))) + 'px sans-serif';
+    const titleFont: number = Math.max(14, Math.min(19, Math.floor(laneW / 3)));
+    const titleLineHeight: number = titleFont + 3;
+    const titleMaxChars: number = Math.max(2, Math.floor((bw - 10) / titleFont * 1.12));
+    const titleLines: string[] = TimetableDrawStyle.wrap(ev.name === 'NULL' ? '' : ev.name,
+      titleMaxChars, bh >= 74 ? 3 : 2);
+    ctx.font = 'bold ' + titleFont.toString() + 'px sans-serif';
+    ctx.fillStyle = '#FFFFFF';
     ctx.textAlign = 'start';
-    if (ev.name.length > 0 && ev.name !== 'NULL') {
-      ctx.fillText(TimetableDrawStyle.compact(ev.name, bw < 52 ? 5 : 9), x + 5, y + 20);
+    if (titleLines.length > 0) {
+      const titleAreaBottom: number = ev.place.length > 0 && bh >= 52 ? y + bh - 17 : y + bh - 8;
+      const titleAreaTop: number = y + 12;
+      const titleHeight: number = titleLines.length * titleLineHeight;
+      let titleY: number = titleAreaTop + Math.max(0, (titleAreaBottom - titleAreaTop - titleHeight) / 2);
+      for (let line = 0; line < titleLines.length; line++) {
+        if (titleY + titleLineHeight > titleAreaBottom + titleLineHeight) {
+          break;
+        }
+        ctx.fillText(titleLines[line], x + 6, titleY);
+        titleY += titleLineHeight;
+      }
     }
     if (ev.place.length > 0 && bh >= 38) {
-      ctx.fillStyle = argbToCss(eventColor, 0.78);
-      ctx.font = '10px sans-serif';
-      ctx.fillText(TimetableDrawStyle.compact(ev.place, bw < 52 ? 5 : 10), x + 5, y + 33);
+      ctx.fillStyle = 'rgba(255,255,255,0.78)';
+      ctx.font = '13px sans-serif';
+      ctx.fillText(TimetableDrawStyle.compact(ev.place, Math.max(3, Math.floor((bw - 10) / 13))),
+        x + 6, y + bh - 9);
     }
   }
 

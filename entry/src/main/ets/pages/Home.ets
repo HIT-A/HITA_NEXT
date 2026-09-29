@@ -454,9 +454,9 @@ struct Home {
       Stack() {
         Row()
           .width(88)
-          .height(52)
+          .height(58)
           .backgroundColor(COLOR_NAV_ACTIVE)
-          .borderRadius(25)
+          .borderRadius(29)
           .offset({ x: 88 * this.currentTab })
           .animation({ duration: 260, curve: Curve.EaseInOut });
 
@@ -466,14 +466,14 @@ struct Home {
           this.navItem($r('sys.symbol.more'), '更多', 2);
         }
         .width(264)
-        .height(52);
+        .height(58);
       }
       .width(264)
-      .height(52)
+      .height(58)
       .alignContent(Alignment.Start);
     }
     .width(286)
-    .height(64)
+    .height(70)
     .padding({ left: 6, right: 6, top: 6, bottom: 6 })
     .backgroundColor(COLOR_NAV)
     .borderRadius(27)
@@ -486,19 +486,19 @@ struct Home {
   navItem(symbol: Resource, label: string, index: number) {
     Column() {
       SymbolGlyph(symbol)
-        .fontSize(20)
+        .fontSize(24)
         .fontColor([index === this.currentTab ? COLOR_NAV_ACTIVE_TEXT : COLOR_TEXT_SECONDARY])
       Text(label)
-        .fontSize(11)
+        .fontSize(14)
         .fontColor(index === this.currentTab ? COLOR_NAV_ACTIVE_TEXT : COLOR_TEXT_SECONDARY)
-        .margin({ top: 3 })
+        .margin({ top: 4 })
     }
     .width(88)
-    .height(52)
+    .height(58)
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
     .backgroundColor('transparent')
-    .borderRadius(25)
+    .borderRadius(29)
     .opacity(1)
     .onClick(() => {
       this.currentTab = index;
@@ -975,27 +975,23 @@ struct Home {
   tabTimetable() {
     Column() {
       Row() {
-        Column() {
-          Text(this.currentTimetable === undefined ? '时间表' :
-            '第' + this.timetableWeek.toString() + '周')
-            .fontSize(26)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(COLOR_TEXT_PRIMARY)
-          Text(this.timetableCampusTerm())
-            .fontSize(15)
-            .fontColor(COLOR_TEXT_SECONDARY)
-            .backgroundColor(COLOR_CARD)
-            .borderRadius(12)
-            .padding({ left: 11, right: 11, top: 5, bottom: 5 })
-            .margin({ top: 7 })
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
+        Text(this.currentTimetable === undefined ? '时间表' :
+          '第' + this.timetableWeek.toString() + '周')
+          .fontSize(34)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(COLOR_TEXT_PRIMARY)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.timetableCampusTerm())
+          .fontSize(19)
+          .fontColor(COLOR_TEXT_SECONDARY)
+          .margin({ left: 18, top: 5 })
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 16, bottom: 10 })
+      .padding({ left: 20, right: 18, top: 24, bottom: 12 })
       .alignItems(VerticalAlign.Center)
 
       if (this.currentTimetable === undefined) {
@@ -1048,21 +1044,21 @@ struct Home {
             .onAreaChange((oldValue: Area, newValue: Area) => {
               this.onTimetableArea(newValue.width as number, newValue.height as number);
             })
+            .gesture(
+              PanGesture({ direction: PanDirection.Horizontal, distance: 10 })
+                .onActionEnd((event: GestureEvent) => {
+                  if (event.offsetX < -48) {
+                    this.shiftTimetableWeek(1);
+                  } else if (event.offsetX > 48) {
+                    this.shiftTimetableWeek(-1);
+                  }
+                })
+            )
         }
         .width('100%')
         .layoutWeight(1)
         .padding({ left: 8, right: 8, top: 2, bottom: 4 })
-        .backgroundColor(COLOR_SURFACE)
-        .gesture(
-          SwipeGesture({ direction: SwipeDirection.Horizontal, speed: 120 })
-            .onAction((event: GestureEvent) => {
-              if (event.offsetX < -60) {
-                this.shiftTimetableWeek(1);
-              } else if (event.offsetX > 60) {
-                this.shiftTimetableWeek(-1);
-              }
-            })
-        );
+        .backgroundColor(COLOR_SURFACE);
       }
     }
     .width('100%')
