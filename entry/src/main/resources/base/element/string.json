@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "HitaNEXT entry module"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "HITA for HarmonyOS NEXT"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "HITA"
+    }
+  ]
+}

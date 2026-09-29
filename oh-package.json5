@@ -1,0 +1,6 @@
+{
+  "modelVersion": "5.0.0",
+  "description": "HITA for HarmonyOS NEXT - port of HITA_X features + new HITA web login (see blueprint v1.0)",
+  "dependencies": {},
+  "devDependencies": {}
+}

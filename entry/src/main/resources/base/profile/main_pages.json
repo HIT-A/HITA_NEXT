@@ -1,0 +1,16 @@
+{
+  "src": [
+    "pages/WelcomePage",
+    "pages/Home",
+    "pages/Index",
+    "pages/TimetablePreview",
+    "pages/TimeLinePage",
+    "pages/ScorePage",
+    "pages/AddEventPage",
+    "pages/ProfilePage",
+    "pages/SubjectsPage",
+    "pages/ExamPage",
+    "pages/SearchPage",
+    "pages/AboutPage"
+  ]
+}
