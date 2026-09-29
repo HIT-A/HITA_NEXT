@@ -143,18 +143,18 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.fillStyle = isToday ? '#E6F0FC' : '#FFFFFF';
     ctx.fillRect(x, gridTop - headerH + 4, colW, headerH - 4);
     ctx.fillStyle = isToday ? TimetableDrawStyle.todayHeadBg : TimetableDrawStyle.textMain;
-    ctx.font = isToday ? 'bold 12px sans-serif' : '12px sans-serif';
+    ctx.font = isToday ? 'bold 14px sans-serif' : '14px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(DOW_NAMES[d], x + colW / 2, gridTop - headerH / 2 - 3);
     const date: Date = new Date(weekMonday + d * DAY_MILLIS);
-    ctx.font = '10px sans-serif';
+    ctx.font = '12px sans-serif';
     ctx.fillStyle = isToday ? TimetableDrawStyle.todayHeadBg : TimetableDrawStyle.textSub;
     ctx.fillText(date.getDate().toString(), x + colW / 2, gridTop - headerH / 2 + 10);
     ctx.textAlign = 'start';
   }
   // 周标题（左侧 gutter 上）
   ctx.fillStyle = TimetableDrawStyle.textSub;
-  ctx.font = '10px sans-serif';
+  ctx.font = '12px sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText('第' + weekNumber.toString() + '周', gutterW / 2, gridTop - headerH / 2 + 2);
   ctx.textAlign = 'start';
@@ -175,7 +175,7 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.lineTo(w, y);
     ctx.stroke();
   }
-  ctx.font = '9px sans-serif';
+  ctx.font = '11px sans-serif';
   ctx.fillStyle = TimetableDrawStyle.textSub;
   for (let hour = AXIS_START_HOUR; hour < AXIS_END_HOUR; hour++) {
     const y: number = gridTop + (hour - AXIS_START_HOUR) * hourH;
@@ -273,14 +273,14 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.beginPath();
     ctx.arc(x + 9, y + 9, 3, 0, Math.PI * 2);
     ctx.fill();
-    ctx.font = Math.max(9, Math.min(12, Math.floor(laneW / 4))) + 'px sans-serif';
+    ctx.font = Math.max(11, Math.min(14, Math.floor(laneW / 3.5))) + 'px sans-serif';
     ctx.textAlign = 'start';
     if (ev.name.length > 0 && ev.name !== 'NULL') {
       ctx.fillText(TimetableDrawStyle.compact(ev.name, bw < 52 ? 5 : 9), x + 5, y + 20);
     }
     if (ev.place.length > 0 && bh >= 38) {
       ctx.fillStyle = argbToCss(eventColor, 0.78);
-      ctx.font = '9px sans-serif';
+      ctx.font = '10px sans-serif';
       ctx.fillText(TimetableDrawStyle.compact(ev.place, bw < 52 ? 5 : 10), x + 5, y + 33);
     }
   }

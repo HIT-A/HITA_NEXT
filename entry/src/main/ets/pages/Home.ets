@@ -451,19 +451,26 @@ struct Home {
   @Builder
   pillNavigation() {
     Stack() {
-      Row()
-        .width(88)
-        .height(52)
-        .backgroundColor(COLOR_NAV_ACTIVE)
-        .borderRadius(25)
-        .offset({ x: 88 * this.currentTab })
-        .animation({ duration: 260, curve: Curve.EaseInOut });
+      Stack() {
+        Row()
+          .width(88)
+          .height(52)
+          .backgroundColor(COLOR_NAV_ACTIVE)
+          .borderRadius(25)
+          .offset({ x: 88 * this.currentTab })
+          .animation({ duration: 260, curve: Curve.EaseInOut });
 
-      Row() {
-        this.navItem($r('sys.symbol.calendar'), '今日', 0);
-        this.navItem($r('sys.symbol.doc_plaintext'), '时间表', 1);
-        this.navItem($r('sys.symbol.more'), '更多', 2);
+        Row() {
+          this.navItem($r('sys.symbol.calendar'), '今日', 0);
+          this.navItem($r('sys.symbol.doc_plaintext'), '时间表', 1);
+          this.navItem($r('sys.symbol.more'), '更多', 2);
+        }
+        .width(264)
+        .height(52);
       }
+      .width(264)
+      .height(52)
+      .alignContent(Alignment.Start);
     }
     .width(286)
     .height(64)
@@ -971,38 +978,24 @@ struct Home {
         Column() {
           Text(this.currentTimetable === undefined ? '时间表' :
             '第' + this.timetableWeek.toString() + '周')
-            .fontSize(22)
+            .fontSize(26)
             .fontWeight(FontWeight.Medium)
             .fontColor(COLOR_TEXT_PRIMARY)
           Text(this.timetableCampusTerm())
-            .fontSize(12)
+            .fontSize(15)
             .fontColor(COLOR_TEXT_SECONDARY)
             .backgroundColor(COLOR_CARD)
             .borderRadius(12)
-            .padding({ left: 9, right: 9, top: 4, bottom: 4 })
-            .margin({ top: 6 })
+            .padding({ left: 11, right: 11, top: 5, bottom: 5 })
+            .margin({ top: 7 })
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-
-        Stack() {
-          SymbolGlyph($r('sys.symbol.repeat_1'))
-            .fontSize(19)
-            .fontColor([COLOR_PRIMARY]);
-        }
-        .width(40)
-        .height(40)
-        .borderRadius(20)
-        .backgroundColor(COLOR_NAV_ACTIVE)
-        .alignContent(Alignment.Center)
-        .onClick(() => {
-          this.importTimetable(true);
-        });
       }
       .width('100%')
-      .padding({ left: 16, right: 14, top: 14, bottom: 8 })
+      .padding({ left: 16, right: 16, top: 16, bottom: 10 })
       .alignItems(VerticalAlign.Center)
 
       if (this.currentTimetable === undefined) {
@@ -1045,54 +1038,6 @@ struct Home {
         .alignItems(HorizontalAlign.Center)
         .padding(24);
       } else {
-        Row() {
-          Text('‹')
-            .fontSize(23)
-            .fontColor(COLOR_TEXT_SECONDARY)
-            .width(34)
-            .height(30)
-            .textAlign(TextAlign.Center)
-            .borderRadius(15)
-            .backgroundColor(COLOR_CARD)
-            .border({ width: 1, color: COLOR_DIVIDER })
-            .onClick(() => {
-              this.shiftTimetableWeek(-1);
-            });
-          Text(this.timetableWeek === this.currentTimetable.getWeekNumber(this.nowTick)
-            ? '本周' : '第' + this.timetableWeek.toString() + '周')
-            .fontSize(12)
-            .fontColor(COLOR_PRIMARY)
-            .height(30)
-            .padding({ left: 13, right: 13 })
-            .backgroundColor(COLOR_NAV_ACTIVE)
-            .borderRadius(15)
-            .textAlign(TextAlign.Center)
-            .onClick(() => {
-              this.gotoCurrentTimetableWeek();
-            });
-          Text('›')
-            .fontSize(23)
-            .fontColor(COLOR_TEXT_SECONDARY)
-            .width(34)
-            .height(30)
-            .textAlign(TextAlign.Center)
-            .borderRadius(15)
-            .backgroundColor(COLOR_CARD)
-            .border({ width: 1, color: COLOR_DIVIDER })
-            .onClick(() => {
-              this.shiftTimetableWeek(1);
-            });
-          Blank();
-          Text(this.importing ? '正在同步…' : '左右滑动切换周')
-            .fontSize(11)
-            .fontColor(COLOR_TEXT_HINT)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis });
-        }
-        .width('100%')
-        .padding({ left: 14, right: 14, top: 4, bottom: 7 })
-        .alignItems(VerticalAlign.Center)
-
         Column() {
           Canvas(this.timetableCanvas)
             .width('100%')
@@ -1103,21 +1048,21 @@ struct Home {
             .onAreaChange((oldValue: Area, newValue: Area) => {
               this.onTimetableArea(newValue.width as number, newValue.height as number);
             })
-            .gesture(
-              SwipeGesture({ direction: SwipeDirection.Horizontal, speed: 120 })
-                .onAction((event: GestureEvent) => {
-                  if (event.offsetX < -60) {
-                    this.shiftTimetableWeek(1);
-                  } else if (event.offsetX > 60) {
-                    this.shiftTimetableWeek(-1);
-                  }
-                })
-            )
         }
         .width('100%')
         .layoutWeight(1)
         .padding({ left: 8, right: 8, top: 2, bottom: 4 })
-        .backgroundColor(COLOR_SURFACE);
+        .backgroundColor(COLOR_SURFACE)
+        .gesture(
+          SwipeGesture({ direction: SwipeDirection.Horizontal, speed: 120 })
+            .onAction((event: GestureEvent) => {
+              if (event.offsetX < -60) {
+                this.shiftTimetableWeek(1);
+              } else if (event.offsetX > 60) {
+                this.shiftTimetableWeek(-1);
+              }
+            })
+        );
       }
     }
     .width('100%')
