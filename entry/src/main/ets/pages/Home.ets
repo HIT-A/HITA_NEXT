@@ -13,6 +13,7 @@ import { TimetableLocalDemo } from '../feature/timetable/data/TimetableLocalDemo
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
 import { EasImportResult, EasTimetableImporter } from '../feature/eas/EasTimetableImporter';
+import { EasLoginPage } from '../feature/eas/webLogin/EasLoginPage';
 import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
 import {
   AXIS_END_HOUR,
@@ -38,6 +39,7 @@ const COLOR_CLASS: string = '#2E86E8';
 const COLOR_EXAM: string = '#8A2E42';
 const COLOR_OTHER: string = '#1B4F9C';
 const COLOR_TAG: string = '#0F6E56';
+const TIMETABLE_BOTTOM_SAFE_EXTENSION: number = 56;
 
 @Entry
 @Component
@@ -52,6 +54,7 @@ struct Home {
   @State hasRealTimetable: boolean = false;
   @State timetableCount: number = 0;
   @State currentTimetable: EasTimetable | undefined = undefined;
+  @State recentTimetable: EasTimetable | undefined = undefined;
   @State importing: boolean = false;
   @State importMessage: string = '';
   @State importError: string = '';
@@ -59,6 +62,11 @@ struct Home {
   @State nextClass: EasEventItem | undefined = undefined;
   @State nowTick: number = Date.now();
   @State sessionInfo: EasSession | undefined = undefined;
+  @State sessionSheetOpen: boolean = false;
+  @State sessionSheetCampus: string = 'WEIHAI';
+  @State sessionSheetInfo: EasSession | undefined = undefined;
+  @State loginSheetOpen: boolean = false;
+  @State loginCampusCode: string = 'WEIHAI';
   @State timetableEvents: EasEventItem[] = [];
   @State timetableWeek: number = 1;
   // Week paging follows the Android timetable: drag the page with the finger,
@@ -158,6 +166,7 @@ struct Home {
 
     const allTimetables: EasTimetable[] = await rdb.getTimetables();
     this.timetableCount = allTimetables.length;
+    this.recentTimetable = await TimetableResolver.getRecent(rdb, this.nowTick);
     const real: EasTimetable | undefined = await TimetableResolver.getReal(rdb);
     if (found !== undefined && real === undefined && !this.importing && !this.importRequested) {
       await this.importTimetable(false);
@@ -235,7 +244,8 @@ struct Home {
       this.timetableEvents, this.timetableWeek);
     const current: number = this.currentTimetable.getWeekNumber(this.nowTick);
     const hourHeight: number = this.timetableHourHeight();
-    const bodyViewportHeight: number = Math.max(1, this.timetableAreaH - TIMETABLE_HEADER_HEIGHT);
+    const bodyViewportHeight: number = Math.max(1,
+      this.timetableAreaH - TIMETABLE_HEADER_HEIGHT + TIMETABLE_BOTTOM_SAFE_EXTENSION);
     const contentHeight: number = TIMETABLE_GRID_TOP_PADDING +
       (AXIS_END_HOUR - AXIS_START_HOUR) * hourHeight + 8;
     const canvasHeight: number = Math.max(bodyViewportHeight, contentHeight);
@@ -280,7 +290,7 @@ struct Home {
     // the iOS compact layout's 56vp/hour as the upper bound.
     const visibleHours: number = 19 - AXIS_START_HOUR;
     const availableGridHeight: number = this.timetableAreaH - TIMETABLE_HEADER_HEIGHT -
-      TIMETABLE_GRID_TOP_PADDING - 8;
+      TIMETABLE_GRID_TOP_PADDING - 8 + TIMETABLE_BOTTOM_SAFE_EXTENSION;
     return Math.max(40, Math.min(TIMETABLE_HOUR_HEIGHT, availableGridHeight / visibleHours));
   }
 
@@ -384,7 +394,8 @@ struct Home {
     this.timetableAreaW = w;
     this.timetableAreaH = h;
     const hourHeight: number = this.timetableHourHeight();
-    const bodyViewportHeight: number = Math.max(1, h - TIMETABLE_HEADER_HEIGHT);
+    const bodyViewportHeight: number = Math.max(1,
+      h - TIMETABLE_HEADER_HEIGHT + TIMETABLE_BOTTOM_SAFE_EXTENSION);
     const contentHeight: number = TIMETABLE_GRID_TOP_PADDING +
       (AXIS_END_HOUR - AXIS_START_HOUR) * hourHeight + 8;
     this.timetableCanvasHeight = Math.max(bodyViewportHeight, contentHeight);
@@ -560,6 +571,45 @@ struct Home {
     return session === undefined ? '未登录' : Home.campusName(session.campus);
   }
 
+  private static campusFromCode(code: string): EasCampus {
+    if (code === 'SHENZHEN') {
+      return EasCampus.SHENZHEN;
+    }
+    if (code === 'BENBU') {
+      return EasCampus.BENBU;
+    }
+    return EasCampus.WEIHAI;
+  }
+
+  private async openSessionSheet(): Promise<void> {
+    const storedCampus: EasCampus | undefined = await EasSessionStore.getInstance().loadLastCampus();
+    const campus: EasCampus = this.sessionInfo === undefined ?
+      (storedCampus === undefined ? EasCampus.WEIHAI : storedCampus) : this.sessionInfo.campus;
+    this.sessionSheetCampus = campus.toString();
+    this.sessionSheetInfo = await EasSessionStore.getInstance().load(campus);
+    this.sessionSheetOpen = true;
+  }
+
+  private async selectSessionCampus(code: string): Promise<void> {
+    this.sessionSheetCampus = code;
+    this.sessionSheetInfo = await EasSessionStore.getInstance().load(Home.campusFromCode(code));
+  }
+
+  private beginSessionLogin(): void {
+    this.loginCampusCode = this.sessionSheetCampus;
+    this.sessionSheetOpen = false;
+    this.loginSheetOpen = true;
+  }
+
+  private async logoutSession(): Promise<void> {
+    const campus: EasCampus = Home.campusFromCode(this.sessionSheetCampus);
+    await EasSessionStore.getInstance().clear(campus);
+    this.sessionSheetInfo = undefined;
+    this.sessionSheetOpen = false;
+    await this.refreshSummaries();
+    this.getUIContext().getPromptAction().showToast({ message: '已退出' + Home.campusName(campus) + '教务会话' });
+  }
+
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
       Column() {
@@ -574,15 +624,50 @@ struct Home {
       .width('100%')
       .height('100%')
       .padding({ bottom: this.currentTab === 1 ? 0 : 64 })
-      .backgroundColor(COLOR_SURFACE)
+      .backgroundColor(this.currentTab === 1 ? 'transparent' : COLOR_SURFACE)
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
 
       this.pillNavigation();
+
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(COLOR_SURFACE)
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM]);
+    .backgroundColor(this.currentTab === 1 ? 'transparent' : COLOR_SURFACE)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+    .bindSheet(this.sessionSheetOpen || this.loginSheetOpen, this.activeSheet(), {
+      height: this.loginSheetOpen ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
+      dragBar: true,
+      showClose: true,
+      preferType: SheetType.BOTTOM,
+      backgroundColor: COLOR_SURFACE,
+      maskColor: 'rgba(20,33,61,0.24)',
+      onDisappear: () => {
+        this.sessionSheetOpen = false;
+        this.loginSheetOpen = false;
+      }
+    });
+  }
+
+  @Builder
+  activeSheet() {
+    if (this.loginSheetOpen) {
+      EasLoginPage({
+        campusCode: this.loginCampusCode,
+        studentType: '1',
+        onCancel: () => {
+          this.loginSheetOpen = false;
+        },
+        onLoggedIn: (session: EasSession) => {
+          this.loginSheetOpen = false;
+          this.sessionSheetInfo = session;
+          this.refreshSummaries();
+        }
+      })
+        .width('100%')
+        .height('100%');
+    } else {
+      this.sessionSheet();
+    }
   }
 
   @Builder
@@ -592,7 +677,9 @@ struct Home {
         Row()
           .width(68)
           .height(44)
-          .backgroundColor('rgba(210,230,252,0.30)')
+          // The Android indicator keeps the tab motion, but the timetable
+          // must remain visible beneath the navigation area on HarmonyOS.
+          .backgroundColor('transparent')
           .borderRadius(22)
           .offset({ x: 68 * this.currentTab })
           .animation({ duration: 260, curve: Curve.EaseInOut });
@@ -1122,6 +1209,7 @@ struct Home {
             Canvas(this.timetableCanvas)
               .width('100%')
               .height(this.timetableCanvasHeight)
+              .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
               .onReady(() => {
                 this.drawTimetableNow();
               })
@@ -1140,10 +1228,10 @@ struct Home {
         // Keep the body canvas flush with the fixed date header.  Its own
         // 24vp grid top padding is painted by the today-column mask, so a
         // separate layout gap would visibly break that column.
-        .padding({ top: 0, bottom: 4 })
-        .backgroundColor(COLOR_SURFACE)
+        .padding({ top: 0 })
+        .backgroundColor('transparent')
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-        .clip(true)
+        .clip(false)
         .onAreaChange((oldValue: Area, newValue: Area) => {
           this.onTimetableArea(newValue.width as number, newValue.height as number);
         })
@@ -1163,7 +1251,7 @@ struct Home {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(COLOR_SURFACE)
+    .backgroundColor('transparent')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
@@ -1210,17 +1298,20 @@ struct Home {
 
           Row() {
             this.moreShortcut($r('sys.symbol.calendar'), '最近课表',
-              this.currentTimetable === undefined ? '暂无课表' : this.currentTimetable.name,
+              this.recentTimetable === undefined ? '暂无课表' : this.recentTimetable.name,
               () => {
-                if (this.currentTimetable !== undefined) {
-                  this.currentTab = 1;
+                if (this.recentTimetable !== undefined) {
+                  this.getUIContext().getRouter().pushUrl({
+                    url: 'pages/TimetableDetailPage',
+                    params: { 'timetableId': this.recentTimetable.id }
+                  });
                 }
               });
             Blank().width(8);
             this.moreShortcut($r('sys.symbol.doc_plaintext'), '课表管理',
               this.timetableCount === 0 ? '暂无课表' : '共 ' + this.timetableCount.toString() + ' 张课表',
               () => {
-                this.getUIContext().getRouter().pushUrl({ url: 'pages/SubjectsPage' });
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/TimetableManagerPage' });
               });
           }
           .width('100%')
@@ -1232,9 +1323,9 @@ struct Home {
               this.importing ? '正在从教务系统同步' : '从教务系统同步当前学期', () => {
                 this.importTimetable(true);
               });
-            this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '科目管理',
-              '查看科目、课程次数与配色', () => {
-                this.getUIContext().getRouter().pushUrl({ url: 'pages/SubjectsPage' });
+            this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '导入 ICS 课表',
+              '从日历文件导入课程', () => {
+                this.getUIContext().getPromptAction().showToast({ message: 'ICS 导入暂未适配' });
               });
           }
           .width('100%')
@@ -1252,6 +1343,10 @@ struct Home {
             this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '成绩管理',
               '查看学期成绩与绩点', () => {
                 this.getUIContext().getRouter().pushUrl({ url: 'pages/ScorePage' });
+              });
+            this.moreNavigationRow($r('sys.symbol.magnifyingglass'), '空教室',
+              '查询可用教室与空闲时段', () => {
+                this.getUIContext().getPromptAction().showToast({ message: '空教室查询将在教务会话完善后开放' });
               });
           }
           .width('100%')
@@ -1278,9 +1373,7 @@ struct Home {
             this.moreNavigationRow($r('sys.symbol.person_crop_circle_fill'), '会话管理',
               this.sessionInfo === undefined ? '登录并管理教务会话' :
                 Home.campusName(this.sessionInfo.campus) + ' · ' + this.sessionText, () => {
-                this.getUIContext().getRouter().pushUrl({
-                  url: this.sessionInfo === undefined ? 'pages/WelcomePage' : 'pages/ProfilePage'
-                });
+                this.openSessionSheet();
               });
             this.moreNavigationRow($r('sys.symbol.more'), '关于 HITA NEXT',
               '版本信息与开源说明', () => {
@@ -1353,9 +1446,150 @@ struct Home {
     .borderRadius(16)
     .margin({ left: 16, right: 16, top: 8, bottom: 8 })
     .onClick(() => {
-      this.getUIContext().getRouter().pushUrl({
-        url: this.sessionInfo === undefined ? 'pages/WelcomePage' : 'pages/ProfilePage'
-      });
+      this.openSessionSheet();
+    });
+  }
+
+  @Builder
+  sessionSheet() {
+    Column() {
+      Row() {
+        Column() {
+          Text('教务认证')
+            .fontSize(24)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(COLOR_TEXT_PRIMARY);
+          Text(this.sessionSheetInfo === undefined ? '请登录教务账号以继续' : '当前教务会话')
+            .fontSize(16)
+            .fontColor(COLOR_TEXT_SECONDARY)
+            .margin({ top: 2 });
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start);
+
+        if (this.sessionSheetInfo === undefined) {
+          Button('网页登录')
+            .height(36)
+            .fontSize(16)
+            .fontColor('#FFFFFF')
+            .backgroundColor(COLOR_PRIMARY)
+            .borderRadius(16)
+            .onClick(() => {
+              this.beginSessionLogin();
+            });
+        }
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center);
+
+      Row({ space: 8 }) {
+        this.sessionCampusButton('SHENZHEN', '深圳');
+        this.sessionCampusButton('BENBU', '本部');
+        this.sessionCampusButton('WEIHAI', '威海');
+      }
+      .width('100%')
+      .margin({ top: 14 });
+
+      if (this.sessionSheetInfo !== undefined) {
+        Row() {
+          Stack() {
+            Text(this.sessionSheetInfo.name.length > 0 ?
+              this.sessionSheetInfo.name.substring(0, 1) : 'U')
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#FFFFFF');
+          }
+          .width(44)
+          .height(44)
+          .borderRadius(22)
+          .backgroundColor(COLOR_PRIMARY)
+          .alignContent(Alignment.Center);
+          Column() {
+            Text(this.sessionSheetInfo.name.length > 0 ? this.sessionSheetInfo.name :
+              (this.sessionSheetInfo.stuId.length > 0 ? this.sessionSheetInfo.stuId : '已登录教务'))
+              .fontSize(16)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(COLOR_TEXT_PRIMARY)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis });
+            Text(Home.campusName(this.sessionSheetInfo.campus) +
+              (this.sessionSheetInfo.stuId.length > 0 ? ' · ' + this.sessionSheetInfo.stuId : ''))
+              .fontSize(13)
+              .fontColor(COLOR_TEXT_SECONDARY)
+              .margin({ top: 4 });
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          .margin({ left: 12 });
+        }
+        .width('100%')
+        .padding(16)
+        .backgroundColor(COLOR_CARD)
+        .borderRadius(16)
+        .margin({ top: 16 });
+
+        Row({ space: 8 }) {
+          Button('重新登录')
+            .layoutWeight(1)
+            .height(42)
+            .fontSize(14)
+            .fontColor(COLOR_PRIMARY)
+            .backgroundColor(COLOR_NAV_ACTIVE)
+            .borderRadius(16)
+            .onClick(() => {
+              this.beginSessionLogin();
+            });
+          Button('退出登录')
+            .layoutWeight(1)
+            .height(42)
+            .fontSize(14)
+            .fontColor('#D93025')
+            .backgroundColor('#FCE8E6')
+            .borderRadius(16)
+            .onClick(() => {
+              this.logoutSession();
+            });
+        }
+        .width('100%')
+        .margin({ top: 12 });
+      } else {
+        Row() {
+          SymbolGlyph($r('sys.symbol.lock_shield'))
+            .fontSize(15)
+            .fontColor([COLOR_TEXT_HINT]);
+          Text('认证在校区教务页面内完成，HITA 不保存认证密码')
+            .fontSize(12)
+            .fontColor(COLOR_TEXT_HINT)
+            .margin({ left: 6 });
+        }
+        .margin({ top: 16 });
+      }
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, bottom: 18 });
+  }
+
+  @Builder
+  sessionCampusButton(code: string, label: string) {
+    Row() {
+      Circle()
+        .width(18)
+        .height(18)
+        .fill(this.sessionSheetCampus === code ? COLOR_PRIMARY : 'transparent')
+        .stroke(this.sessionSheetCampus === code ? COLOR_PRIMARY : '#B7C1CE')
+        .strokeWidth(2);
+      Text(label)
+        .fontSize(14)
+        .fontColor(COLOR_TEXT_PRIMARY)
+        .margin({ left: 6 });
+    }
+    .layoutWeight(1)
+    .height(40)
+    .justifyContent(FlexAlign.Center)
+    .borderRadius(14)
+    .backgroundColor(this.sessionSheetCampus === code ? COLOR_NAV_ACTIVE : COLOR_CARD)
+    .onClick(() => {
+      this.selectSessionCampus(code);
     });
   }
 

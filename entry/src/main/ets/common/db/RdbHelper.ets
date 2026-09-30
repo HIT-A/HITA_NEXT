@@ -259,9 +259,22 @@ export class RdbHelper {
   }
 
   async deleteTimetablesInIds(ids: string[]): Promise<void> {
+    if (ids.length === 0) {
+      return;
+    }
     const pred: relationalStore.RdbPredicates = new relationalStore.RdbPredicates('timetable');
     pred.in('id', ids);
     await this.del(pred);
+  }
+
+  /** 删除课表以及其科目、课程事件，避免留下无法再访问的孤立数据。 */
+  async deleteTimetablesCascade(ids: string[]): Promise<void> {
+    if (ids.length === 0) {
+      return;
+    }
+    await this.del(new relationalStore.RdbPredicates('events').in('timetableId', ids));
+    await this.del(new relationalStore.RdbPredicates('subject').in('timetableId', ids));
+    await this.deleteTimetablesInIds(ids);
   }
 
   // ------------------------------------------------------------------

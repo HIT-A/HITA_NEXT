@@ -11,6 +11,8 @@
     "pages/SubjectsPage",
     "pages/ExamPage",
     "pages/SearchPage",
-    "pages/AboutPage"
+    "pages/AboutPage",
+    "pages/TimetableManagerPage",
+    "pages/TimetableDetailPage"
   ]
 }
