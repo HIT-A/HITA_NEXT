@@ -9,6 +9,7 @@ import { common } from '@kit.AbilityKit';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasSubjectType, EasTermSubject, EasTimetable } from '../common/model/timetable/TimetableModels';
 import { TimetableLocalDemo } from '../feature/timetable/data/TimetableLocalDemo';
+import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
 
 const PALETTE: number[] = [0xFF5C6BC0, 0xFF26A69A, 0xFFEF8E5A, 0xFFD93025, 0xFF7E57C2,
   0xFF42A5F5, 0xFF9CCC65, 0xFF8D6E63];
@@ -33,11 +34,11 @@ struct SubjectsPage {
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     const rdb: RdbHelper = RdbHelper.getInstance();
     await rdb.init(ctx);
-    const tt: EasTimetable | undefined = await rdb.getTimetableByEasCode(TimetableLocalDemo.DEMO_CODE);
+    const tt: EasTimetable | undefined = await TimetableResolver.getForDisplay(rdb);
     if (tt === undefined) {
       this.ready = false;
       this.rows = [];
-      this.summary = '暂无演示课表：请先在首页「生成本地演示数据」。';
+      this.summary = '暂无课表：请先登录教务并导入课表。';
       return;
     }
     const subjects: EasTermSubject[] = await rdb.getSubjectsOfTimetable(tt.id);

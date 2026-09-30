@@ -32,27 +32,12 @@ const COLOR_CARD: string = '#FFFFFF';
 const COLOR_TEXT_PRIMARY: string = '#14213D';
 const COLOR_TEXT_SECONDARY: string = '#6B7A90';
 const COLOR_TEXT_HINT: string = '#8A96A8';
-const COLOR_DIVIDER: string = '#DCE4F0';
 const COLOR_NAV_ACTIVE: string = '#E3EEFC';
 const COLOR_NAV_ACTIVE_TEXT: string = '#1B6FD1';
 const COLOR_CLASS: string = '#2E86E8';
 const COLOR_EXAM: string = '#8A2E42';
 const COLOR_OTHER: string = '#1B4F9C';
 const COLOR_TAG: string = '#0F6E56';
-
-class HitaMenuItem {
-  symbol: string;
-  title: string;
-  subtitle: string;
-  destination: string;
-
-  constructor(symbol: string, title: string, subtitle: string, destination: string) {
-    this.symbol = symbol;
-    this.title = title;
-    this.subtitle = subtitle;
-    this.destination = destination;
-  }
-}
 
 @Entry
 @Component
@@ -65,6 +50,7 @@ struct Home {
   @State currentTab: number = 0;
   @State hasTimetable: boolean = false;
   @State hasRealTimetable: boolean = false;
+  @State timetableCount: number = 0;
   @State currentTimetable: EasTimetable | undefined = undefined;
   @State importing: boolean = false;
   @State importMessage: string = '';
@@ -170,6 +156,8 @@ struct Home {
     this.sessionInfo = found;
     this.sessionText = found === undefined ? '未登录：从导航页登录统一认证' : '已登录';
 
+    const allTimetables: EasTimetable[] = await rdb.getTimetables();
+    this.timetableCount = allTimetables.length;
     const real: EasTimetable | undefined = await TimetableResolver.getReal(rdb);
     if (found !== undefined && real === undefined && !this.importing && !this.importRequested) {
       await this.importTimetable(false);
@@ -604,7 +592,7 @@ struct Home {
         Row()
           .width(68)
           .height(44)
-          .backgroundColor('rgba(210,230,252,0.34)')
+          .backgroundColor('rgba(210,230,252,0.30)')
           .borderRadius(22)
           .offset({ x: 68 * this.currentTab })
           .animation({ duration: 260, curve: Curve.EaseInOut });
@@ -624,10 +612,10 @@ struct Home {
     .width(212)
     .height(52)
     .padding(4)
-    .backgroundColor('rgba(255,255,255,0.14)')
+    .backgroundColor('transparent')
     .borderRadius(28)
-    .border({ width: 1, color: 'rgba(220,228,240,0.22)' })
-    .shadow({ radius: 8, color: '#126B7A28', offsetX: 0, offsetY: 2 })
+    .border({ width: 0, color: 'transparent' })
+    .shadow({ radius: 0, color: 'transparent', offsetX: 0, offsetY: 0 })
     .margin({ bottom: 0 })
     .translate({ y: 10 });
   }
@@ -656,83 +644,15 @@ struct Home {
   }
 
   @Builder
-  topBar(title: string, subtitle: string, actionSymbol: string, action: () => void) {
-    Row() {
-      Column() {
-        Text(title)
-          .fontSize(22)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(COLOR_TEXT_PRIMARY)
-        if (subtitle.length > 0) {
-          Text(subtitle)
-            .fontSize(12)
-            .fontColor(COLOR_TEXT_SECONDARY)
-            .margin({ top: 4 })
-        }
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-
-      if (actionSymbol.length > 0) {
-        Stack() {
-          if (actionSymbol === '＋') {
-            SymbolGlyph($r('sys.symbol.plus'))
-              .fontSize(22)
-              .fontColor([COLOR_PRIMARY]);
-          } else if (actionSymbol === '↻') {
-            SymbolGlyph($r('sys.symbol.repeat_1'))
-              .fontSize(21)
-              .fontColor([COLOR_PRIMARY]);
-          } else {
-            SymbolGlyph($r('sys.symbol.magnifyingglass'))
-              .fontSize(21)
-              .fontColor([COLOR_PRIMARY]);
-          }
-        }
-        .width(46)
-        .height(46)
-        .borderRadius(23)
-        .backgroundColor(COLOR_NAV_ACTIVE)
-        .alignContent(Alignment.Center)
-        .onClick(action)
-      }
-    }
-    .width('100%')
-    .padding({ left: 20, right: 16, top: 14, bottom: 10 })
-    .backgroundColor(COLOR_SURFACE)
-  }
-
-  @Builder
-  featureGlyph(symbol: string) {
-    if (symbol === '▦') {
-      SymbolGlyph($r('sys.symbol.calendar'))
-        .fontSize(22)
-        .fontColor([COLOR_PRIMARY]);
-    } else if (symbol === '◫') {
-      SymbolGlyph($r('sys.symbol.doc_plaintext'))
-        .fontSize(22)
-        .fontColor([COLOR_PRIMARY]);
-    } else if (symbol === '◉') {
-      SymbolGlyph($r('sys.symbol.checkmark_circle'))
-        .fontSize(22)
-        .fontColor([COLOR_PRIMARY]);
-    } else if (symbol === '＋') {
-      SymbolGlyph($r('sys.symbol.plus'))
-        .fontSize(22)
-        .fontColor(['#FFFFFF']);
-    } else {
-      SymbolGlyph($r('sys.symbol.person_crop_circle_fill'))
-        .fontSize(22)
-        .fontColor([COLOR_PRIMARY]);
-    }
-  }
-
-  @Builder
   tabToday() {
     Column() {
       this.todayHeader();
 
-      this.todayHeroCard();
+      Row() {
+        this.todayHeroCard();
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16 })
       this.todaySectionHeader();
 
       if (this.todayItems.length === 0) {
@@ -888,7 +808,7 @@ struct Home {
     .backgroundColor(COLOR_PRIMARY)
     .borderRadius(24)
     .shadow({ radius: 14, color: '#262E86E8', offsetY: 6 })
-    .margin({ left: 14, right: 14, top: 12 });
+    .margin({ top: 12 });
   }
 
   @Builder
@@ -1269,81 +1189,114 @@ struct Home {
   }
 
   @Builder
-  actionRow(symbol: string, title: string, subtitle: string, destination: string) {
-    Row() {
-      Stack() {
-        this.featureGlyph(symbol)
-      }
-        .width(32)
-        .height(32)
-        .borderRadius(10)
-        .alignContent(Alignment.Center)
-        .backgroundColor(COLOR_NAV_ACTIVE)
-      Column() {
-        Text(title)
-          .fontSize(15)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(COLOR_TEXT_PRIMARY)
-        Text(subtitle)
-          .fontSize(12)
-          .fontColor(COLOR_TEXT_SECONDARY)
-          .margin({ top: 4 })
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-      .margin({ left: 12 })
-      Text('›')
-        .fontSize(24)
-        .fontColor(COLOR_TEXT_HINT)
-    }
-    .width('100%')
-    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-    .backgroundColor(COLOR_CARD)
-    .borderRadius(18)
-    .border({ width: 1, color: '#EDF1F7' })
-    .margin({ left: 14, right: 14, top: 9 })
-    .onClick(() => {
-      this.getUIContext().getRouter().pushUrl({ url: destination });
-    })
-  }
-
-  @Builder
   tabMine() {
     Column() {
-      this.topBar('更多', '常用功能与教务工具', '⌕', () => {
-        this.getUIContext().getRouter().pushUrl({ url: 'pages/SearchPage' });
-      });
+      Row() {
+        Text('功能中心')
+          .fontSize(24)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(COLOR_TEXT_PRIMARY)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis });
+      }
+      .width('100%')
+      .height(56)
+      .padding({ left: 20, right: 20 })
+      .alignItems(VerticalAlign.Center);
+
       Scroll() {
         Column() {
           this.userCard();
+
           Row() {
-            this.shortcut('▦', '时间表', '周视图', 1);
-            this.shortcut('◉', '成绩', '成绩查询', 0);
+            this.moreShortcut($r('sys.symbol.calendar'), '最近课表',
+              this.currentTimetable === undefined ? '暂无课表' : this.currentTimetable.name,
+              () => {
+                if (this.currentTimetable !== undefined) {
+                  this.currentTab = 1;
+                }
+              });
+            Blank().width(8);
+            this.moreShortcut($r('sys.symbol.doc_plaintext'), '课表管理',
+              this.timetableCount === 0 ? '暂无课表' : '共 ' + this.timetableCount.toString() + ' 张课表',
+              () => {
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/SubjectsPage' });
+              });
           }
           .width('100%')
-          .padding({ left: 14, right: 14, top: 12 });
+          .padding({ left: 16, right: 16, top: 8 });
 
-          this.sectionTitle('教务');
-          this.menuGroup([
-            new HitaMenuItem('◉', '成绩查询', '查看学期成绩与绩点', 'pages/ScorePage'),
-            new HitaMenuItem('□', '考试查询', '查看考试时间与地点', 'pages/ExamPage'),
-            new HitaMenuItem('⌕', '本地搜索', '搜索课程、事件和记录', 'pages/SearchPage')
-          ]);
-          this.sectionTitle('设置');
-          this.menuGroup([
-            new HitaMenuItem('◎', '会话管理', '登录校区与同步状态', 'pages/ProfilePage'),
-            new HitaMenuItem('◇', '开发者自检', '检查本地数据库和网络链路', 'pages/Index'),
-            new HitaMenuItem('i', '关于 HITA NEXT', '版本与开源信息', 'pages/AboutPage')
-          ]);
-          Text('HITA NEXT · HarmonyOS')
-            .fontSize(12)
-            .fontColor(COLOR_TEXT_HINT)
-            .margin({ top: 22, bottom: 24 });
+          this.moreSectionTitle('课表工具');
+          Column() {
+            this.moreNavigationRow($r('sys.symbol.repeat_1'), '导入课表',
+              this.importing ? '正在从教务系统同步' : '从教务系统同步当前学期', () => {
+                this.importTimetable(true);
+              });
+            this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '科目管理',
+              '查看科目、课程次数与配色', () => {
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/SubjectsPage' });
+              });
+          }
+          .width('100%')
+          .padding({ top: 4, bottom: 4 })
+          .backgroundColor(COLOR_CARD)
+          .borderRadius(16)
+          .margin({ left: 16, right: 16 });
+
+          this.moreSectionTitle('教务功能');
+          Column() {
+            this.moreNavigationRow($r('sys.symbol.calendar'), '考试',
+              '查看考试时间与地点', () => {
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/ExamPage' });
+              });
+            this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '成绩管理',
+              '查看学期成绩与绩点', () => {
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/ScorePage' });
+              });
+          }
+          .width('100%')
+          .padding({ top: 4, bottom: 4 })
+          .backgroundColor(COLOR_CARD)
+          .borderRadius(16)
+          .margin({ left: 16, right: 16 });
+
+          this.moreSectionTitle('课程资源');
+          Column() {
+            this.moreNavigationRow($r('sys.symbol.magnifyingglass'), '本地搜索',
+              '搜索课程、教师与教室', () => {
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/SearchPage' });
+              });
+          }
+          .width('100%')
+          .padding({ top: 4, bottom: 4 })
+          .backgroundColor(COLOR_CARD)
+          .borderRadius(16)
+          .margin({ left: 16, right: 16 });
+
+          this.moreSectionTitle('设置');
+          Column() {
+            this.moreNavigationRow($r('sys.symbol.person_crop_circle_fill'), '会话管理',
+              this.sessionInfo === undefined ? '登录并管理教务会话' :
+                Home.campusName(this.sessionInfo.campus) + ' · ' + this.sessionText, () => {
+                this.getUIContext().getRouter().pushUrl({
+                  url: this.sessionInfo === undefined ? 'pages/WelcomePage' : 'pages/ProfilePage'
+                });
+              });
+            this.moreNavigationRow($r('sys.symbol.more'), '关于 HITA NEXT',
+              '版本信息与开源说明', () => {
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/AboutPage' });
+              });
+          }
+          .width('100%')
+          .padding({ top: 4, bottom: 4 })
+          .backgroundColor(COLOR_CARD)
+          .borderRadius(16)
+          .margin({ left: 16, right: 16 });
+
+          Blank().height(88);
         }
         .width('100%')
-        .padding({ bottom: 18 });
+        .padding({ bottom: 16 });
       }
       .layoutWeight(1)
       .scrollBar(BarState.Off);
@@ -1358,49 +1311,47 @@ struct Home {
       Column() {
         Text(this.sessionInfo === undefined ? '?' :
           (this.sessionInfo.name.length > 0 ? this.sessionInfo.name.substring(0, 1) : 'U'))
-          .fontSize(22)
+          .fontSize(18)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF');
       }
-      .width(54)
-      .height(54)
-      .borderRadius(27)
+      .width(40)
+      .height(40)
+      .borderRadius(20)
       .backgroundColor(this.sessionInfo === undefined ? '#AAB4C1' : COLOR_PRIMARY)
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center);
       Column() {
-        Text(this.sessionInfo === undefined ? '未登录' :
-          (this.sessionInfo.name.length > 0 ? this.sessionInfo.name : this.sessionInfo.username))
-          .fontSize(18)
+        Text(this.sessionInfo === undefined ? '未登录教务' :
+          (this.sessionInfo.name.length > 0 ? this.sessionInfo.name :
+            (this.sessionInfo.username.length > 0 ? this.sessionInfo.username :
+              (this.sessionInfo.stuId.length > 0 ? this.sessionInfo.stuId : '已登录教务'))))
+          .fontSize(16)
           .fontWeight(FontWeight.Bold)
           .fontColor(COLOR_TEXT_PRIMARY);
-        Text(this.sessionInfo === undefined ? '登录统一认证以使用完整功能' :
-          Home.campusName(this.sessionInfo.campus) + '  ·  ' + this.sessionText)
+        Text(this.sessionInfo === undefined ? '点击进行教务登录' :
+          ((this.sessionInfo.stuId.length > 0 ? this.sessionInfo.stuId + '\n' : '') +
+            Home.campusName(this.sessionInfo.campus) +
+            (this.sessionInfo.school.length > 0 ? ' · ' + this.sessionInfo.school : '') +
+            (this.sessionInfo.major.length > 0 ? ' · ' + this.sessionInfo.major : '')))
           .fontSize(12)
           .fontColor(COLOR_TEXT_SECONDARY)
-          .margin({ top: 5 })
-          .maxLines(1)
+          .margin({ top: 4 })
+          .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis });
-        if (this.sessionInfo !== undefined && this.sessionInfo.stuId.length > 0) {
-          Text('学号  ' + this.sessionInfo.stuId)
-            .fontSize(11)
-            .fontColor(COLOR_TEXT_HINT)
-            .margin({ top: 3 });
-        }
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      .margin({ left: 14 });
+      .margin({ left: 12 });
       Text('›')
         .fontSize(24)
-        .fontColor(COLOR_TEXT_HINT);
+        .fontColor(COLOR_TEXT_SECONDARY);
     }
-      .width('100%')
-      .padding(16)
-      .backgroundColor(COLOR_CARD)
-      .borderRadius(20)
-      .border({ width: 1, color: '#EDF1F7' })
-      .margin({ left: 14, right: 14, top: 12 })
+    .width('100%')
+    .padding(16)
+    .backgroundColor(COLOR_CARD)
+    .borderRadius(16)
+    .margin({ left: 16, right: 16, top: 8, bottom: 8 })
     .onClick(() => {
       this.getUIContext().getRouter().pushUrl({
         url: this.sessionInfo === undefined ? 'pages/WelcomePage' : 'pages/ProfilePage'
@@ -1409,103 +1360,93 @@ struct Home {
   }
 
   @Builder
-  shortcut(symbol: string, title: string, subtitle: string, destinationIndex: number) {
-    Column() {
+  moreShortcut(symbol: Resource, title: string, subtitle: string, action: () => void) {
+    Row() {
       Stack() {
-        this.featureGlyph(symbol)
+        SymbolGlyph(symbol)
+          .fontSize(22)
+          .fontColor([COLOR_PRIMARY]);
       }
-        .width(32)
-        .height(32)
-        .borderRadius(10)
-        .alignContent(Alignment.Center)
-        .backgroundColor(COLOR_NAV_ACTIVE);
-      Text(title)
-        .fontSize(15)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(COLOR_TEXT_PRIMARY)
-        .margin({ top: 10 });
-      Text(subtitle)
-        .fontSize(11)
-        .fontColor(COLOR_TEXT_SECONDARY)
-        .margin({ top: 3 });
+      .width(40)
+      .height(40)
+      .borderRadius(20)
+      .alignContent(Alignment.Center)
+      .backgroundColor(COLOR_NAV_ACTIVE);
+      Column() {
+        Text(title)
+          .fontSize(12)
+          .fontColor(COLOR_TEXT_SECONDARY)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis });
+        Text(subtitle)
+          .fontSize(14)
+          .fontColor(COLOR_TEXT_PRIMARY)
+          .margin({ top: 4 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis });
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      .margin({ left: 12 });
     }
     .layoutWeight(1)
-    .height(116)
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
+    .height(80)
+    .padding({ left: 12, right: 12 })
+    .alignItems(VerticalAlign.Center)
     .backgroundColor(COLOR_CARD)
-    .borderRadius(18)
-    .border({ width: 1, color: '#EDF1F7' })
-    .margin({ right: destinationIndex === 1 ? 6 : 0, left: destinationIndex === 0 ? 6 : 0 })
-    .onClick(() => {
-      if (destinationIndex === 1) {
-        this.currentTab = 1;
-      } else {
-        this.getUIContext().getRouter().pushUrl({ url: 'pages/ScorePage' });
-      }
-    });
+    .borderRadius(16)
+    .onClick(action);
   }
 
   @Builder
-  sectionTitle(title: string) {
+  moreSectionTitle(title: string) {
     Text(title)
-      .fontSize(13)
-      .fontWeight(FontWeight.Medium)
-      .fontColor(COLOR_TEXT_SECONDARY)
-      .margin({ left: 20, right: 20, top: 20, bottom: 8 })
+      .fontSize(18)
+      .fontWeight(FontWeight.Bold)
+      .fontColor(COLOR_TEXT_PRIMARY)
+      .margin({ left: 16, right: 16, top: 16, bottom: 4 })
       .alignSelf(ItemAlign.Start);
   }
 
   @Builder
-  menuGroup(items: HitaMenuItem[]) {
-    Column() {
-      ForEach(items, (item: HitaMenuItem, index: number) => {
-        Column() {
-          Row() {
-            Text(item.symbol)
-              .fontSize(20)
-              .fontColor(COLOR_PRIMARY)
-              .width(32)
-              .height(32)
-              .textAlign(TextAlign.Center)
-              .borderRadius(10)
-              .backgroundColor(COLOR_NAV_ACTIVE);
-            Column() {
-              Text(item.title)
-                .fontSize(15)
-                .fontColor(COLOR_TEXT_PRIMARY);
-              Text(item.subtitle)
-                .fontSize(11)
-                .fontColor(COLOR_TEXT_SECONDARY)
-                .margin({ top: 3 });
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-            .margin({ left: 12 });
-            Text('›')
-              .fontSize(23)
-              .fontColor(COLOR_TEXT_HINT);
-          }
-          .width('100%')
-          .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-          .onClick(() => {
-            this.getUIContext().getRouter().pushUrl({ url: item.destination });
-          });
-          if (index < items.length - 1) {
-            Row()
-              .width('100%')
-              .height(1)
-              .backgroundColor(COLOR_DIVIDER)
-              .margin({ left: 62 });
-          }
+  moreNavigationRow(symbol: Resource, title: string, subtitle: string, action: () => void) {
+    Row() {
+      Stack() {
+        SymbolGlyph(symbol)
+          .fontSize(22)
+          .fontColor([COLOR_PRIMARY]);
+      }
+      .width(40)
+      .height(40)
+      .borderRadius(20)
+      .alignContent(Alignment.Center)
+      .backgroundColor(COLOR_NAV_ACTIVE);
+      Column() {
+        Text(title)
+          .fontSize(14)
+          .fontColor(COLOR_TEXT_PRIMARY)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis });
+        if (subtitle.length > 0) {
+          Text(subtitle)
+            .fontSize(12)
+            .fontColor(COLOR_TEXT_SECONDARY)
+            .margin({ top: 2 })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis });
         }
-      }, (item: HitaMenuItem) => item.destination);
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      .margin({ left: 12 });
+      Text('›')
+        .fontSize(23)
+        .fontColor(COLOR_TEXT_SECONDARY);
     }
     .width('100%')
-    .backgroundColor(COLOR_CARD)
-    .borderRadius(18)
-    .border({ width: 1, color: '#EDF1F7' })
-    .margin({ left: 14, right: 14 })
-    .clip(true);
+    .height(56)
+    .padding({ left: 16, right: 16 })
+    .alignItems(VerticalAlign.Center)
+    .onClick(action);
   }
 }
