@@ -215,10 +215,15 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     drawWeekHeader(ctx, w, headerH, timetable, weekNumber, isCurrentWeek);
   }
 
-  // 今日列整列遮罩（仅当前周）
+  // 今日列整列遮罩（仅当前周）。
+  // The body canvas starts below the fixed date header.  Paint from its own
+  // top edge so the highlight continues through the intentional top padding
+  // before the first 08:00 grid line instead of being cut by a white band.
   if (isCurrentWeek) {
     ctx.fillStyle = TimetableDrawStyle.todayMask;
-    ctx.fillRect(gridLeft + (todayDow - 1) * colW, gridTop, colW, gridH);
+    const todayMaskTop: number = drawHeader ? gridTop : 0;
+    ctx.fillRect(gridLeft + (todayDow - 1) * colW, todayMaskTop, colW,
+      gridBottom - todayMaskTop);
   }
 
   // 网格（每小时一格）+ 左侧整点标签

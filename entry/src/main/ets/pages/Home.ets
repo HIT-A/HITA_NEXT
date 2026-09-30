@@ -587,6 +587,7 @@ struct Home {
       .height('100%')
       .padding({ bottom: this.currentTab === 1 ? 0 : 64 })
       .backgroundColor(COLOR_SURFACE)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
 
       this.pillNavigation();
     }
@@ -603,7 +604,7 @@ struct Home {
         Row()
           .width(68)
           .height(44)
-          .backgroundColor('rgba(210,230,252,0.44)')
+          .backgroundColor('rgba(210,230,252,0.34)')
           .borderRadius(22)
           .offset({ x: 68 * this.currentTab })
           .animation({ duration: 260, curve: Curve.EaseInOut });
@@ -623,12 +624,12 @@ struct Home {
     .width(212)
     .height(52)
     .padding(4)
-    .backgroundColor('rgba(255,255,255,0.28)')
+    .backgroundColor('rgba(255,255,255,0.14)')
     .borderRadius(28)
-    .border({ width: 1, color: 'rgba(220,228,240,0.34)' })
-    .shadow({ radius: 8, color: '#126B7A40', offsetX: 0, offsetY: 2 })
+    .border({ width: 1, color: 'rgba(220,228,240,0.22)' })
+    .shadow({ radius: 8, color: '#126B7A28', offsetX: 0, offsetY: 2 })
     .margin({ bottom: 0 })
-    .translate({ y: 22 });
+    .translate({ y: 10 });
   }
 
   @Builder
@@ -1209,11 +1210,19 @@ struct Home {
           .layoutWeight(1)
           .scrollable(ScrollDirection.Vertical)
           .scrollBar(BarState.Off)
+          // The navigation pill is drawn into the bottom system inset. Extend
+          // the timetable viewport there as well so the grid remains visible
+          // beneath the translucent lower half of the pill.
+          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         }
         .width('100%')
         .layoutWeight(1)
-        .padding({ top: 2, bottom: 4 })
+        // Keep the body canvas flush with the fixed date header.  Its own
+        // 24vp grid top padding is painted by the today-column mask, so a
+        // separate layout gap would visibly break that column.
+        .padding({ top: 0, bottom: 4 })
         .backgroundColor(COLOR_SURFACE)
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         .clip(true)
         .onAreaChange((oldValue: Area, newValue: Area) => {
           this.onTimetableArea(newValue.width as number, newValue.height as number);
@@ -1235,6 +1244,7 @@ struct Home {
     .width('100%')
     .height('100%')
     .backgroundColor(COLOR_SURFACE)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
   @Builder
