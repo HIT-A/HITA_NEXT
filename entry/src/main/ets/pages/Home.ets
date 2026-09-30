@@ -1182,6 +1182,7 @@ struct Home {
         }
         .width('100%')
         .layoutWeight(1)
+        .alignContent(Alignment.TopStart)
         .padding({ left: 8, right: 8, top: 2, bottom: 4 })
         .backgroundColor(COLOR_SURFACE)
         .clip(true)
