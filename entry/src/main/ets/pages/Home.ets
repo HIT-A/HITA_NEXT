@@ -14,7 +14,15 @@ import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
 import { EasImportResult, EasTimetableImporter } from '../feature/eas/EasTimetableImporter';
 import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
-import { drawTimetableWeek, eventsOfWeek } from '../feature/timetable/views/TimetableWeekDraw';
+import {
+  AXIS_END_HOUR,
+  AXIS_START_HOUR,
+  TIMETABLE_HEADER_HEIGHT,
+  TIMETABLE_HOUR_HEIGHT,
+  drawTimetableWeek,
+  drawTimetableWeekHeader,
+  eventsOfWeek
+} from '../feature/timetable/views/TimetableWeekDraw';
 
 const DAY_MS: number = 24 * 60 * 60 * 1000;
 const COLOR_PRIMARY: string = '#2E86E8';
@@ -78,8 +86,11 @@ struct Home {
   private dayKey: string = EasTimeTools.printDate(Date.now());
   private timetableCanvas: CanvasRenderingContext2D =
     new CanvasRenderingContext2D(new RenderingContextSettings(true));
+  private timetableHeaderCanvas: CanvasRenderingContext2D =
+    new CanvasRenderingContext2D(new RenderingContextSettings(true));
   private timetableAreaW: number = 0;
   private timetableAreaH: number = 0;
+  @State private timetableCanvasHeight: number = 0;
 
   async aboutToAppear(): Promise<void> {
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
@@ -220,8 +231,18 @@ struct Home {
     const weekEvents: EasEventItem[] = eventsOfWeek(this.currentTimetable,
       this.timetableEvents, this.timetableWeek);
     const current: number = this.currentTimetable.getWeekNumber(this.nowTick);
-    drawTimetableWeek(this.timetableCanvas, this.timetableAreaW, this.timetableAreaH,
-      this.currentTimetable, weekEvents, this.timetableWeek, current === this.timetableWeek);
+    const contentHeight: number = TIMETABLE_HEADER_HEIGHT +
+      (AXIS_END_HOUR - AXIS_START_HOUR) * TIMETABLE_HOUR_HEIGHT + 8;
+    const canvasHeight: number = Math.max(this.timetableAreaH, contentHeight);
+    if (this.timetableCanvasHeight !== canvasHeight) {
+      this.timetableCanvasHeight = canvasHeight;
+    }
+    drawTimetableWeek(this.timetableCanvas, this.timetableAreaW, canvasHeight,
+      this.currentTimetable, weekEvents, this.timetableWeek, current === this.timetableWeek,
+      TIMETABLE_HOUR_HEIGHT, TIMETABLE_HEADER_HEIGHT);
+    drawTimetableWeekHeader(this.timetableHeaderCanvas, this.timetableAreaW,
+      TIMETABLE_HEADER_HEIGHT + 2, this.currentTimetable, this.timetableWeek,
+      current === this.timetableWeek);
   }
 
   private maxTimetableWeek(): number {
@@ -344,6 +365,9 @@ struct Home {
   private onTimetableArea(w: number, h: number): void {
     this.timetableAreaW = w;
     this.timetableAreaH = h;
+    const contentHeight: number = TIMETABLE_HEADER_HEIGHT +
+      (AXIS_END_HOUR - AXIS_START_HOUR) * TIMETABLE_HOUR_HEIGHT + 8;
+    this.timetableCanvasHeight = Math.max(h, contentHeight);
     this.drawTimetableNow();
   }
 
@@ -1131,21 +1155,39 @@ struct Home {
         .alignItems(HorizontalAlign.Center)
         .padding(24);
       } else {
-        Column() {
-          Canvas(this.timetableCanvas)
+        Stack() {
+          Scroll() {
+            Canvas(this.timetableCanvas)
+              .width('100%')
+              .height(this.timetableCanvasHeight)
+              .onReady(() => {
+                this.drawTimetableNow();
+              })
+          }
+          .width('100%')
+          .height('100%')
+          .scrollable(ScrollDirection.Vertical)
+          .scrollBar(BarState.Off)
+
+          // The Android timetable keeps the weekday/date row fixed while the
+          // time grid scrolls vertically. This transparent overlay mirrors
+          // that behavior without intercepting the horizontal week gesture.
+          Canvas(this.timetableHeaderCanvas)
             .width('100%')
-            .height('100%')
+            .height(TIMETABLE_HEADER_HEIGHT + 2)
+            .hitTestBehavior(HitTestMode.Transparent)
             .onReady(() => {
               this.drawTimetableNow();
-            })
-            .onAreaChange((oldValue: Area, newValue: Area) => {
-              this.onTimetableArea(newValue.width as number, newValue.height as number);
             })
         }
         .width('100%')
         .layoutWeight(1)
         .padding({ left: 8, right: 8, top: 2, bottom: 4 })
         .backgroundColor(COLOR_SURFACE)
+        .clip(true)
+        .onAreaChange((oldValue: Area, newValue: Area) => {
+          this.onTimetableArea(newValue.width as number, newValue.height as number);
+        })
         .translate({ x: this.timetableDragOffset, y: 0 })
         .opacity(this.timetableOpacity())
         .animation({ duration: this.timetableAnimationDuration, curve: Curve.EaseOut })

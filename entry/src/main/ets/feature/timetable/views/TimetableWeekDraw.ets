@@ -22,8 +22,11 @@ import {
 export const DOW_NAMES: string[] = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 /** 轴起点 08:00（对应源 startTime=800）。 */
 export const AXIS_START_HOUR: number = 8;
-/** 轴终点 24:00。 */
-export const AXIS_END_HOUR: number = 24;
+/** 轴终点 23:00；更晚的课程通过纵向滚动继续查看。 */
+export const AXIS_END_HOUR: number = 23;
+/** 固定的周标题高度与每小时高度，确保课卡不会被整天时间轴压扁。 */
+export const TIMETABLE_HEADER_HEIGHT: number = 90;
+export const TIMETABLE_HOUR_HEIGHT: number = 112;
 
 export class TimetableDrawStyle {
   static bg: string = '#FBFCFE';
@@ -34,7 +37,7 @@ export class TimetableDrawStyle {
   /** 今日列整列遮罩（源 ~#10000000）。 */
   static todayMask: string = 'rgba(46,134,232,0.06)';
   /** 顶栏最低/占比。 */
-  static headerMin: number = 90;
+  static headerMin: number = TIMETABLE_HEADER_HEIGHT;
   static headerRatio: number = 0.12;
   /** 左侧整点标签列最低/占比。 */
   static gutterMin: number = 62;
@@ -125,8 +128,52 @@ export function eventsOfWeek(timetable: EasTimetable, events: EasEventItem[],
   return out;
 }
 
+function drawWeekHeader(ctx: CanvasRenderingContext2D, w: number, headerH: number,
+  timetable: EasTimetable, weekNumber: number, isCurrentWeek: boolean): void {
+  const gridTop: number = headerH + 2;
+  const gridLeft: number = Math.max(TimetableDrawStyle.gutterMin, w * TimetableDrawStyle.gutterRatio);
+  const colW: number = (w - gridLeft) / 7;
+  const fontUnit: string = 'vp sans-serif';
+  const weekMonday: number = timetable.startTime + (weekNumber - 1) * WEEK_MILLIS;
+  const todayDow: number = EasTimetable.dowOfMs(Date.now());
+
+  ctx.fillStyle = TimetableDrawStyle.bg;
+  ctx.fillRect(0, 0, w, gridTop);
+  ctx.textBaseline = 'middle';
+  for (let d = 0; d < 7; d++) {
+    const x: number = gridLeft + d * colW;
+    const isToday: boolean = isCurrentWeek && todayDow === d + 1;
+    ctx.fillStyle = isToday ? '#E6F0FC' : '#FFFFFF';
+    ctx.fillRect(x, 4, colW, headerH - 2);
+    ctx.fillStyle = isToday ? TimetableDrawStyle.todayHeadBg : TimetableDrawStyle.textMain;
+    ctx.font = 'bold ' + (isToday ? '11' : '10') + fontUnit;
+    ctx.textAlign = 'center';
+    ctx.fillText(DOW_NAMES[d], x + colW / 2, headerH / 2 - 11);
+    const date: Date = new Date(weekMonday + d * DAY_MILLIS);
+    ctx.font = '10' + fontUnit;
+    ctx.fillStyle = isToday ? TimetableDrawStyle.todayHeadBg : TimetableDrawStyle.textSub;
+    ctx.fillText(date.getDate().toString(), x + colW / 2, headerH / 2 + 16);
+  }
+  const firstDay: Date = new Date(weekMonday);
+  ctx.fillStyle = TimetableDrawStyle.textSub;
+  ctx.font = 'bold 11' + fontUnit;
+  ctx.textAlign = 'center';
+  ctx.fillText((firstDay.getMonth() + 1).toString() + '月', gridLeft / 2, headerH / 2 + 16);
+  ctx.textAlign = 'start';
+}
+
+/** 绘制固定在纵向滚动区域顶部的周标题。 */
+export function drawTimetableWeekHeader(ctx: CanvasRenderingContext2D, w: number, h: number,
+  timetable: EasTimetable, weekNumber: number, isCurrentWeek: boolean): void {
+  if (w <= 0 || h <= 0) {
+    return;
+  }
+  ctx.clearRect(0, 0, w, h);
+  drawWeekHeader(ctx, w, Math.max(2, h - 2), timetable, weekNumber, isCurrentWeek);
+}
+
 /**
- * 全量重绘。
+ * 全量重绘。网格高度可固定为每小时高度，供外层 Scroll 保持安卓端长课卡比例。
  * @param ctx 画布上下文
  * @param w/h 可用尺寸
  * @param timetable 课表（周一起点 startTime）
@@ -136,7 +183,8 @@ export function eventsOfWeek(timetable: EasTimetable, events: EasEventItem[],
  */
 export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: number,
   timetable: EasTimetable, events: EasEventItem[], weekNumber: number,
-  isCurrentWeek: boolean): void {
+  isCurrentWeek: boolean, hourHeightOverride: number = 0,
+  headerHeightOverride: number = 0): void {
   if (w <= 0 || h <= 0) {
     return;
   }
@@ -144,47 +192,22 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   ctx.fillStyle = TimetableDrawStyle.bg;
   ctx.fillRect(0, 0, w, h);
 
-  const headerH: number = Math.max(TimetableDrawStyle.headerMin, h * TimetableDrawStyle.headerRatio);
+  const headerH: number = headerHeightOverride > 0 ? headerHeightOverride :
+    Math.max(TimetableDrawStyle.headerMin, h * TimetableDrawStyle.headerRatio);
   const gutterW: number = Math.max(TimetableDrawStyle.gutterMin, w * TimetableDrawStyle.gutterRatio);
   const gridLeft: number = gutterW;
   const gridTop: number = headerH + 2;
-  const gridBottom: number = h - 4;
+  const gridBottom: number = hourHeightOverride > 0 ?
+    Math.min(h - 4, gridTop + (AXIS_END_HOUR - AXIS_START_HOUR) * hourHeightOverride) : h - 4;
   const gridH: number = gridBottom - gridTop;
   const hoursInDay: number = AXIS_END_HOUR - AXIS_START_HOUR;
-  const hourH: number = gridH / hoursInDay;
+  const hourH: number = hourHeightOverride > 0 ? hourHeightOverride : gridH / hoursInDay;
   const colW: number = (w - gridLeft) / 7;
-  // Keep the geometry in the same coordinates as the measured Canvas area.
-  // Text is assigned in vp below so it remains readable across device density.
   const fontUnit: string = 'vp sans-serif';
   const weekMonday: number = timetable.startTime + (weekNumber - 1) * WEEK_MILLIS;
   const todayDow: number = EasTimetable.dowOfMs(Date.now());
 
-  // 星期头
-  ctx.textBaseline = 'middle';
-  for (let d = 0; d < 7; d++) {
-    const x: number = gridLeft + d * colW;
-    const isToday: boolean = isCurrentWeek && todayDow === d + 1;
-    ctx.fillStyle = isToday ? '#E6F0FC' : '#FFFFFF';
-    ctx.fillRect(x, gridTop - headerH + 4, colW, headerH - 4);
-    ctx.fillStyle = isToday ? TimetableDrawStyle.todayHeadBg : TimetableDrawStyle.textMain;
-    const dowFontSize: number = isToday ? 21 : 20;
-    ctx.font = 'bold ' + dowFontSize.toString() + fontUnit;
-    ctx.textAlign = 'center';
-    ctx.fillText(DOW_NAMES[d], x + colW / 2, gridTop - headerH / 2 - 11);
-    const date: Date = new Date(weekMonday + d * DAY_MILLIS);
-    ctx.font = '18' + fontUnit;
-    ctx.fillStyle = isToday ? TimetableDrawStyle.todayHeadBg : TimetableDrawStyle.textSub;
-    ctx.fillText(date.getDate().toString(), x + colW / 2, gridTop - headerH / 2 + 18);
-    ctx.textAlign = 'start';
-  }
-  // 月份标签（左侧时间轴上方，安卓端以月份替代重复周数）。
-  const firstDay: Date = new Date(weekMonday);
-  ctx.fillStyle = TimetableDrawStyle.textSub;
-  ctx.font = 'bold 19' + fontUnit;
-  ctx.textAlign = 'center';
-  ctx.fillText((firstDay.getMonth() + 1).toString() + '月', gutterW / 2,
-    gridTop - headerH / 2 + 18);
-  ctx.textAlign = 'start';
+  drawWeekHeader(ctx, w, headerH, timetable, weekNumber, isCurrentWeek);
 
   // 今日列整列遮罩（仅当前周）
   if (isCurrentWeek) {
@@ -197,12 +220,22 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   ctx.lineWidth = 1;
   for (let i = 0; i <= hoursInDay; i++) {
     const y: number = gridTop + i * hourH;
+    ctx.setLineDash([6, 8]);
     ctx.beginPath();
     ctx.moveTo(gridLeft, y);
     ctx.lineTo(w, y);
     ctx.stroke();
   }
-  ctx.font = '18' + fontUnit;
+  ctx.setLineDash([]);
+  ctx.strokeStyle = '#EEF2F6';
+  for (let i = 0; i < hoursInDay; i++) {
+    const y: number = gridTop + (i + 0.5) * hourH;
+    ctx.beginPath();
+    ctx.moveTo(gridLeft, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+  ctx.font = '10' + fontUnit;
   ctx.fillStyle = TimetableDrawStyle.textSub;
   for (let hour = AXIS_START_HOUR; hour < AXIS_END_HOUR; hour++) {
     const y: number = gridTop + (hour - AXIS_START_HOUR) * hourH;
@@ -312,9 +345,10 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
       cardHeightScreen - titlePaddingScreen * 2 - placePaddingScreen);
     const maxTitleLines: number = cardHeightScreen < 40 ? 1 :
       (cardHeightScreen < 60 ? 2 : 3);
-    const maxTitleFromSpace: number = Math.min(18, titleAvailableScreen / 1.2);
-    const titleScreen: number = Math.max(10,
-      Math.min(maxTitleFromSpace, 15 * textScale * lengthScale));
+    const maxTitleFromSpace: number = Math.min(16, titleAvailableScreen / 1.2);
+    const minTitleSize: number = layout.lanes > 1 ? 5 : 6;
+    const titleScreen: number = Math.max(minTitleSize,
+      Math.min(maxTitleFromSpace, 13 * textScale * lengthScale));
     const titleFont: number = Math.max(1, Math.round(titleScreen));
     const titleLineHeight: number = Math.max(1, Math.round(titleScreen * 1.2));
     // Chinese glyphs are close to one em wide.  A small allowance lets a
@@ -354,24 +388,4 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     }
   }
 
-  // 当前时间线：安卓端样式为细红线，只有当前周显示。
-  if (isCurrentWeek) {
-    const now: Date = new Date();
-    const minute: number = now.getHours() * 60 + now.getMinutes();
-    const axisStart: number = AXIS_START_HOUR * 60;
-    const axisEnd: number = AXIS_END_HOUR * 60;
-    if (minute >= axisStart && minute <= axisEnd) {
-      const nowY: number = gridTop + ((minute - axisStart) / (axisEnd - axisStart)) * gridH;
-      ctx.strokeStyle = '#2E86E8';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(gridLeft, nowY);
-      ctx.lineTo(w, nowY);
-      ctx.stroke();
-      ctx.fillStyle = '#2E86E8';
-      ctx.beginPath();
-      ctx.arc(gridLeft, nowY, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
 }
