@@ -15,6 +15,7 @@ import { EasSessionStore } from '../feature/eas/EasSessionStore';
 import { EasImportResult, EasTimetableImporter } from '../feature/eas/EasTimetableImporter';
 import { EasLoginPage } from '../feature/eas/webLogin/EasLoginPage';
 import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
+import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
 import {
   AXIS_END_HOUR,
   AXIS_START_HOUR,
@@ -67,6 +68,8 @@ struct Home {
   @State sessionSheetInfo: EasSession | undefined = undefined;
   @State loginSheetOpen: boolean = false;
   @State loginCampusCode: string = 'WEIHAI';
+  @State courseSheetOpen: boolean = false;
+  @State selectedCourse: EasEventItem | undefined = undefined;
   @State timetableEvents: EasEventItem[] = [];
   @State timetableWeek: number = 1;
   // Week paging follows the Android timetable: drag the page with the finger,
@@ -92,6 +95,7 @@ struct Home {
   async aboutToAppear(): Promise<void> {
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     await EasSessionStore.getInstance().init(ctx);
+    await TimetableSelectionStore.getInstance().init(ctx);
     await this.refreshSummaries();
     this.startClock();
   }
@@ -167,14 +171,24 @@ struct Home {
     const allTimetables: EasTimetable[] = await rdb.getTimetables();
     this.timetableCount = allTimetables.length;
     this.recentTimetable = await TimetableResolver.getRecent(rdb, this.nowTick);
+    const selectedId: string = await TimetableSelectionStore.getInstance().load();
+    let selected: EasTimetable | undefined = undefined;
+    if (selectedId.length > 0) {
+      selected = await rdb.getTimetableById(selectedId);
+      if (selected === undefined) {
+        await TimetableSelectionStore.getInstance().clearIf(selectedId);
+      }
+    }
     const real: EasTimetable | undefined = await TimetableResolver.getReal(rdb);
-    if (found !== undefined && real === undefined && !this.importing && !this.importRequested) {
+    if (found !== undefined && real === undefined && selected === undefined &&
+      !this.importing && !this.importRequested) {
       await this.importTimetable(false);
       return;
     }
 
     const demo: EasTimetable | undefined = await rdb.getTimetableByEasCode(TimetableLocalDemo.DEMO_CODE);
-    const display: EasTimetable | undefined = real !== undefined ? real : demo;
+    const display: EasTimetable | undefined = selected !== undefined ? selected :
+      (real !== undefined ? real : await TimetableResolver.getForDisplay(rdb));
     this.hasDemo = demo !== undefined;
     this.hasRealTimetable = real !== undefined;
     this.hasTimetable = display !== undefined;
@@ -183,7 +197,9 @@ struct Home {
       this.tableText = found === undefined ? '课表：请先登录并导入' : '课表：暂无数据，可点击导入';
     } else {
       const week: number = display.getWeekNumber(Date.now());
-      this.tableText = display.name + (real !== undefined ? ' · 已导入' : ' · 演示课表') +
+      const sourceLabel: string = TimetableResolver.isReal(display) ? ' · 已导入' :
+        (TimetableResolver.isLocal(display) ? ' · 本地课表' : ' · 演示课表');
+      this.tableText = display.name + sourceLabel +
         (week > 0 ? ' · 第 ' + week.toString() + ' 周' : '');
     }
 
@@ -291,7 +307,67 @@ struct Home {
     const visibleHours: number = 19 - AXIS_START_HOUR;
     const availableGridHeight: number = this.timetableAreaH - TIMETABLE_HEADER_HEIGHT -
       TIMETABLE_GRID_TOP_PADDING - 8 + TIMETABLE_BOTTOM_SAFE_EXTENSION;
-    return Math.max(40, Math.min(TIMETABLE_HOUR_HEIGHT, availableGridHeight / visibleHours));
+    return Math.max(42, Math.min(TIMETABLE_HOUR_HEIGHT, availableGridHeight / visibleHours));
+  }
+
+  private openCourseAt(x: number, y: number): void {
+    if (this.currentTimetable === undefined || x <= 0 || y < TIMETABLE_GRID_TOP_PADDING) {
+      return;
+    }
+    const gutterWidth: number = Math.max(48, this.timetableAreaW * 0.11);
+    if (x < gutterWidth || x > this.timetableAreaW) {
+      return;
+    }
+    const columnWidth: number = (this.timetableAreaW - gutterWidth) / 7;
+    const day: number = Math.max(1, Math.min(7, Math.floor((x - gutterWidth) / columnWidth) + 1));
+    const minuteOfDay: number = AXIS_START_HOUR * 60 +
+      (y - TIMETABLE_GRID_TOP_PADDING) / this.timetableHourHeight() * 60;
+    if (minuteOfDay < AXIS_START_HOUR * 60 || minuteOfDay > AXIS_END_HOUR * 60) {
+      return;
+    }
+    const weekMonday: number = this.currentTimetable.startTime +
+      (this.timetableWeek - 1) * 7 * DAY_MS;
+    const tappedTime: number = weekMonday + (day - 1) * DAY_MS + minuteOfDay * 60000;
+    const weekEvents: EasEventItem[] = eventsOfWeek(this.currentTimetable,
+      this.timetableEvents, this.timetableWeek);
+    for (let i: number = weekEvents.length - 1; i >= 0; i--) {
+      const event: EasEventItem = weekEvents[i];
+      if (event.type === EasEventType.CLASS && event.getDow() === day &&
+        event.from <= tappedTime && event.to >= tappedTime) {
+        this.selectedCourse = event;
+        this.courseSheetOpen = true;
+        return;
+      }
+    }
+  }
+
+  private courseProgressText(event: EasEventItem): string {
+    const instances: EasEventItem[] = this.timetableEvents.filter((item: EasEventItem): boolean =>
+      item.type === EasEventType.CLASS && item.subjectId === event.subjectId);
+    instances.sort((a: EasEventItem, b: EasEventItem): number => a.from - b.from);
+    let index: number = 0;
+    for (let i: number = 0; i < instances.length; i++) {
+      if (instances[i].id === event.id) {
+        index = i + 1;
+        break;
+      }
+    }
+    return index > 0 ? '第 ' + index.toString() + ' / ' + instances.length.toString() + ' 次课' :
+      '共 ' + instances.length.toString() + ' 次课';
+  }
+
+  private static courseDateText(timestamp: number): string {
+    const date: Date = new Date(timestamp);
+    return date.getFullYear().toString() + '年' + (date.getMonth() + 1).toString() + '月' +
+      date.getDate().toString() + '日 · ' + DOW_FULL[EasTimeTools.getDow(timestamp)];
+  }
+
+  private static coursePeriodText(event: EasEventItem): string {
+    if (event.fromNumber <= 0 || event.lastNumber <= 0) {
+      return '未记录节次';
+    }
+    return event.fromNumber === event.lastNumber ? '第 ' + event.fromNumber.toString() + ' 节' :
+      '第 ' + event.fromNumber.toString() + ' - ' + event.lastNumber.toString() + ' 节';
   }
 
   private timetableOpacity(): number {
@@ -414,6 +490,9 @@ struct Home {
     try {
       const result: EasImportResult = await EasTimetableImporter.importCurrent(ctx);
       if (result.success) {
+        if (result.timetable !== undefined) {
+          await TimetableSelectionStore.getInstance().save(result.timetable.id);
+        }
         this.importMessage = result.message;
         if (showToast) {
           this.getUIContext().getPromptAction().showToast({ message: result.message });
@@ -634,7 +713,7 @@ struct Home {
     .height('100%')
     .backgroundColor(this.currentTab === 1 ? 'transparent' : COLOR_SURFACE)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-    .bindSheet(this.sessionSheetOpen || this.loginSheetOpen, this.activeSheet(), {
+    .bindSheet(this.sessionSheetOpen || this.loginSheetOpen || this.courseSheetOpen, this.activeSheet(), {
       height: this.loginSheetOpen ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
       dragBar: true,
       showClose: true,
@@ -644,6 +723,8 @@ struct Home {
       onDisappear: () => {
         this.sessionSheetOpen = false;
         this.loginSheetOpen = false;
+        this.courseSheetOpen = false;
+        this.selectedCourse = undefined;
       }
     });
   }
@@ -665,6 +746,8 @@ struct Home {
       })
         .width('100%')
         .height('100%');
+    } else if (this.courseSheetOpen && this.selectedCourse !== undefined) {
+      this.courseDetailSheet(this.selectedCourse as EasEventItem);
     } else {
       this.sessionSheet();
     }
@@ -677,9 +760,9 @@ struct Home {
         Row()
           .width(68)
           .height(44)
-          // The Android indicator keeps the tab motion, but the timetable
-          // must remain visible beneath the navigation area on HarmonyOS.
-          .backgroundColor('transparent')
+          // Keep the Android-style selected capsule visible. Only the area
+          // around the navigation pill is transparent over the timetable.
+          .backgroundColor(COLOR_NAV_ACTIVE)
           .borderRadius(22)
           .offset({ x: 68 * this.currentTab })
           .animation({ duration: 260, curve: Curve.EaseInOut });
@@ -699,10 +782,10 @@ struct Home {
     .width(212)
     .height(52)
     .padding(4)
-    .backgroundColor('transparent')
+    .backgroundColor(COLOR_CARD)
     .borderRadius(28)
-    .border({ width: 0, color: 'transparent' })
-    .shadow({ radius: 0, color: 'transparent', offsetX: 0, offsetY: 0 })
+    .border({ width: 1, color: '#E7EDF5' })
+    .shadow({ radius: 14, color: '#18000000', offsetX: 0, offsetY: 4 })
     .margin({ bottom: 0 })
     .translate({ y: 10 });
   }
@@ -1213,6 +1296,9 @@ struct Home {
               .onReady(() => {
                 this.drawTimetableNow();
               })
+              .onClick((event: ClickEvent) => {
+                this.openCourseAt(event.x, event.y);
+              })
           }
           .width('100%')
           .layoutWeight(1)
@@ -1448,6 +1534,91 @@ struct Home {
     .onClick(() => {
       this.openSessionSheet();
     });
+  }
+
+  @Builder
+  courseDetailSheet(event: EasEventItem) {
+    Column() {
+      Row() {
+        Row()
+          .width(7)
+          .height(50)
+          .borderRadius(4)
+          .backgroundColor(Home.canvasColorCss(event.color === 0 ?
+            Home.defaultCanvasColor(event.type) : event.color));
+        Column() {
+          Text(event.name === 'NULL' || event.name.length === 0 ? '未命名课程' : event.name)
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(COLOR_TEXT_PRIMARY)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis });
+          Text('查看课程详情')
+            .fontSize(12)
+            .fontColor(COLOR_TEXT_SECONDARY)
+            .margin({ top: 4 });
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: 12 });
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .margin({ bottom: 12 });
+
+      this.courseDetailRow($r('sys.symbol.person_crop_circle_fill'), '老师',
+        event.teacher.trim().length > 0 ? event.teacher : '无');
+      this.courseDetailRow($r('sys.symbol.pin'), '教室',
+        event.place.trim().length > 0 ? event.place : '无');
+      this.courseDetailRow($r('sys.symbol.clock'), '时间',
+        EasTimeTools.printTime(event.from) + ' - ' + EasTimeTools.printTime(event.to));
+      this.courseDetailRow($r('sys.symbol.doc_plaintext'), '节次', Home.coursePeriodText(event));
+      this.courseDetailRow($r('sys.symbol.calendar'), '日期', Home.courseDateText(event.from));
+      this.courseDetailRow($r('sys.symbol.repeat_1'), '课程进度', this.courseProgressText(event));
+    }
+    .width('100%')
+    .padding({ left: 18, right: 18, bottom: 20 });
+  }
+
+  @Builder
+  courseDetailRow(symbol: Resource, label: string, value: string) {
+    Row() {
+      Stack() {
+        SymbolGlyph(symbol)
+          .fontSize(20)
+          .fontColor([COLOR_PRIMARY]);
+      }
+      .width(38)
+      .height(38)
+      .borderRadius(19)
+      .backgroundColor(COLOR_NAV_ACTIVE)
+      .alignContent(Alignment.Center);
+      Column() {
+        Text(label)
+          .fontSize(12)
+          .fontColor(COLOR_TEXT_SECONDARY);
+        Text(value)
+          .fontSize(17)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(COLOR_TEXT_PRIMARY)
+          .margin({ top: 2 })
+          .maxLines(3)
+          .textOverflow({ overflow: TextOverflow.Ellipsis });
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      .margin({ left: 12 });
+    }
+    .width('100%')
+    .padding({ top: 8, bottom: 8 })
+    .alignItems(VerticalAlign.Center);
+  }
+
+  private static canvasColorCss(argb: number): string {
+    const r: number = (argb >> 16) & 0xFF;
+    const g: number = (argb >> 8) & 0xFF;
+    const b: number = argb & 0xFF;
+    return 'rgb(' + r.toString() + ',' + g.toString() + ',' + b.toString() + ')';
   }
 
   @Builder

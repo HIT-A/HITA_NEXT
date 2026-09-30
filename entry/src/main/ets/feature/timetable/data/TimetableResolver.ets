@@ -5,7 +5,14 @@ import { TimetableLocalDemo } from './TimetableLocalDemo';
 
 export class TimetableResolver {
   static isReal(timetable: EasTimetable): boolean {
-    return timetable.code !== TimetableLocalDemo.DEMO_CODE;
+    // A blank timetable created from the manager is local-only. It must not
+    // replace the imported EAS timetable selected by the main timetable view.
+    return timetable.code !== TimetableLocalDemo.DEMO_CODE &&
+      !timetable.code.startsWith('LOCAL:');
+  }
+
+  static isLocal(timetable: EasTimetable): boolean {
+    return timetable.code.startsWith('LOCAL:');
   }
 
   static async getReal(rdb: RdbHelper): Promise<EasTimetable | undefined> {
@@ -22,6 +29,12 @@ export class TimetableResolver {
     const real: EasTimetable | undefined = await TimetableResolver.getReal(rdb);
     if (real !== undefined) {
       return real;
+    }
+    const all: EasTimetable[] = await rdb.getTimetables();
+    for (let i: number = 0; i < all.length; i++) {
+      if (TimetableResolver.isLocal(all[i])) {
+        return all[i];
+      }
     }
     return await rdb.getTimetableByEasCode(TimetableLocalDemo.DEMO_CODE);
   }

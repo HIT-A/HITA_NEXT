@@ -25,8 +25,8 @@ export const AXIS_START_HOUR: number = 8;
 /** 轴终点 23:00；更晚的课程通过纵向滚动继续查看。 */
 export const AXIS_END_HOUR: number = 23;
 /** 固定周标题高度；56vp 是 iOS 紧凑课表使用的每小时高度上限。 */
-export const TIMETABLE_HEADER_HEIGHT: number = 90;
-export const TIMETABLE_HOUR_HEIGHT: number = 56;
+export const TIMETABLE_HEADER_HEIGHT: number = 64;
+export const TIMETABLE_HOUR_HEIGHT: number = 50;
 /** 安卓端在固定日期栏和首个整点之间保留 24dp。 */
 export const TIMETABLE_GRID_TOP_PADDING: number = 24;
 

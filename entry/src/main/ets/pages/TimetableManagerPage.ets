@@ -6,6 +6,7 @@ import { EasTimetable } from '../common/model/timetable/TimetableModels';
 import { HitaColors } from '../common/theme/HitaColors';
 import { EasImportResult, EasTimetableImporter } from '../feature/eas/EasTimetableImporter';
 import { IcsExporter } from '../common/util/ICSExport';
+import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
 
 const WEEK_MS: number = 7 * 24 * 60 * 60 * 1000;
 
@@ -18,6 +19,7 @@ struct TimetableManagerPage {
   @State loading: boolean = true;
   @State importing: boolean = false;
   @State exporting: boolean = false;
+  @State activeTimetableId: string = '';
 
   async onPageShow(): Promise<void> {
     await this.load();
@@ -25,9 +27,11 @@ struct TimetableManagerPage {
 
   private async load(): Promise<void> {
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
+    await TimetableSelectionStore.getInstance().init(ctx);
     const rdb: RdbHelper = RdbHelper.getInstance();
     await rdb.init(ctx);
     this.timetables = await rdb.getTimetables();
+    this.activeTimetableId = await TimetableSelectionStore.getInstance().load();
     this.loading = false;
   }
 
@@ -52,11 +56,13 @@ struct TimetableManagerPage {
     this.selectionMode = next.length > 0;
   }
 
-  private openTimetable(timetable: EasTimetable): void {
+  private async openTimetable(timetable: EasTimetable): Promise<void> {
     if (this.selectionMode) {
       this.toggleSelection(timetable.id);
       return;
     }
+    await TimetableSelectionStore.getInstance().save(timetable.id);
+    this.activeTimetableId = timetable.id;
     this.getUIContext().getRouter().pushUrl({
       url: 'pages/TimetableDetailPage',
       params: { 'timetableId': timetable.id }
@@ -90,6 +96,10 @@ struct TimetableManagerPage {
       const result: EasImportResult = await EasTimetableImporter.importCurrent(ctx);
       this.getUIContext().getPromptAction().showToast({ message: result.message });
       if (result.success) {
+        if (result.timetable !== undefined) {
+          await TimetableSelectionStore.getInstance().save(result.timetable.id);
+          this.activeTimetableId = result.timetable.id;
+        }
         await this.load();
       }
     } catch (e) {
@@ -108,6 +118,8 @@ struct TimetableManagerPage {
     timetable.endTime = timetable.startTime + 20 * WEEK_MS - 1;
     timetable.createdAt = now;
     await RdbHelper.getInstance().saveTimetable(timetable);
+    await TimetableSelectionStore.getInstance().save(timetable.id);
+    this.activeTimetableId = timetable.id;
     await this.load();
     this.getUIContext().getRouter().pushUrl({
       url: 'pages/TimetableDetailPage',
@@ -175,6 +187,9 @@ struct TimetableManagerPage {
         return;
       }
       await RdbHelper.getInstance().deleteTimetablesCascade(this.selectedIds);
+      for (let i: number = 0; i < this.selectedIds.length; i++) {
+        await TimetableSelectionStore.getInstance().clearIf(this.selectedIds[i]);
+      }
       this.selectedIds = [];
       this.selectionMode = false;
       await this.load();
@@ -239,6 +254,21 @@ struct TimetableManagerPage {
             this.toggleSelection(timetable.id);
           })
       )
+
+      if (!this.selectionMode && this.activeTimetableId === timetable.id) {
+        Row() {
+          Text('当前')
+            .fontSize(11)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#FFFFFF')
+        }
+        .height(26)
+        .padding({ left: 10, right: 10 })
+        .justifyContent(FlexAlign.Center)
+        .backgroundColor(HitaColors.primary)
+        .borderRadius(13)
+        .margin({ top: 12, right: 12 })
+      }
 
       if (this.selectionMode) {
         Row() {
