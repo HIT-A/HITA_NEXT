@@ -1,6 +1,5 @@
 {
   "src": [
-    "pages/WelcomePage",
     "pages/Home",
     "pages/Index",
     "pages/TimetablePreview",

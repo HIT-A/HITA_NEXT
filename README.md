@@ -87,7 +87,6 @@ HitaNEXT/
 
 主要入口：
 
-- `entry/src/main/ets/pages/WelcomePage.ets`：校区选择与登录入口。
 - `entry/src/main/ets/pages/Home.ets`：今日、时间表、更多三个主页面。
 - `entry/src/main/ets/feature/eas/webLogin/`：ArkWeb 登录和 Cookie 会话采集。
 - `entry/src/main/ets/feature/eas/EasDataProvider.ets`：深圳、本部本科与威海课表数据适配；真实成绩目前仅支持深圳。

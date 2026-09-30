@@ -16,8 +16,8 @@ export default class EntryAbility extends UIAbility {
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
     this.configureSystemBars(windowStage);
-    // 首屏：WelcomePage（登录引导页），已登录用户在 WelcomePage 内自动跳转 Home
-    windowStage.loadContent('pages/WelcomePage', (err) => {
+    // 首屏直接进入主界面。教务登录从主界面的会话入口按需打开。
+    windowStage.loadContent('pages/Home', (err) => {
       if (err.code) {
         hilog.error(DOMAIN, TAG, 'Failed to load content. Cause: %{public}s', JSON.stringify(err));
         return;
