@@ -17,6 +17,7 @@ import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
 import {
   AXIS_END_HOUR,
   AXIS_START_HOUR,
+  TIMETABLE_GRID_TOP_PADDING,
   TIMETABLE_HEADER_HEIGHT,
   TIMETABLE_HOUR_HEIGHT,
   drawTimetableWeek,
@@ -32,7 +33,6 @@ const COLOR_TEXT_PRIMARY: string = '#14213D';
 const COLOR_TEXT_SECONDARY: string = '#6B7A90';
 const COLOR_TEXT_HINT: string = '#8A96A8';
 const COLOR_DIVIDER: string = '#DCE4F0';
-const COLOR_NAV: string = '#FFFFFF';
 const COLOR_NAV_ACTIVE: string = '#E3EEFC';
 const COLOR_NAV_ACTIVE_TEXT: string = '#1B6FD1';
 const COLOR_CLASS: string = '#2E86E8';
@@ -82,6 +82,9 @@ struct Home {
   @State timetableAnimating: boolean = false;
   private importRequested: boolean = false;
   private clockTimer: number = -1;
+  private timetableMarqueeTimer: number = -1;
+  private timetableMarqueeOffset: number = 0;
+  private timetableHasScrollingPlace: boolean = false;
   private timetableAnimationTimer: number = -1;
   private dayKey: string = EasTimeTools.printDate(Date.now());
   private timetableCanvas: CanvasRenderingContext2D =
@@ -109,6 +112,10 @@ struct Home {
       clearInterval(this.clockTimer);
       this.clockTimer = -1;
     }
+    if (this.timetableMarqueeTimer >= 0) {
+      clearInterval(this.timetableMarqueeTimer);
+      this.timetableMarqueeTimer = -1;
+    }
     if (this.timetableAnimationTimer >= 0) {
       clearTimeout(this.timetableAnimationTimer);
       this.timetableAnimationTimer = -1;
@@ -116,19 +123,27 @@ struct Home {
   }
 
   private startClock(): void {
-    if (this.clockTimer >= 0) {
-      return;
+    if (this.clockTimer < 0) {
+      this.clockTimer = setInterval(() => {
+        this.nowTick = Date.now();
+        this.updateTodayHighlights();
+        this.drawTimetableNow();
+        const nextDayKey: string = EasTimeTools.printDate(this.nowTick);
+        if (nextDayKey !== this.dayKey) {
+          this.dayKey = nextDayKey;
+          this.refreshSummaries();
+        }
+      }, 60000);
     }
-    this.clockTimer = setInterval(() => {
-      this.nowTick = Date.now();
-      this.updateTodayHighlights();
-      this.drawTimetableNow();
-      const nextDayKey: string = EasTimeTools.printDate(this.nowTick);
-      if (nextDayKey !== this.dayKey) {
-        this.dayKey = nextDayKey;
-        this.refreshSummaries();
-      }
-    }, 60000);
+    if (this.timetableMarqueeTimer < 0) {
+      this.timetableMarqueeTimer = setInterval(() => {
+        if (this.currentTab === 1 && this.currentTimetable !== undefined &&
+          this.timetableHasScrollingPlace) {
+          this.timetableMarqueeOffset = (this.timetableMarqueeOffset + 1.2) % 100000;
+          this.drawTimetableNow();
+        }
+      }, 100);
+    }
   }
 
   async refreshSummaries(): Promise<void> {
@@ -232,17 +247,19 @@ struct Home {
       this.timetableEvents, this.timetableWeek);
     const current: number = this.currentTimetable.getWeekNumber(this.nowTick);
     const hourHeight: number = this.timetableHourHeight();
-    const contentHeight: number = TIMETABLE_HEADER_HEIGHT +
+    const bodyViewportHeight: number = Math.max(1, this.timetableAreaH - TIMETABLE_HEADER_HEIGHT);
+    const contentHeight: number = TIMETABLE_GRID_TOP_PADDING +
       (AXIS_END_HOUR - AXIS_START_HOUR) * hourHeight + 8;
-    const canvasHeight: number = Math.max(this.timetableAreaH, contentHeight);
+    const canvasHeight: number = Math.max(bodyViewportHeight, contentHeight);
     if (this.timetableCanvasHeight !== canvasHeight) {
       this.timetableCanvasHeight = canvasHeight;
     }
-    drawTimetableWeek(this.timetableCanvas, this.timetableAreaW, canvasHeight,
+    this.timetableHasScrollingPlace = drawTimetableWeek(this.timetableCanvas,
+      this.timetableAreaW, canvasHeight,
       this.currentTimetable, weekEvents, this.timetableWeek, current === this.timetableWeek,
-      hourHeight, TIMETABLE_HEADER_HEIGHT);
+      hourHeight, 0, false, this.timetableMarqueeOffset);
     drawTimetableWeekHeader(this.timetableHeaderCanvas, this.timetableAreaW,
-      TIMETABLE_HEADER_HEIGHT + 2, this.currentTimetable, this.timetableWeek,
+      TIMETABLE_HEADER_HEIGHT, this.currentTimetable, this.timetableWeek,
       current === this.timetableWeek);
   }
 
@@ -274,7 +291,8 @@ struct Home {
     // Keep 08:00–19:00 visible in the initial viewport, while preserving
     // the iOS compact layout's 56vp/hour as the upper bound.
     const visibleHours: number = 19 - AXIS_START_HOUR;
-    const availableGridHeight: number = this.timetableAreaH - TIMETABLE_HEADER_HEIGHT - 8;
+    const availableGridHeight: number = this.timetableAreaH - TIMETABLE_HEADER_HEIGHT -
+      TIMETABLE_GRID_TOP_PADDING - 8;
     return Math.max(40, Math.min(TIMETABLE_HOUR_HEIGHT, availableGridHeight / visibleHours));
   }
 
@@ -378,9 +396,10 @@ struct Home {
     this.timetableAreaW = w;
     this.timetableAreaH = h;
     const hourHeight: number = this.timetableHourHeight();
-    const contentHeight: number = TIMETABLE_HEADER_HEIGHT +
+    const bodyViewportHeight: number = Math.max(1, h - TIMETABLE_HEADER_HEIGHT);
+    const contentHeight: number = TIMETABLE_GRID_TOP_PADDING +
       (AXIS_END_HOUR - AXIS_START_HOUR) * hourHeight + 8;
-    this.timetableCanvasHeight = Math.max(h, contentHeight);
+    this.timetableCanvasHeight = Math.max(bodyViewportHeight, contentHeight);
     this.drawTimetableNow();
   }
 
@@ -566,14 +585,15 @@ struct Home {
       }
       .width('100%')
       .height('100%')
-      .padding({ bottom: 92 })
+      .padding({ bottom: 64 })
       .backgroundColor(COLOR_SURFACE)
 
       this.pillNavigation();
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(COLOR_SURFACE);
+    .backgroundColor(COLOR_SURFACE)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM]);
   }
 
   @Builder
@@ -581,11 +601,11 @@ struct Home {
     Stack() {
       Stack() {
         Row()
-          .width(88)
-          .height(58)
-          .backgroundColor(COLOR_NAV_ACTIVE)
-          .borderRadius(29)
-          .offset({ x: 88 * this.currentTab })
+          .width(68)
+          .height(44)
+          .backgroundColor('rgba(227,238,252,0.90)')
+          .borderRadius(22)
+          .offset({ x: 68 * this.currentTab })
           .animation({ duration: 260, curve: Curve.EaseInOut });
 
         Row() {
@@ -593,20 +613,21 @@ struct Home {
           this.navItem($r('sys.symbol.doc_plaintext'), '时间表', 1);
           this.navItem($r('sys.symbol.more'), '更多', 2);
         }
-        .width(264)
-        .height(58);
+        .width(204)
+        .height(44);
       }
-      .width(264)
-      .height(58)
+      .width(204)
+      .height(44)
       .alignContent(Alignment.Start);
     }
-    .width(286)
-    .height(70)
-    .padding({ left: 6, right: 6, top: 6, bottom: 6 })
-    .backgroundColor(COLOR_NAV)
-    .borderRadius(27)
-    .border({ width: 1, color: COLOR_DIVIDER })
-    .shadow({ radius: 16, color: '#1A6B7A90', offsetX: 0, offsetY: 5 })
+    .width(212)
+    .height(52)
+    .padding(4)
+    .backgroundColor('rgba(255,255,255,0.86)')
+    .backgroundBlurStyle(BlurStyle.Thin)
+    .borderRadius(28)
+    .border({ width: 1, color: 'rgba(220,228,240,0.72)' })
+    .shadow({ radius: 9, color: '#186B7A90', offsetX: 0, offsetY: 3 })
     .margin({ bottom: 12 });
   }
 
@@ -614,19 +635,19 @@ struct Home {
   navItem(symbol: Resource, label: string, index: number) {
     Column() {
       SymbolGlyph(symbol)
-        .fontSize(24)
+        .fontSize(18)
         .fontColor([index === this.currentTab ? COLOR_NAV_ACTIVE_TEXT : COLOR_TEXT_SECONDARY])
       Text(label)
-        .fontSize(14)
+        .fontSize(11)
         .fontColor(index === this.currentTab ? COLOR_NAV_ACTIVE_TEXT : COLOR_TEXT_SECONDARY)
-        .margin({ top: 4 })
+        .margin({ top: 3 })
     }
-    .width(88)
-    .height(58)
+    .width(68)
+    .height(44)
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
     .backgroundColor('transparent')
-    .borderRadius(29)
+    .borderRadius(22)
     .opacity(1)
     .onClick(() => {
       this.currentTab = index;
@@ -1168,7 +1189,14 @@ struct Home {
         .alignItems(HorizontalAlign.Center)
         .padding(24);
       } else {
-        Stack() {
+        Column() {
+          Canvas(this.timetableHeaderCanvas)
+            .width('100%')
+            .height(TIMETABLE_HEADER_HEIGHT)
+            .onReady(() => {
+              this.drawTimetableNow();
+            })
+
           Scroll() {
             Canvas(this.timetableCanvas)
               .width('100%')
@@ -1178,25 +1206,13 @@ struct Home {
               })
           }
           .width('100%')
-          .height('100%')
+          .layoutWeight(1)
           .scrollable(ScrollDirection.Vertical)
           .scrollBar(BarState.Off)
-
-          // The Android timetable keeps the weekday/date row fixed while the
-          // time grid scrolls vertically. This transparent overlay mirrors
-          // that behavior without intercepting the horizontal week gesture.
-          Canvas(this.timetableHeaderCanvas)
-            .width('100%')
-            .height(TIMETABLE_HEADER_HEIGHT + 2)
-            .hitTestBehavior(HitTestMode.Transparent)
-            .onReady(() => {
-              this.drawTimetableNow();
-            })
         }
         .width('100%')
         .layoutWeight(1)
-        .alignContent(Alignment.TopStart)
-        .padding({ left: 8, right: 8, top: 2, bottom: 4 })
+        .padding({ top: 2, bottom: 4 })
         .backgroundColor(COLOR_SURFACE)
         .clip(true)
         .onAreaChange((oldValue: Area, newValue: Area) => {

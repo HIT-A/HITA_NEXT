@@ -2,7 +2,7 @@
  * TimetableWeekDraw.ets — 课表周视图绘制模块（Canvas 纯函数，状态由宿主页面持有）。
  *
  * 语义依据 docs/eas-timetable-view-notes.md（HITA_X TimeTableView 几何还原）：
- *  - 7 等分列；时间轴 08:00–24:00（16h），网格每小时一格；
+ *  - 7 等分列；时间轴 08:00–23:00，网格每小时一格；
  *  - 事件块按真实时刻分钟定位：yTop = minutesFromAxisStart/60 * hourH，
  *    高 = durationMinutes/60 * hourH；x=(dow-1)*colW（dow 周一=1）；
  *    fromNumber/lastNumber 只作数据字段，不参与布局（源如此）；
@@ -19,7 +19,7 @@ import {
   EasTimetable
 } from '../../../common/model/timetable/TimetableModels';
 
-export const DOW_NAMES: string[] = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+export const DOW_NAMES: string[] = ['一', '二', '三', '四', '五', '六', '日'];
 /** 轴起点 08:00（对应源 startTime=800）。 */
 export const AXIS_START_HOUR: number = 8;
 /** 轴终点 23:00；更晚的课程通过纵向滚动继续查看。 */
@@ -27,6 +27,8 @@ export const AXIS_END_HOUR: number = 23;
 /** 固定周标题高度；56vp 是 iOS 紧凑课表使用的每小时高度上限。 */
 export const TIMETABLE_HEADER_HEIGHT: number = 90;
 export const TIMETABLE_HOUR_HEIGHT: number = 56;
+/** 安卓端在固定日期栏和首个整点之间保留 24dp。 */
+export const TIMETABLE_GRID_TOP_PADDING: number = 24;
 
 export class TimetableDrawStyle {
   static bg: string = '#FBFCFE';
@@ -184,19 +186,20 @@ export function drawTimetableWeekHeader(ctx: CanvasRenderingContext2D, w: number
 export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: number,
   timetable: EasTimetable, events: EasEventItem[], weekNumber: number,
   isCurrentWeek: boolean, hourHeightOverride: number = 0,
-  headerHeightOverride: number = 0): void {
+  headerHeightOverride: number = 0, drawHeader: boolean = true,
+  placeScrollOffset: number = 0): boolean {
   if (w <= 0 || h <= 0) {
-    return;
+    return false;
   }
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = TimetableDrawStyle.bg;
   ctx.fillRect(0, 0, w, h);
 
-  const headerH: number = headerHeightOverride > 0 ? headerHeightOverride :
-    Math.max(TimetableDrawStyle.headerMin, h * TimetableDrawStyle.headerRatio);
+  const headerH: number = drawHeader ? (headerHeightOverride > 0 ? headerHeightOverride :
+    Math.max(TimetableDrawStyle.headerMin, h * TimetableDrawStyle.headerRatio)) : 0;
   const gutterW: number = Math.max(TimetableDrawStyle.gutterMin, w * TimetableDrawStyle.gutterRatio);
   const gridLeft: number = gutterW;
-  const gridTop: number = headerH + 2;
+  const gridTop: number = drawHeader ? headerH + 2 : TIMETABLE_GRID_TOP_PADDING;
   const gridBottom: number = hourHeightOverride > 0 ?
     Math.min(h - 4, gridTop + (AXIS_END_HOUR - AXIS_START_HOUR) * hourHeightOverride) : h - 4;
   const gridH: number = gridBottom - gridTop;
@@ -206,8 +209,11 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   const fontUnit: string = 'vp sans-serif';
   const weekMonday: number = timetable.startTime + (weekNumber - 1) * WEEK_MILLIS;
   const todayDow: number = EasTimetable.dowOfMs(Date.now());
+  let hasScrollingPlace: boolean = false;
 
-  drawWeekHeader(ctx, w, headerH, timetable, weekNumber, isCurrentWeek);
+  if (drawHeader) {
+    drawWeekHeader(ctx, w, headerH, timetable, weekNumber, isCurrentWeek);
+  }
 
   // 今日列整列遮罩（仅当前周）
   if (isCurrentWeek) {
@@ -380,12 +386,28 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
       const placeFont: number = Math.round(10 * textScale);
       ctx.font = placeFont.toString() + fontUnit;
       ctx.textAlign = 'center';
-      ctx.fillText(TimetableDrawStyle.compact(ev.place,
-        Math.max(3, Math.floor((cardWidthScreen - titlePaddingScreen * 2) /
-          placeFont))),
-        x + bw / 2, y + bh - 9);
+      const placeText: string = ev.place.trim();
+      const placeAvailableWidth: number = Math.max(4, cardWidthScreen - titlePaddingScreen * 2);
+      const placeTextWidth: number = ctx.measureText(placeText).width;
+      const placeY: number = y + bh - 9;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x + titlePaddingScreen, y + bh - 18, placeAvailableWidth, 16);
+      ctx.clip();
+      if (placeTextWidth <= placeAvailableWidth) {
+        ctx.fillText(placeText, x + bw / 2, placeY);
+      } else {
+        hasScrollingPlace = true;
+        const gap: number = 18;
+        const cycleWidth: number = placeTextWidth + gap;
+        const textX: number = x + titlePaddingScreen - (placeScrollOffset % cycleWidth);
+        ctx.textAlign = 'left';
+        ctx.fillText(placeText, textX, placeY);
+        ctx.fillText(placeText, textX + cycleWidth, placeY);
+      }
+      ctx.restore();
       ctx.textAlign = 'start';
     }
   }
-
+  return hasScrollingPlace;
 }
