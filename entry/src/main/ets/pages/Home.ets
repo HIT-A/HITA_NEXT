@@ -585,7 +585,7 @@ struct Home {
       }
       .width('100%')
       .height('100%')
-      .padding({ bottom: 64 })
+      .padding({ bottom: this.currentTab === 1 ? 0 : 64 })
       .backgroundColor(COLOR_SURFACE)
 
       this.pillNavigation();
@@ -603,7 +603,7 @@ struct Home {
         Row()
           .width(68)
           .height(44)
-          .backgroundColor('rgba(227,238,252,0.90)')
+          .backgroundColor('rgba(210,230,252,0.44)')
           .borderRadius(22)
           .offset({ x: 68 * this.currentTab })
           .animation({ duration: 260, curve: Curve.EaseInOut });
@@ -623,12 +623,12 @@ struct Home {
     .width(212)
     .height(52)
     .padding(4)
-    .backgroundColor('rgba(255,255,255,0.86)')
-    .backgroundBlurStyle(BlurStyle.Thin)
+    .backgroundColor('rgba(255,255,255,0.28)')
     .borderRadius(28)
-    .border({ width: 1, color: 'rgba(220,228,240,0.72)' })
-    .shadow({ radius: 9, color: '#186B7A90', offsetX: 0, offsetY: 3 })
-    .margin({ bottom: 12 });
+    .border({ width: 1, color: 'rgba(220,228,240,0.34)' })
+    .shadow({ radius: 8, color: '#126B7A40', offsetX: 0, offsetY: 2 })
+    .margin({ bottom: 0 })
+    .translate({ y: 22 });
   }
 
   @Builder

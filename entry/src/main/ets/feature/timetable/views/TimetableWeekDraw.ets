@@ -42,8 +42,8 @@ export class TimetableDrawStyle {
   static headerMin: number = TIMETABLE_HEADER_HEIGHT;
   static headerRatio: number = 0.12;
   /** 左侧整点标签列最低/占比。 */
-  static gutterMin: number = 62;
-  static gutterRatio: number = 0.14;
+  static gutterMin: number = 48;
+  static gutterRatio: number = 0.11;
   /** 块外边距（源 1dp 量级，比例化）。 */
   static blockMargin: number = 3;
   /** 安卓端使用高对比度实色课程卡片，标题与地点均使用白色。 */
@@ -246,8 +246,8 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   for (let hour = AXIS_START_HOUR; hour < AXIS_END_HOUR; hour++) {
     const y: number = gridTop + (hour - AXIS_START_HOUR) * hourH;
     const label: string = hour.toString() + ':00';
-    ctx.textAlign = 'right';
-    ctx.fillText(label, gridLeft - 8, y);
+    ctx.textAlign = 'left';
+    ctx.fillText(label, 8, y);
     ctx.textAlign = 'start';
   }
   // 列分隔
