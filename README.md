@@ -1,107 +1,163 @@
-# HitaNEXT — HITA × HarmonyOS NEXT (ArkTS) 整合移植工程
+<p align="center">
+  <img src="AppScope/resources/base/media/app_icon.png" width="128" alt="HITA NEXT 图标">
+</p>
 
-> 依据 `../HITA_X_新版登录_鸿蒙NEXT整合实现蓝本.md`（v1.0）实施。
-> 基线素材位于 `../HITA/.analysis/`（HITA_X 源码镜像 + 新版 HITA v2.7.0 反编译）。
-> 阶段：**M1/M3 开发预览（登录子系统 + 数据层 + 本地课表域 + 3-Tab 主框架 Home）**。
-> 静态一致性自检：`node scripts/static-checks.cjs`（导入导出/路由/资源三层，0=全过）。
->
-> 📌 **当前状态**：代码与文档齐备（35 .ets / 12 路由），静态自检 ALL OK；
-> ✅ **DevEco 26（SDK API26）命令行 `assembleHap` 编译通过**（unsigned HAP 已产出，0 error；
-> 真机安装需先在 DevEco 配置当前签名）。深圳网页登录后的学期、已选课程、JSON 课表、节次结构和成绩请求链路已经接入；本部/威海链路仍待真机回归。
-> 接续入口：`docs/usage.md`（操作手册）→ `docs/arkts-compile-checklist.md`（逐项销项）→ `docs/project-state.md`（待办队列+编译记录）。
+# HITA NEXT
 
-## 目录结构
+HITA NEXT 是基于开源项目 [HITA Android](https://github.com/HIT-A/HITA_Android) 开发的 HarmonyOS NEXT 客户端，采用 ArkTS 与 ArkUI 原生实现，为哈尔滨工业大学一校三区学生提供课表查看、教务登录和本地学习信息管理功能。
 
+项目在功能逻辑上参考 HITA Android，在界面结构与交互体验上同时参考 [HITA Aura](https://github.com/HIT-A/HITA-Aura)，尽量保持不同平台之间一致的使用习惯。
+
+## 核心功能
+
+### 今日
+
+- 显示当前日期、星期和教学周。
+- 展示正在进行或即将开始的课程。
+- 显示下一节课的时间、地点和倒计时。
+- 按时间顺序展示当天全部课程及完成状态。
+
+### 时间表
+
+- 按周查看当前学期课程表。
+- 显示周数、校区、学期、星期和日期。
+- 支持左右滑动切换周次，并带有页面切换动画。
+- 课程按照真实开始时间和持续时间绘制。
+- 默认显示约 08:00–19:00，晚间课程可继续向下滚动查看。
+- 显示课程名称、地点以及不同课程对应的颜色。
+
+### 教务
+
+- 提供深圳、本部和威海校区的 ArkWeb 网页登录入口。
+- 保存登录会话，并在再次启动应用时恢复当前登录状态。
+- 支持深圳、威海和本部本科生课表导入。
+- 自动获取当前学期，将课程、科目和每周课次写入本地数据库。
+- 支持使用深圳校区教务会话查询成绩。
+
+### 更多
+
+- 查看当前账号、校区和会话状态。
+- 按校区管理会话并退出登录。
+- 在本地课表中搜索课程、教师和地点。
+- 将本地课表数据导出为 JSON 备份，并从备份恢复。
+- 清除本地课表及会话数据。
+
+## 技术基线
+
+- UI：ArkUI 声明式界面。
+- 开发语言：ArkTS。
+- 网页登录：ArkWeb。
+- 网络访问：HarmonyOS NetworkKit。
+- 本地课表：RelationalStore 关系型数据库。
+- 会话与轻量配置：Preferences。
+- 目标平台：HarmonyOS NEXT，模块声明支持 phone、tablet 和 2in1 设备。
+- 当前兼容 SDK：HarmonyOS 5.0.0（API 12）。
+
+教务数据流：
+
+```text
+ArkUI 页面 -> EasDataProvider -> EasApiClient -> 校区教务系统
 ```
+
+课表导入与本地展示数据流：
+
+```text
+教务会话 -> EasTimetableImporter -> RdbHelper -> 今日 / 时间表 / 本地搜索
+```
+
+## 关键结构
+
+```text
 HitaNEXT/
-├─ AppScope/                      # 应用级配置（bundle/label/icon）
-├─ docs/
-│  ├─ mapping-hitax-to-arkts.md        # HITA_X → ArkTS 逐文件映射表（蓝本附录①）
-│  ├─ eas-cookie-finish-notes.md       # 反编译：Cookie采集/必选规则/轮询/EELAB（带行号）
-│  ├─ eas-page-predicate-notes.md      # 反编译：页面谓词/UA切换/MFA脚本（带行号）
-│  ├─ eas-timetable-view-notes.md      # 反编译：课表视图几何/常量
-│  ├─ arkts-compile-checklist.md       # DevEco 编译前自查清单（A–E 销项）
-│  ├─ project-state.md                 # 工程状态总览（待办+编译记录）
-│  ├─ usage.md                         # 使用手册（离线走查 + 真机联调）
-│  ├─ eas-api-capture.md               # M0 抓包记录模板（回填端点用）
-│  ├─ DEVICE-RUNBOOK.md                # 编译→签名→装机→M0 抓包 操作手册
-│  └─ DEVICE-FIRST-RUN-CHECKLIST.md    # 真机首跑核对 + 回传模板
-├─ entry/                         # 唯一 HAP 模块（feature 目录组织，后续可拆 HAR）
-│  └─ src/main/
-│     ├─ ets/
-│     │  ├─ entryability/EntryAbility.ets
-│     │  ├─ pages/Index.ets                       # 首页：校区选择 + 会话状态 + 解析自检
-│     │  ├─ common/                               # 网络/RDB/偏好/工具（增量）+ db/RdbHelper·util/EasTimeTools·model/timetable 课表域
-│     │  └─ feature/
-│     │     ├─ eas/
-│     │     │  ├─ EasSession.ets                  # 会话模型(对应 EASToken) + 校验
-│     │     │  ├─ EasSessionStore.ets             # 持久化（preferences + JSON）
-│     │     │  ├─ EasApiClient.ets                # 教务数据 HTTP 客户端(Cookie注入)
-│     │     │  ├─ EasDataProvider.ets             # 数据提供者（对齐新版 EASService 方法面）
-│     │     │  ├─ model/EasModels.ets             # EasTerm/EasCourseScore/EasExam/EasCourse
-│     │     │  ├─ data/ShenzhenWebScores.ets      # 深圳成绩 JSON 解析(1:1) + 离线样例自检
-│     │     │  └─ webLogin/                       # —— 本蓝本核心 ——
-│     │     │     ├─ EasWebLoginConfig.ets        # 三校区 CampusConfig 表(§2.2.3)
-│     │     │     ├─ EasWebLoginProbe.ets         # URL/页面判定谓词纯函数(§2.2.4)
-│     │     │     ├─ EasWebMfaBridge.ets          # MFA 探测脚本 + 原生输入桥接
-│     │     │     ├─ EasWebLoginController.ets    # 登录状态机（轮询式驱动）
-│     │     │     └─ EasLoginPage.ets             # 登录页 UI（ArkWeb+MFA覆盖层）
-│     │     └─ feature-timetable|search|profile… # 后续阶段
-│     ├─ module.json5 / resources / …             # DevEco 工程配置
+├── AppScope/                         # 应用级名称、图标与配置
+├── entry/
+│   └── src/main/
+│       ├── ets/
+│       │   ├── entryability/         # EntryAbility 应用入口
+│       │   ├── pages/                # 今日、时间表、更多及功能页面
+│       │   ├── feature/eas/          # 登录、会话、教务请求与课表导入
+│       │   ├── feature/timetable/    # 周课表绘制与本地演示数据
+│       │   └── common/               # 数据库、模型与通用工具
+│       └── resources/                # 字符串、颜色、图标等资源
+├── docs/                             # 迁移记录、接口笔记与设备调试文档
+├── scripts/                          # 静态检查脚本
+├── build-profile.json5
+└── hvigorfile.ts
 ```
 
-## 移植对照速查
+主要入口：
 
-| 原 Android 能力 | ArkTS 替代 | 状态 |
-|---|---|---|
-| WebView / CookieManager / evaluateJavascript | `@kit.ArkWeb` `Web` + `webview.WebviewController` + `WebCookieManager.getCookieSync` + `runJavaScript` | 骨架（待真机销项） |
-| Room / SharedPreferences | `@ohos.data.relationalStore` / `@kit.ArkData` preferences | 会话先用 preferences |
-| Retrofit/OkHttp/Gson | `@kit.NetworkKit` http + `JSON.parse` | `EasApiClient` Cookie 注入与校区 UA 已落地 |
-| 深圳成绩 JSON 解析（新版 ShenzhenWebScoreParser） | `data/ShenzhenWebScores.ets`（1:1 移植） | 已落地；离线样例自检通过（Node 镜像验证） |
-| 深圳网页登录课表 JSON（`/xszykb/queryxszykbzong`） | `data/ShenzhenWebTimetableParser.ets` + `EasDataProvider` | 已落地；登录 Cookie → 学期/课程 → 课表 → 本地 RDB |
-| jsoup 旧登录链（HITA_X EASource） | 弃用，由新版网页登录替换 | 不迁移 |
-| Room 三表（timetable/subject/events） | `common/db/RdbHelper.ets`（relationalStore，DAO 语义同步方法） | 已落地；Index「本地课表演示」自检入口 |
-| 课表周视图（TimeTableView 系） | `feature/timetable/views/TimetableWeekDraw.ets`（真实时刻分钟映射绘制）+ `pages/TimetablePreview.ets` | 预览页周切换已接通（08:00–24:00 轴/今日遮罩）；圆角/手势/归并按视图笔记续做 |
-| 课表/日程/成绩/搜索等其余 UI | ArkUI 重写（时间线/事件/成绩页等，后续阶段） | 未开始 |
+- `entry/src/main/ets/pages/WelcomePage.ets`：校区选择与登录入口。
+- `entry/src/main/ets/pages/Home.ets`：今日、时间表、更多三个主页面。
+- `entry/src/main/ets/feature/eas/webLogin/`：ArkWeb 登录和 Cookie 会话采集。
+- `entry/src/main/ets/feature/eas/EasDataProvider.ets`：三校区教务数据适配。
+- `entry/src/main/ets/feature/eas/EasTimetableImporter.ets`：远端课程到本地课表的转换与写入。
+- `entry/src/main/ets/feature/timetable/views/TimetableWeekDraw.ets`：周课表网格及课程卡片绘制。
+- `entry/src/main/ets/common/db/RdbHelper.ets`：本地课表、科目和事件数据库。
 
-## 如何打开 / 编译（重要）
+## 开发与构建
 
-1. 用 **DevEco Studio 5.0.x（API 12+）** 打开本目录（File > Open）。
-2. 若 SDK 版本不同，调整：
-   - `build-profile.json5`（根 + entry）的 `compatibleSdkVersion`（如 `5.0.0(12)` / `5.1.0(13)`）
-   - `hvigor/hvigor-config.json5` 的 `modelVersion`
-   - 根 `oh-package.json5` / `entry/oh-package.json5` 的 hvigor 依赖版本（Sync 时按提示）
-3. 首次需配置签名（File > Project Structure > Signing Configs，勾选自动签名）。
-4. `entry/src/main/resources/base/media/` 内已包含 HITA NEXT 启动图标（`app_icon/startIcon/ic_launcher`）；AppScope 图标与其保持同步。
-5. 真机/模拟器需联网访问门户；`module.json5` 已声明 `ohos.permission.INTERNET`。
-   ⚠️ 本部 ivpn 与威海 webvpn 门户含 `http://` 明文，若被鸿蒙网络策略拦截需按域放行（见蓝本 §8）。
+### 环境要求
 
-## 代码注意事项（ArkTS 严格模式）
+- DevEco Studio 5.0 或更新版本。
+- HarmonyOS NEXT SDK 5.0.0（API 12）或兼容版本。
+- 用于运行辅助脚本的 Node.js 环境。
 
-- 不使用 `any`；接口/类/枚举显式类型；对象字面量须带类型标注。
-- `Web` 组件与 `webview.WebviewController` 的控制器回调（`onControllerAttached`/`onPageEnd`/`onProgressChange`）驱动状态机。
-- Cookie 采集使用 `webview.WebCookieManager.getCookieSync(url)`（API 12 经 `@kit.ArkWeb`）。
-- 门户判定谓词全部为**纯函数**（`EasWebLoginProbe`），与平台无关，可单测回归。
-- 深圳成绩解析为纯函数（`parseShenzhenWebScores`），首页「离线解析自检」按钮可直接验证（不依赖网络）。
+### 使用 DevEco Studio
 
-## 阶段路线（对照蓝本 §7）
+1. 克隆仓库：
 
-- [x] M0 前置：反编译抽取笔记 `docs/`、逐文件映射表（+ 静态一致性工具 scripts/static-checks.cjs）
-- [x] M1/M3 开发预览：工程骨架、webLogin 登录子系统、深圳真实课表/成绩解析与 Provider、本地课表域(RDB/周视图/时间线/事件 CRUD/科目/备份⇄恢复/ICS/搜索)、成绩/考试样例页、我的/关于、3-Tab Home(12 路由)
-- [x] DevEco 26（API26 SDK）CLI 编译：`assembleHap` 通过（unsigned HAP，0 error；仅 deprecation WARN）
-- [ ] 待真机环境：配置签名 → 安装 → 深圳门户登录验证 → 真实 Cookie/端点回归；本部/威海数据端点仍需补齐
-- [ ] M2：威海/本部登录收尾、分校区数据端点、失效重登验证
-- [ ] M3 精化：周视图合并/ViewPager 手感、事件“周课时段”语义、深色/主题；二期：服务卡片、会话 HUKS 加密
-- [ ] M3+ 课表/日程/成绩/考试/空教室/搜索精化（周视图预览、今日时间线、事件编辑、深圳真实课表/成绩、我的/会话管理已落地；本部/威海真链路与设备回归待完成）
+   ```bash
+   git clone https://github.com/samerberry/HITA_NEXT.git
+   ```
 
-## 真机/编译验证清单（本机无法验证，需 DevEco 同步后逐项确认）
+2. 使用 DevEco Studio 打开仓库根目录并等待工程同步完成。
+3. 在 `File > Project Structure > Signing Configs` 中为本机重新配置自动签名。
+4. 选择 `entry` 模块并执行 Build 或 Run。
 
-1. **工程可同步**：`compatibleSdkVersion`/`modelVersion`/hvigor 依赖按本机 DevEco 调整；启动图标资源已替换为 HITA NEXT 风格化正式图标。
-2. **ArkTS 严格模式编译**：`Record`/对象字面量/`enum`/`Set`/`get` 访问器用法、接口类型断言（`as`）、`@Prop` 传字符串、普通成员变量传闭包（页面回调）等按 DevEco 报错微调。
-3. **ArkWeb API 面**：`webview.WebviewController`（`getUrl/getCustomUserAgent/setCustomUserAgent('')/runJavaScript/stopLoading/reload`）、`WebCookieManager.getCookieSync(url)`（域/path 口径、http/https/端口跨域）——口径与原 Android `CookieManager` 不同处需按笔记 B 节对齐。
-4. **UA 语义**：原版“桌面 UA + 软件层渲染”中的软件层在 ArkTS 无对应物（已注释）；UA 双向切换触发 reload 的防抖由幂等标志+500ms 轮询保证，真机观察是否抖动。
-5. **明文 HTTP 门户**（本部 ivpn `:1080`、威海 webvpn、eelab `http://…:1080`）：若被网络策略拦截按域放行。
-6. **待真机校准项（笔记 D 节）**：威海 `fetchVpnEasCookies` 交换请求、深圳 `buildClickScript` 自动化点击、三个 viewport 修补脚本注入时机、eelab `JSESSIONID` 门控与 5000ms 超时；深圳课表/成绩端点代码已接入，需验证真实 Cookie 与返回字段。
-7. 门户判定谓词改动影响三校区：`docs/eas-page-predicate-notes.md` §1 记录了与源码逐字对应关系，改前先比对。
+签名配置包含设备和开发者相关材料，不同电脑需要使用自己的证书与 Profile，不能直接复用其他开发环境中的签名文件。
 
-详见 `docs/mapping-hitax-to-arkts.md` 与各源码文件头注释中的出处标注（形如 `@see Lxxxx` 指向反编译行号）。
+### 命令行构建
+
+在 Windows PowerShell 中进入仓库根目录：
+
+```powershell
+$env:NODE_HOME = 'C:\Program Files\nodejs'
+$env:DEVECO_SDK_HOME = 'C:\Program Files\Huawei\DevEco Studio\sdk'
+
+& 'C:\Program Files\Huawei\DevEco Studio\tools\hvigor\bin\hvigorw.bat' `
+  --mode module -p product=default assembleHap --no-daemon
+```
+
+构建产物位于：
+
+```text
+entry/build/default/outputs/default/
+```
+
+配置签名后通常生成 `entry-default-signed.hap`。仓库中的 `install_and_run.bat` 可用于构建、检测 HDC 设备并安装已签名 HAP。
+
+### 静态检查
+
+```bash
+node scripts/static-checks.cjs
+```
+
+## 数据与隐私
+
+- 教务登录和数据请求直接访问哈尔滨工业大学各校区的统一认证及教务系统。
+- 登录后的 Cookie 和会话信息保存在应用本地，用于恢复登录状态和请求教务数据。
+- 本地备份包含课表、科目和事件信息，请妥善保管，不要公开分享。
+- 校方页面、认证方式或接口发生变化时，相关功能可能需要同步适配。
+
+本项目不是哈尔滨工业大学官方应用。教务数据的所有权与使用规则以学校相关规定为准。
+
+## 致谢
+
+- [HITA Android](https://github.com/HIT-A/HITA_Android)：主要功能逻辑、数据结构和 Android 端交互参考。
+- [HITA Aura](https://github.com/HIT-A/HITA-Aura)：iOS 端界面布局和跨平台体验参考。
+- HITA 系列项目的开发者与贡献者。
+
+## 授权状态
+
+本仓库当前未附带正式的 `LICENSE` 文件。除非后续另行声明，当前代码与文档默认保留全部权利，不授予再分发、商用、二次上架或衍生发布许可。
