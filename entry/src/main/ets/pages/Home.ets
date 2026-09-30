@@ -716,7 +716,10 @@ struct Home {
     .bindSheet(this.sessionSheetOpen || this.loginSheetOpen || this.courseSheetOpen, this.activeSheet(), {
       height: this.loginSheetOpen ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
       dragBar: true,
-      showClose: true,
+      // The full-page web login keeps the system close control. The compact
+      // session and course sheets use their own header control so the title
+      // is not squeezed between the drag handle and a floating close bubble.
+      showClose: this.loginSheetOpen,
       preferType: SheetType.BOTTOM,
       backgroundColor: COLOR_SURFACE,
       maskColor: 'rgba(20,33,61,0.24)',
@@ -1548,23 +1551,28 @@ struct Home {
             Home.defaultCanvasColor(event.type) : event.color));
         Column() {
           Text(event.name === 'NULL' || event.name.length === 0 ? '未命名课程' : event.name)
-            .fontSize(20)
+            .fontSize(21)
             .fontWeight(FontWeight.Bold)
             .fontColor(COLOR_TEXT_PRIMARY)
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis });
-          Text('查看课程详情')
-            .fontSize(12)
+          Text('课程详情')
+            .fontSize(13)
             .fontColor(COLOR_TEXT_SECONDARY)
             .margin({ top: 4 });
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-        .margin({ left: 12 });
+        .margin({ left: 12, right: 10 });
+
+        this.sheetCloseButton(() => {
+          this.courseSheetOpen = false;
+          this.selectedCourse = undefined;
+        });
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
-      .margin({ bottom: 12 });
+      .margin({ bottom: 14 });
 
       this.courseDetailRow($r('sys.symbol.person_crop_circle_fill'), '老师',
         event.teacher.trim().length > 0 ? event.teacher : '无');
@@ -1577,7 +1585,23 @@ struct Home {
       this.courseDetailRow($r('sys.symbol.repeat_1'), '课程进度', this.courseProgressText(event));
     }
     .width('100%')
-    .padding({ left: 18, right: 18, bottom: 20 });
+    .padding({ left: 20, right: 20, top: 4, bottom: 20 });
+  }
+
+  @Builder
+  sheetCloseButton(action: () => void) {
+    Stack() {
+      Text('×')
+        .fontSize(28)
+        .fontWeight(FontWeight.Regular)
+        .fontColor(COLOR_TEXT_SECONDARY);
+    }
+    .width(40)
+    .height(40)
+    .borderRadius(20)
+    .backgroundColor('#E9EEF5')
+    .alignContent(Alignment.Center)
+    .onClick(action);
   }
 
   @Builder
@@ -1627,39 +1651,45 @@ struct Home {
       Row() {
         Column() {
           Text('教务认证')
-            .fontSize(24)
+            .fontSize(22)
             .fontWeight(FontWeight.Bold)
             .fontColor(COLOR_TEXT_PRIMARY);
           Text(this.sessionSheetInfo === undefined ? '请登录教务账号以继续' : '当前教务会话')
-            .fontSize(16)
+            .fontSize(13)
             .fontColor(COLOR_TEXT_SECONDARY)
-            .margin({ top: 2 });
+            .margin({ top: 4 });
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start);
 
-        if (this.sessionSheetInfo === undefined) {
-          Button('网页登录')
-            .height(36)
-            .fontSize(16)
-            .fontColor('#FFFFFF')
-            .backgroundColor(COLOR_PRIMARY)
-            .borderRadius(16)
-            .onClick(() => {
-              this.beginSessionLogin();
-            });
-        }
+        this.sheetCloseButton(() => {
+          this.sessionSheetOpen = false;
+        });
       }
       .width('100%')
       .alignItems(VerticalAlign.Center);
 
-      Row({ space: 8 }) {
-        this.sessionCampusButton('SHENZHEN', '深圳');
-        this.sessionCampusButton('BENBU', '本部');
-        this.sessionCampusButton('WEIHAI', '威海');
+      Column() {
+        Text('认证校区')
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(COLOR_TEXT_SECONDARY)
+          .width('100%');
+
+        Row({ space: 4 }) {
+          this.sessionCampusButton('SHENZHEN', '深圳');
+          this.sessionCampusButton('BENBU', '本部');
+          this.sessionCampusButton('WEIHAI', '威海');
+        }
+        .width('100%')
+        .padding(4)
+        .backgroundColor('#EAF0F7')
+        .borderRadius(16)
+        .margin({ top: 7 });
       }
       .width('100%')
-      .margin({ top: 14 });
+      .alignItems(HorizontalAlign.Start)
+      .margin({ top: 18 });
 
       if (this.sessionSheetInfo !== undefined) {
         Row() {
@@ -1670,15 +1700,15 @@ struct Home {
               .fontWeight(FontWeight.Bold)
               .fontColor('#FFFFFF');
           }
-          .width(44)
-          .height(44)
-          .borderRadius(22)
+          .width(48)
+          .height(48)
+          .borderRadius(24)
           .backgroundColor(COLOR_PRIMARY)
           .alignContent(Alignment.Center);
           Column() {
             Text(this.sessionSheetInfo.name.length > 0 ? this.sessionSheetInfo.name :
               (this.sessionSheetInfo.stuId.length > 0 ? this.sessionSheetInfo.stuId : '已登录教务'))
-              .fontSize(16)
+              .fontSize(17)
               .fontWeight(FontWeight.Bold)
               .fontColor(COLOR_TEXT_PRIMARY)
               .maxLines(1)
@@ -1692,31 +1722,42 @@ struct Home {
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
           .margin({ left: 12 });
+
+          Text('已连接')
+            .fontSize(12)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#248A5A')
+            .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+            .backgroundColor('#E6F5ED')
+            .borderRadius(12);
         }
         .width('100%')
-        .padding(16)
-        .backgroundColor(COLOR_CARD)
-        .borderRadius(16)
+        .padding(15)
+        .backgroundColor('#F8FAFD')
+        .border({ width: 1, color: '#E3EAF2' })
+        .borderRadius(18)
         .margin({ top: 16 });
 
         Row({ space: 8 }) {
           Button('重新登录')
             .layoutWeight(1)
-            .height(42)
-            .fontSize(14)
+            .height(46)
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
             .fontColor(COLOR_PRIMARY)
             .backgroundColor(COLOR_NAV_ACTIVE)
-            .borderRadius(16)
+            .borderRadius(17)
             .onClick(() => {
               this.beginSessionLogin();
             });
           Button('退出登录')
             .layoutWeight(1)
-            .height(42)
-            .fontSize(14)
+            .height(46)
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
             .fontColor('#D93025')
             .backgroundColor('#FCE8E6')
-            .borderRadius(16)
+            .borderRadius(17)
             .onClick(() => {
               this.logoutSession();
             });
@@ -1724,41 +1765,90 @@ struct Home {
         .width('100%')
         .margin({ top: 12 });
       } else {
-        Row() {
-          SymbolGlyph($r('sys.symbol.lock_shield'))
+        Column() {
+          Row() {
+            Stack() {
+              SymbolGlyph($r('sys.symbol.lock_shield'))
+                .fontSize(22)
+                .fontColor([COLOR_PRIMARY]);
+            }
+            .width(42)
+            .height(42)
+            .borderRadius(21)
+            .backgroundColor(COLOR_NAV_ACTIVE)
+            .alignContent(Alignment.Center);
+            Column() {
+              Text('登录教务系统')
+                .fontSize(16)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_TEXT_PRIMARY);
+              Text('将打开对应校区的官方认证页')
+                .fontSize(12)
+                .fontColor(COLOR_TEXT_SECONDARY)
+                .margin({ top: 3 });
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+            .margin({ left: 12 });
+          }
+          .width('100%');
+
+          Button('网页登录')
+            .width('100%')
+            .height(46)
             .fontSize(15)
-            .fontColor([COLOR_TEXT_HINT]);
-          Text('认证在校区教务页面内完成，HITA 不保存认证密码')
-            .fontSize(12)
-            .fontColor(COLOR_TEXT_HINT)
-            .margin({ left: 6 });
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#FFFFFF')
+            .backgroundColor(COLOR_PRIMARY)
+            .borderRadius(17)
+            .margin({ top: 14 })
+            .onClick(() => {
+              this.beginSessionLogin();
+            });
+
+          Row() {
+            SymbolGlyph($r('sys.symbol.lock_shield'))
+              .fontSize(14)
+              .fontColor([COLOR_TEXT_HINT]);
+            Text('HITA 不保存您的教务密码')
+              .fontSize(12)
+              .fontColor(COLOR_TEXT_HINT)
+              .margin({ left: 6 });
+          }
+          .margin({ top: 12 });
         }
+        .width('100%')
+        .padding(16)
+        .backgroundColor('#F8FAFD')
+        .border({ width: 1, color: '#E3EAF2' })
+        .borderRadius(18)
         .margin({ top: 16 });
       }
     }
     .width('100%')
-    .padding({ left: 16, right: 16, bottom: 18 });
+    .padding({ left: 20, right: 20, top: 4, bottom: 22 });
   }
 
   @Builder
   sessionCampusButton(code: string, label: string) {
     Row() {
       Circle()
-        .width(18)
-        .height(18)
+        .width(9)
+        .height(9)
         .fill(this.sessionSheetCampus === code ? COLOR_PRIMARY : 'transparent')
-        .stroke(this.sessionSheetCampus === code ? COLOR_PRIMARY : '#B7C1CE')
-        .strokeWidth(2);
+        .stroke(this.sessionSheetCampus === code ? COLOR_PRIMARY : '#A9B4C2')
+        .strokeWidth(1.5);
       Text(label)
-        .fontSize(14)
-        .fontColor(COLOR_TEXT_PRIMARY)
-        .margin({ left: 6 });
+        .fontSize(15)
+        .fontWeight(this.sessionSheetCampus === code ? FontWeight.Medium : FontWeight.Regular)
+        .fontColor(this.sessionSheetCampus === code ? COLOR_TEXT_PRIMARY : COLOR_TEXT_SECONDARY)
+        .margin({ left: 7 });
     }
     .layoutWeight(1)
-    .height(40)
+    .height(42)
     .justifyContent(FlexAlign.Center)
-    .borderRadius(14)
-    .backgroundColor(this.sessionSheetCampus === code ? COLOR_NAV_ACTIVE : COLOR_CARD)
+    .borderRadius(13)
+    .backgroundColor(this.sessionSheetCampus === code ? COLOR_CARD : 'transparent')
     .onClick(() => {
       this.selectSessionCampus(code);
     });
