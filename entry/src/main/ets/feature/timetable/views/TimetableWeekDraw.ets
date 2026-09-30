@@ -24,7 +24,7 @@ export const DOW_NAMES: string[] = ['周一', '周二', '周三', '周四', '周
 export const AXIS_START_HOUR: number = 8;
 /** 轴终点 23:00；更晚的课程通过纵向滚动继续查看。 */
 export const AXIS_END_HOUR: number = 23;
-/** 固定周标题高度；每小时 56vp 对齐 iOS 紧凑课表比例，首屏约显示 08:00–19:00。 */
+/** 固定周标题高度；56vp 是 iOS 紧凑课表使用的每小时高度上限。 */
 export const TIMETABLE_HEADER_HEIGHT: number = 90;
 export const TIMETABLE_HOUR_HEIGHT: number = 56;
 

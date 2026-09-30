@@ -231,15 +231,16 @@ struct Home {
     const weekEvents: EasEventItem[] = eventsOfWeek(this.currentTimetable,
       this.timetableEvents, this.timetableWeek);
     const current: number = this.currentTimetable.getWeekNumber(this.nowTick);
+    const hourHeight: number = this.timetableHourHeight();
     const contentHeight: number = TIMETABLE_HEADER_HEIGHT +
-      (AXIS_END_HOUR - AXIS_START_HOUR) * TIMETABLE_HOUR_HEIGHT + 8;
+      (AXIS_END_HOUR - AXIS_START_HOUR) * hourHeight + 8;
     const canvasHeight: number = Math.max(this.timetableAreaH, contentHeight);
     if (this.timetableCanvasHeight !== canvasHeight) {
       this.timetableCanvasHeight = canvasHeight;
     }
     drawTimetableWeek(this.timetableCanvas, this.timetableAreaW, canvasHeight,
       this.currentTimetable, weekEvents, this.timetableWeek, current === this.timetableWeek,
-      TIMETABLE_HOUR_HEIGHT, TIMETABLE_HEADER_HEIGHT);
+      hourHeight, TIMETABLE_HEADER_HEIGHT);
     drawTimetableWeekHeader(this.timetableHeaderCanvas, this.timetableAreaW,
       TIMETABLE_HEADER_HEIGHT + 2, this.currentTimetable, this.timetableWeek,
       current === this.timetableWeek);
@@ -264,6 +265,17 @@ struct Home {
 
   private timetableDragLimit(): number {
     return Math.max(1, this.timetableAreaW);
+  }
+
+  private timetableHourHeight(): number {
+    if (this.timetableAreaH <= TIMETABLE_HEADER_HEIGHT) {
+      return TIMETABLE_HOUR_HEIGHT;
+    }
+    // Keep 08:00–19:00 visible in the initial viewport, while preserving
+    // the iOS compact layout's 56vp/hour as the upper bound.
+    const visibleHours: number = 19 - AXIS_START_HOUR;
+    const availableGridHeight: number = this.timetableAreaH - TIMETABLE_HEADER_HEIGHT - 8;
+    return Math.max(40, Math.min(TIMETABLE_HOUR_HEIGHT, availableGridHeight / visibleHours));
   }
 
   private timetableOpacity(): number {
@@ -365,8 +377,9 @@ struct Home {
   private onTimetableArea(w: number, h: number): void {
     this.timetableAreaW = w;
     this.timetableAreaH = h;
+    const hourHeight: number = this.timetableHourHeight();
     const contentHeight: number = TIMETABLE_HEADER_HEIGHT +
-      (AXIS_END_HOUR - AXIS_START_HOUR) * TIMETABLE_HOUR_HEIGHT + 8;
+      (AXIS_END_HOUR - AXIS_START_HOUR) * hourHeight + 8;
     this.timetableCanvasHeight = Math.max(h, contentHeight);
     this.drawTimetableNow();
   }
