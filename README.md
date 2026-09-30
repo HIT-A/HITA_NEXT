@@ -38,7 +38,7 @@ HITA NEXT 是基于开源项目 [HITA Android](https://github.com/HIT-A/HITA_And
 
 - 查看当前账号、校区和会话状态。
 - 按校区管理会话并退出登录。
-- 在本地课表中搜索课程、教师和地点。
+- 在本地数据中搜索事件名称、教师和地点。
 - 将本地课表数据导出为 JSON 备份，并从备份恢复。
 - 清除本地课表及会话数据。
 
@@ -90,7 +90,7 @@ HitaNEXT/
 - `entry/src/main/ets/pages/WelcomePage.ets`：校区选择与登录入口。
 - `entry/src/main/ets/pages/Home.ets`：今日、时间表、更多三个主页面。
 - `entry/src/main/ets/feature/eas/webLogin/`：ArkWeb 登录和 Cookie 会话采集。
-- `entry/src/main/ets/feature/eas/EasDataProvider.ets`：三校区教务数据适配。
+- `entry/src/main/ets/feature/eas/EasDataProvider.ets`：深圳、本部本科与威海课表数据适配；真实成绩目前仅支持深圳。
 - `entry/src/main/ets/feature/eas/EasTimetableImporter.ets`：远端课程到本地课表的转换与写入。
 - `entry/src/main/ets/feature/timetable/views/TimetableWeekDraw.ets`：周课表网格及课程卡片绘制。
 - `entry/src/main/ets/common/db/RdbHelper.ets`：本地课表、科目和事件数据库。
@@ -146,7 +146,7 @@ node scripts/static-checks.cjs
 ## 数据与隐私
 
 - 教务登录和数据请求直接访问哈尔滨工业大学各校区的统一认证及教务系统。
-- 登录后的 Cookie 和会话信息保存在应用本地，用于恢复登录状态和请求教务数据。
+- 登录后的 Cookie 和会话信息当前保存在应用本地 Preferences 中，尚未接入 HUKS 加密，用于恢复登录状态和请求教务数据。
 - 本地备份包含课表、科目和事件信息，请妥善保管，不要公开分享。
 - 校方页面、认证方式或接口发生变化时，相关功能可能需要同步适配。
 
