@@ -4,7 +4,6 @@ import { fileIo } from '@kit.CoreFileKit';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasTimetable } from '../common/model/timetable/TimetableModels';
 import { HitaColors } from '../common/theme/HitaColors';
-import { EasImportResult, EasTimetableImporter } from '../feature/eas/EasTimetableImporter';
 import { IcsExporter } from '../common/util/ICSExport';
 import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
 
@@ -17,7 +16,6 @@ struct TimetableManagerPage {
   @State selectedIds: string[] = [];
   @State selectionMode: boolean = false;
   @State loading: boolean = true;
-  @State importing: boolean = false;
   @State exporting: boolean = false;
   @State activeTimetableId: string = '';
 
@@ -80,33 +78,14 @@ struct TimetableManagerPage {
       if (ret.index === 0) {
         this.createEmptyTimetable();
       } else if (ret.index === 1) {
-        this.importFromEas();
+        this.openImportPage();
       }
     }).catch(() => {
     });
   }
 
-  private async importFromEas(): Promise<void> {
-    if (this.importing) {
-      return;
-    }
-    const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
-    this.importing = true;
-    try {
-      const result: EasImportResult = await EasTimetableImporter.importCurrent(ctx);
-      this.getUIContext().getPromptAction().showToast({ message: result.message });
-      if (result.success) {
-        if (result.timetable !== undefined) {
-          await TimetableSelectionStore.getInstance().save(result.timetable.id);
-          this.activeTimetableId = result.timetable.id;
-        }
-        await this.load();
-      }
-    } catch (e) {
-      this.getUIContext().getPromptAction().showToast({ message: '导入课表失败' });
-    } finally {
-      this.importing = false;
-    }
+  private openImportPage(): void {
+    this.getUIContext().getRouter().pushUrl({ url: 'pages/ImportTimetablePage' });
   }
 
   private async createEmptyTimetable(): Promise<void> {
@@ -296,7 +275,7 @@ struct TimetableManagerPage {
         this.createEmptyTimetable();
       });
       this.addActionGlyph($r('sys.symbol.repeat_1'), () => {
-        this.importFromEas();
+        this.openImportPage();
       });
       this.addActionGlyph($r('sys.symbol.doc_plaintext'), () => {
         this.getUIContext().getPromptAction().showToast({ message: 'ICS 导入暂未适配' });

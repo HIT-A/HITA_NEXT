@@ -12,6 +12,7 @@
     "pages/SearchPage",
     "pages/AboutPage",
     "pages/TimetableManagerPage",
-    "pages/TimetableDetailPage"
+    "pages/TimetableDetailPage",
+    "pages/ImportTimetablePage"
   ]
 }

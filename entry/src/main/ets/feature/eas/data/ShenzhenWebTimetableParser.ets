@@ -16,6 +16,14 @@ export class ShenzhenSubjectMeta {
   name: string = '';
   teacher: string = '';
   key: string = '';
+  /** 课程性质：必修、限选、任选等。 */
+  courseProperty: string = '';
+  /** 课程类别：专业课、通识课等。 */
+  courseCategory: string = '';
+  /** 考核方式：考试、考查，或“是否考试课”的布尔值。 */
+  assessMethod: string = '';
+  /** 选课方式/任务类型：专选、任选、MOOC 等。 */
+  selectionCategory: string = '';
 }
 
 class SchedulePeriodEntry {
@@ -301,6 +309,20 @@ export function parseShenzhenWebSelectedSubjects(body: string): ShenzhenSubjectM
     meta.name = name;
     meta.teacher = textValue(row, ['dgjsmc', 'DGJSMC', 'jsmc', 'JSMC', 'skjs', 'SKJS']);
     meta.key = textValue(row, ['rwh', 'RWH', 'id', 'ID']);
+    meta.courseProperty = textValue(row, [
+      'kcxzmc', 'KCXZMC', 'kcxz', 'KCXZ', 'courseProperty', 'courseNature'
+    ]);
+    meta.courseCategory = textValue(row, [
+      'kclbmc', 'KCLBMC', 'kclb', 'KCLB', 'courseCategory', 'courseField'
+    ]);
+    meta.assessMethod = textValue(row, [
+      'khfs', 'KHFS', 'khfsmc', 'KHFSMC', 'khsj', 'KHSJ',
+      'sfks', 'SFKS', 'sffsks', 'SFFSKS', 'isExamCourse', 'examCourse', 'isExam'
+    ]);
+    meta.selectionCategory = textValue(row, [
+      'rwlxmc', 'RWLXMC', 'xkfsmc', 'XKFSMC', 'xklbmc', 'XKLBMC',
+      'xkfsdm', 'XKFSDM', 'selectCategory', 'selectionCategory'
+    ]);
     result.push(meta);
   }
   return result;
@@ -385,6 +407,28 @@ export function parseShenzhenWebTimetable(body: string, subjects: ShenzhenSubjec
     item.weeks = weeks.join(',');
     item.teacher = teacher;
     item.classroom = classroom;
+    item.courseProperty = firstNonBlank([
+      textValue(row, ['KCXZMC', 'kcxzmc', 'KCXZ', 'kcxz', 'courseProperty', 'courseNature']),
+      meta === undefined ? '' : meta.courseProperty
+    ]);
+    item.courseCategory = firstNonBlank([
+      textValue(row, ['KCLBMC', 'kclbmc', 'KCLB', 'kclb', 'courseCategory', 'courseField']),
+      meta === undefined ? '' : meta.courseCategory
+    ]);
+    item.assessMethod = firstNonBlank([
+      textValue(row, [
+        'KHFS', 'khfs', 'KHFSMC', 'khfsmc', 'KHSJ', 'khsj',
+        'SFKS', 'sfks', 'SFFSKS', 'sffsks', 'isExamCourse', 'examCourse', 'isExam'
+      ]),
+      meta === undefined ? '' : meta.assessMethod
+    ]);
+    item.selectionCategory = firstNonBlank([
+      textValue(row, [
+        'RWLXMC', 'rwlxmc', 'XKFSMC', 'xkfsmc', 'XKLBMC', 'xklbmc',
+        'XKFSDM', 'xkfsdm', 'selectCategory', 'selectionCategory'
+      ]),
+      meta === undefined ? '' : meta.selectionCategory
+    ]);
     item.dayOfWeek = weekday;
     item.beginSection = Math.trunc(beginValue);
     item.sectionCount = Math.trunc(endValue - beginValue + 1);

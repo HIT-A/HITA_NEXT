@@ -36,7 +36,13 @@ export class EasTimetableImporter {
     [17, 20, 18, 10], [18, 30, 19, 20], [19, 30, 20, 20], [20, 30, 21, 20]
   ];
 
-  static async importCurrent(context: common.Context): Promise<EasImportResult> {
+  /**
+   * 导入当前学期。传入参数时复用同一条链路导入指定学期，并使用页面编辑后的
+   * 开学日期和节次结构。这让“导入课表”页面和首页快捷导入共享完全相同的
+   * 会话、解析与本地写库逻辑。
+   */
+  static async importCurrent(context: common.Context, selectedTerm?: EasTermItem,
+    startTimeMs?: number, scheduleOverride?: EasTimePeriodInDay[], studentType?: string): Promise<EasImportResult> {
     const result: EasImportResult = new EasImportResult();
     try {
       await EasSessionStore.getInstance().init(context);
@@ -63,6 +69,9 @@ export class EasTimetableImporter {
         result.message = '请先登录统一身份认证';
         return result;
       }
+      if (studentType !== undefined && studentType.length > 0) {
+        session.setStudentType(studentType);
+      }
       if (session.campus === EasCampus.BENBU && session.getStudentType() === '2') {
         result.message = '本部研究生课表接口暂未接入';
         return result;
@@ -75,10 +84,19 @@ export class EasTimetableImporter {
         return result;
       }
       let term: EasTermItem = terms[0];
-      for (let i: number = 0; i < terms.length; i++) {
-        if (terms[i].isCurrent) {
-          term = terms[i];
-          break;
+      if (selectedTerm !== undefined) {
+        for (let i: number = 0; i < terms.length; i++) {
+          if (terms[i].equalsKey(selectedTerm)) {
+            term = terms[i];
+            break;
+          }
+        }
+      } else {
+        for (let i: number = 0; i < terms.length; i++) {
+          if (terms[i].isCurrent) {
+            term = terms[i];
+            break;
+          }
         }
       }
       result.term = term;
@@ -88,8 +106,9 @@ export class EasTimetableImporter {
         result.message = '课表为空，未导入';
         return result;
       }
-      let schedule: EasTimePeriodInDay[] = EasTimetableImporter.scheduleStructure(session.campus);
-      if (session.campus === EasCampus.SHENZHEN) {
+      let schedule: EasTimePeriodInDay[] = scheduleOverride !== undefined && scheduleOverride.length > 0 ?
+        scheduleOverride : EasTimetableImporter.scheduleStructure(session.campus);
+      if ((scheduleOverride === undefined || scheduleOverride.length === 0) && session.campus === EasCampus.SHENZHEN) {
         try {
           const remoteSchedule: EasTimePeriodInDay[] = await provider.getShenzhenScheduleStructure(session, term);
           if (remoteSchedule.length > 0) {
@@ -99,7 +118,8 @@ export class EasTimetableImporter {
           hilog.warn(DOMAIN, TAG, 'using fallback Shenzhen schedule %{public}s', String(e));
         }
       }
-      const timetable: EasTimetable = await EasTimetableImporter.saveCourses(rdb, session, term, courses, schedule);
+      const timetable: EasTimetable = await EasTimetableImporter.saveCourses(rdb, session, term, courses, schedule,
+        startTimeMs);
       result.timetable = timetable;
       const readback: EasEventItem[] = await rdb.getEventsOfTimetable(timetable.id);
       result.eventCount = readback.length;
@@ -121,7 +141,7 @@ export class EasTimetableImporter {
   }
 
   private static async saveCourses(rdb: RdbHelper, session: EasSession, term: EasTermItem,
-    courses: EasCourseItem[], schedule: EasTimePeriodInDay[]): Promise<EasTimetable> {
+    courses: EasCourseItem[], schedule: EasTimePeriodInDay[], startTimeMs?: number): Promise<EasTimetable> {
     const code: string = session.campus.toString() + ':' + term.getCode();
     let timetable: EasTimetable | undefined = await rdb.getTimetableByEasCode(code);
     if (timetable === undefined) {
@@ -129,7 +149,8 @@ export class EasTimetableImporter {
       timetable.code = code;
     }
     timetable.name = term.name;
-    timetable.startTime = EasTimetableImporter.startOfTerm(term);
+    timetable.startTime = startTimeMs !== undefined && startTimeMs > 0 ? startTimeMs :
+      EasTimetableImporter.startOfTerm(term);
     let maxWeek: number = 25;
     for (let i = 0; i < courses.length; i++) {
       for (let j = 0; j < courses[i].weekNumbers.length; j++) {
@@ -169,9 +190,18 @@ export class EasTimetableImporter {
         subject.timetableId = timetable.id;
         subject.name = course.name;
         subject.code = course.code;
-        subject.type = EasSubjectType.COM_A;
+        subject.type = EasTimetableImporter.subjectTypeForCourse(course);
         subjects.push(subject);
         await rdb.saveSubject(subject);
+      } else if (EasTimetableImporter.hasSubjectTypeHint(course)) {
+        // 旧版本导入器曾把所有新科目默认写成 COM_A（必修·考试）。
+        // 重新导入时，仅在教务返回了明确分类时修正已有科目，避免用不完整
+        // 的课表数据覆盖用户手动调整过的类型。
+        const inferredType: EasSubjectType = EasTimetableImporter.subjectTypeForCourse(course);
+        if (subject.type !== inferredType) {
+          subject.type = inferredType;
+          await rdb.saveSubject(subject);
+        }
       }
       const weeks: number[] = course.weekNumbers;
       for (let w: number = 0; w < weeks.length; w++) {
@@ -206,7 +236,69 @@ export class EasTimetableImporter {
     return timetable;
   }
 
-  private static scheduleStructure(campus: EasCampus = EasCampus.BENBU): EasTimePeriodInDay[] {
+  /**
+   * 将教务课程的性质/选课类别/考核方式映射为 Android 同源的科目类型。
+   * 规则优先使用明确的“考查/非考试/否”，避免把考查课误判为考试课。
+   */
+  private static subjectTypeForCourse(course: EasCourseItem): EasSubjectType {
+    const property: string = EasTimetableImporter.normalizeTypeText(course.courseProperty);
+    const category: string = EasTimetableImporter.normalizeTypeText(course.courseCategory);
+    const selection: string = EasTimetableImporter.normalizeTypeText(course.selectionCategory);
+    const assess: string = EasTimetableImporter.normalizeTypeText(course.assessMethod);
+    const all: string = property + '|' + category + '|' + selection;
+
+    if (/(?:MOOC|慕课|在线开放课程|网络课程)/i.test(all)) {
+      return EasSubjectType.MOOC;
+    }
+
+    const assessLower: string = assess.toLowerCase();
+    const isAssessment: boolean = assess.length > 0 &&
+      (/非考试|考查|考察|不考试|否/.test(assess) ||
+        assessLower === 'false' || assessLower === 'no' || assessLower === '0');
+    const isExam: boolean = assess.length > 0 && !isAssessment &&
+      (/考试|考试课|是/.test(assess) ||
+        assessLower === 'true' || assessLower === 'yes' || assessLower === '1');
+
+    // 课程性质优先决定必修/选修；考核方式只影响必修课的 A/B。
+    if (/必修|共同必修|核心必修/.test(property)) {
+      return isAssessment ? EasSubjectType.COM_B : EasSubjectType.COM_A;
+    }
+    if (/限选|专选|指定选修/.test(property + '|' + selection) ||
+      /(^|\|)xx(?:[-_]|$)/i.test(selection)) {
+      return EasSubjectType.OPT_A;
+    }
+    if (/任选|任意选修|公共选修|通识选修/.test(property + '|' + selection) ||
+      /(^|\|)rx(?:[-_]|$)/i.test(selection)) {
+      return EasSubjectType.OPT_B;
+    }
+    if (/选修/.test(property + '|' + selection)) {
+      return EasSubjectType.OPT_B;
+    }
+
+    // 有些接口只返回考核方式，不返回课程性质；明确的考查课仍应识别为
+    // COM_B，考试课则保留兼容性的 COM_A 默认值。
+    if (isAssessment) {
+      return EasSubjectType.COM_B;
+    }
+    if (isExam) {
+      return EasSubjectType.COM_A;
+    }
+    return EasSubjectType.COM_A;
+  }
+
+  private static hasSubjectTypeHint(course: EasCourseItem): boolean {
+    return course.courseProperty.trim().length > 0 ||
+      course.courseCategory.trim().length > 0 ||
+      course.assessMethod.trim().length > 0 ||
+      course.selectionCategory.trim().length > 0;
+  }
+
+  private static normalizeTypeText(value: string): string {
+    return value.replace(/[\s\u00a0：:，,;；（）()]/g, '').trim();
+  }
+
+  /** 默认作息结构，供导入页显示和编辑时使用。 */
+  static scheduleStructure(campus: EasCampus = EasCampus.BENBU): EasTimePeriodInDay[] {
     if (campus === EasCampus.WEIHAI) {
       return EasTimetable.getWeihaiTimeStructure();
     }
@@ -219,7 +311,8 @@ export class EasTimetableImporter {
     return out;
   }
 
-  private static startOfTerm(term: EasTermItem): number {
+  /** 根据学年学期推导一个可编辑的开学日。 */
+  static startOfTerm(term: EasTermItem): number {
     const yearMatch: RegExpExecArray | null = /(\d{4})-(\d{4})/.exec(term.yearCode);
     const startYear: number = yearMatch === null ? new Date().getFullYear() : Number(yearMatch[1]);
     const endYear: number = yearMatch === null ? startYear + 1 : Number(yearMatch[2]);

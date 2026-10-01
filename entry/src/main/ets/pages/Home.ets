@@ -1410,7 +1410,7 @@ struct Home {
           Column() {
             this.moreNavigationRow($r('sys.symbol.repeat_1'), '导入课表',
               this.importing ? '正在从教务系统同步' : '从教务系统同步当前学期', () => {
-                this.importTimetable(true);
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/ImportTimetablePage' });
               });
             this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '导入 ICS 课表',
               '从日历文件导入课程', () => {
@@ -1884,6 +1884,9 @@ struct Home {
       .alignItems(HorizontalAlign.Start)
       .margin({ left: 12 });
     }
+    // Give each shortcut a zero base width so the two weighted cards remain
+    // exactly equal on narrow devices.
+    .width(0)
     .layoutWeight(1)
     .height(80)
     .padding({ left: 12, right: 12 })

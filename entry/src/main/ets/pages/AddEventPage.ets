@@ -1,15 +1,23 @@
 /**
  * AddEventPage.ets — 新建/编辑事件（HITA_X ui/event/add 语义 → ArkUI 表单）。
  *
- * P1 本地功能：类型(课程/日程/考试/备忘)、名称、地点、日期偏移(今天起 0..6)、
+ * P1 本地功能：类型(课程/日程/考试/备忘)、名称、地点、日期偏移(今天起 ±370 天)、
  * 开始时刻(整点/半点调节+预设)、时长(30/60/120/180min) → RDB events → 返回时间线自动刷新。
  */
 import { promptAction, router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { RdbHelper } from '../common/db/RdbHelper';
-import { EasEventItem, EasEventType, EasTimetable } from '../common/model/timetable/TimetableModels';
+import {
+  EasEventItem,
+  EasEventType,
+  EasSubjectType,
+  EasTermSubject,
+  EasTimetable,
+  newId
+} from '../common/model/timetable/TimetableModels';
 
 const DAY_MS: number = 24 * 60 * 60 * 1000;
+const MAX_DAY_OFFSET: number = 370;
 const TYPE_ITEMS: string[] = ['日程', '课程', '考试', '备忘'];
 
 @Entry
@@ -26,6 +34,8 @@ struct AddEventPage {
   @State hint: string = '';
   @State saved: boolean = false;
   private editId: string = '';
+  private timetableId: string = '';
+  private subjectId: string = '';
 
   private durations: number[] = [30, 60, 120, 180];
 
@@ -36,6 +46,11 @@ struct AddEventPage {
     }
     const record = params as Record<string, string>;
     const id: string = record['id'] === undefined ? '' : record['id'] as string;
+    this.timetableId = record['timetableId'] === undefined ? '' : record['timetableId'] as string;
+    if (id.length === 0 && this.timetableId.length > 0) {
+      // 课表详情页的“+课程”默认创建课程，而不是普通日程。
+      this.typeIdx = 1;
+    }
     if (id.length === 0) {
       // 新建：若从时间线某天进入，沿用该天（offset 参数）
       const offsetRaw: string = record['offset'] === undefined ? '' : record['offset'] as string;
@@ -43,11 +58,11 @@ struct AddEventPage {
         const n: number = Number(offsetRaw);
         if (!Number.isNaN(n)) {
           let off: number = n;
-          if (off < -60) {
-            off = -60;
+          if (off < -MAX_DAY_OFFSET) {
+            off = -MAX_DAY_OFFSET;
           }
-          if (off > 60) {
-            off = 60;
+          if (off > MAX_DAY_OFFSET) {
+            off = MAX_DAY_OFFSET;
           }
           this.dayOffset = off;
         }
@@ -64,6 +79,8 @@ struct AddEventPage {
     this.name = ev.name;
     this.place = ev.place;
     this.teacher = ev.teacher;
+    this.timetableId = ev.timetableId.length > 0 ? ev.timetableId : this.timetableId;
+    this.subjectId = ev.subjectId;
     this.typeIdx = AddEventPage.idxOf(ev.type);
     const d: Date = new Date(ev.from);
     this.hour = d.getHours();
@@ -71,11 +88,11 @@ struct AddEventPage {
     const todayMidnight: number = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
     const fromMidnight: number = new Date(new Date(ev.from).setHours(0, 0, 0, 0)).getTime();
     let off: number = Math.round((fromMidnight - todayMidnight) / DAY_MS);
-    if (off < -60) {
-      off = -60;
+    if (off < -MAX_DAY_OFFSET) {
+      off = -MAX_DAY_OFFSET;
     }
-    if (off > 60) {
-      off = 60;
+    if (off > MAX_DAY_OFFSET) {
+      off = MAX_DAY_OFFSET;
     }
     this.dayOffset = off;
     const durMin: number = Math.round((ev.to - ev.from) / 60000);
@@ -111,11 +128,11 @@ struct AddEventPage {
 
   private shiftDay(delta: number): void {
     let d: number = this.dayOffset + delta;
-    if (d < -60) {
-      d = -60;
+    if (d < -MAX_DAY_OFFSET) {
+      d = -MAX_DAY_OFFSET;
     }
-    if (d > 60) {
-      d = 60;
+    if (d > MAX_DAY_OFFSET) {
+      d = MAX_DAY_OFFSET;
     }
     this.dayOffset = d;
   }
@@ -158,13 +175,43 @@ struct AddEventPage {
     ev.name = this.name.trim();
     ev.place = this.place.trim();
     ev.teacher = this.teacher.trim();
-    ev.subjectId = '';
-    // 新建“课程”若存在演示课表则挂到课表 id（可在周视图/科目下可见可编辑）
-    ev.timetableId = '';
+    ev.subjectId = this.subjectId;
+    // 从课表详情页新建的课程必须挂到目标课表，不能回退到演示课表。
+    ev.timetableId = this.timetableId;
     if (this.typeIdx === 1 && this.editId.length === 0) {
-      const tt: EasTimetable | undefined = await RdbHelper.getInstance().getTimetableByEasCode('LOCAL_DEMO_001');
-      if (tt !== undefined) {
-        ev.timetableId = tt.id;
+      if (ev.timetableId.length === 0) {
+        const tt: EasTimetable | undefined = await RdbHelper.getInstance().getTimetableByEasCode('LOCAL_DEMO_001');
+        if (tt !== undefined) {
+          ev.timetableId = tt.id;
+        }
+      }
+      if (ev.timetableId.length > 0) {
+        // 为手动课程建立一个可管理的科目记录，避免课程只存在于事件表中。
+        const subjects: EasTermSubject[] = await RdbHelper.getInstance().getSubjectsOfTimetable(ev.timetableId);
+        let matched: EasTermSubject | undefined = undefined;
+        for (let i: number = 0; i < subjects.length; i++) {
+          if (subjects[i].name === ev.name) {
+            matched = subjects[i];
+            break;
+          }
+        }
+        if (matched === undefined) {
+          const subject: EasTermSubject = new EasTermSubject();
+          subject.id = newId();
+          subject.timetableId = ev.timetableId;
+          subject.name = ev.name;
+          subject.type = EasSubjectType.COM_B;
+          subject.credit = 0;
+          subject.field = 'manual';
+          subject.code = '';
+          subject.key = '';
+          subject.school = '';
+          subject.countInSPA = false;
+          subject.createdAt = Date.now();
+          await RdbHelper.getInstance().saveSubject(subject);
+          matched = subject;
+        }
+        ev.subjectId = matched.id;
       }
     }
     ev.from = base + this.hour * 60 * 60 * 1000 + this.minute * 60 * 1000;

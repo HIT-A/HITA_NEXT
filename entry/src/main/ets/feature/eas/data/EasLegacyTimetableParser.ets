@@ -6,6 +6,14 @@
  */
 import { EasCourseItem, EasTermItem } from '../model/EasModels';
 
+/** 传统 HTML 课表中可能附带的课程分类元数据。 */
+class LegacyCourseMetadata {
+  courseProperty: string = '';
+  courseCategory: string = '';
+  assessMethod: string = '';
+  selectionCategory: string = '';
+}
+
 export class EasLegacyTimetableParser {
   private static readonly WEEK_PATTERN: RegExp = /\[[^\]]+\](?:单|双)?周(?:\((?:单|双)\))?/;
 
@@ -70,14 +78,16 @@ export class EasLegacyTimetableParser {
           continue;
         }
         const dow: number = cellIndex - 1;
-        out.push(...EasLegacyTimetableParser.parseCellCourses(cells[cellIndex], dow, rowIndex, periodInfo));
+        const metadata: LegacyCourseMetadata = EasLegacyTimetableParser.extractCourseMetadata(cells[cellIndex]);
+        out.push(...EasLegacyTimetableParser.parseCellCourses(
+          cells[cellIndex], dow, rowIndex, periodInfo, metadata));
       }
     }
     return EasLegacyTimetableParser.mergeAdjacent(out);
   }
 
   private static parseCellCourses(cellHtml: string, dow: number, periodHint: number,
-    periodInfo: string): EasCourseItem[] {
+    periodInfo: string, metadata: LegacyCourseMetadata): EasCourseItem[] {
     const courses: EasCourseItem[] = [];
     let cleanedHtml: string = cellHtml.replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, '');
     cleanedHtml = cleanedHtml.replace(/<(?!\/?br\b)[^>]+>/gi, '');
@@ -129,7 +139,7 @@ export class EasLegacyTimetableParser {
         const parsedForCourse: EasCourseItem[] = [];
         for (let j: number = 0; j < elements.length; j++) {
           parsedForCourse.push(...EasLegacyTimetableParser.parseCourseElement(courseName, elements[j], dow,
-            periodHint, periodInfo));
+            periodHint, periodInfo, metadata));
         }
         courses.push(...EasLegacyTimetableParser.normalizeCourseElementParts(parsedForCourse));
       }
@@ -163,7 +173,7 @@ export class EasLegacyTimetableParser {
   }
 
   private static parseCourseElement(courseName: string, element: string, dow: number, periodHint: number,
-    periodInfo: string): EasCourseItem[] {
+    periodInfo: string, metadata: LegacyCourseMetadata): EasCourseItem[] {
     const out: EasCourseItem[] = [];
     const weekPattern: RegExp = /([^,，\[]*)\[([^\]]+?)\](?:(单|双)周)?(?:\((单|双)\))?([^,，]*)/g;
     let match: RegExpExecArray | null = weekPattern.exec(element);
@@ -193,6 +203,10 @@ export class EasLegacyTimetableParser {
         item.weeks = weeks.join(',');
         item.teacher = EasLegacyTimetableParser.sanitizeTeacher(courseName, teacherRaw);
         item.classroom = classroom;
+        item.courseProperty = metadata.courseProperty;
+        item.courseCategory = metadata.courseCategory;
+        item.assessMethod = metadata.assessMethod;
+        item.selectionCategory = metadata.selectionCategory;
         item.dayOfWeek = dow;
         item.beginSection = period[0];
         item.sectionCount = period[1];
@@ -352,6 +366,81 @@ export class EasLegacyTimetableParser {
     const pattern: RegExp = /<table\b[^>]*class\s*=\s*["'][^"']*addlist_01[^"']*["'][^>]*>[\s\S]*?<\/table>/i;
     const match: RegExpExecArray | null = pattern.exec(html);
     return match === null ? '' : match[0];
+  }
+
+  /**
+   * 旧版课表通常只提供排课 HTML，但不同部署会把课程分类放在 td 的
+   * data-* 属性、隐藏字段或可见标签中。尽量提取这些字段；没有明确字段
+   * 时保持空值，交给导入器使用保守默认值，避免把未知课程误判为考查。
+   */
+  private static extractCourseMetadata(cellHtml: string): LegacyCourseMetadata {
+    const out: LegacyCourseMetadata = new LegacyCourseMetadata();
+    const text: string = EasLegacyTimetableParser.textFromHtml(cellHtml);
+    const attributeValue = (names: string[]): string => {
+      for (let i: number = 0; i < names.length; i++) {
+        const value: string = EasLegacyTimetableParser.attribute(cellHtml, names[i]).trim();
+        if (value.length > 0 && value.toLowerCase() !== 'null') {
+          return value;
+        }
+      }
+      return '';
+    };
+    const labeledValue = (labels: string[]): string => {
+      const pattern: RegExp = new RegExp('(?:' + labels.join('|') +
+        ')\\s*[：:]?\\s*([^,，;；|\\s<>()（）]+)', 'i');
+      const match: RegExpExecArray | null = pattern.exec(text);
+      return match === null ? '' : match[1].trim();
+    };
+    const firstNonBlank = (values: string[]): string => {
+      for (let i: number = 0; i < values.length; i++) {
+        if (values[i].trim().length > 0) {
+          return values[i].trim();
+        }
+      }
+      return '';
+    };
+
+    out.courseProperty = firstNonBlank([
+      attributeValue(['kcxzmc', 'KCXZMC', 'kcxz', 'KCXZ', 'courseProperty', 'courseNature']),
+      labeledValue(['课程性质', '课程属性', 'courseProperty', 'courseNature'])
+    ]);
+    out.courseCategory = firstNonBlank([
+      attributeValue(['kclbmc', 'KCLBMC', 'kclb', 'KCLB', 'courseCategory', 'courseField']),
+      labeledValue(['课程类别', 'courseCategory', 'courseField'])
+    ]);
+    out.assessMethod = firstNonBlank([
+      attributeValue([
+        'khfs', 'KHFS', 'khfsmc', 'KHFSMC', 'sfks', 'SFKS',
+        'sffsks', 'SFFSKS', 'isExamCourse', 'examCourse', 'isExam'
+      ]),
+      labeledValue(['是否考试课', '考核方式', '考核类别', 'assessMethod', 'khfs'])
+    ]);
+    out.selectionCategory = firstNonBlank([
+      attributeValue([
+        'rwlxmc', 'RWLXMC', 'xkfsmc', 'XKFSMC', 'xkfsdm', 'XKFSDM',
+        'xklbmc', 'XKLBMC', 'selectionCategory'
+      ]),
+      labeledValue(['选课方式', '任务类型', '选课类别', 'selectionCategory'])
+    ]);
+
+    // 部分旧页面没有字段名，只在课程单元格中显示分类文字。
+    if (out.courseProperty.length === 0) {
+      if (/必修/.test(text)) {
+        out.courseProperty = '必修';
+      } else if (/限选/.test(text)) {
+        out.courseProperty = '限选';
+      } else if (/任选/.test(text)) {
+        out.courseProperty = '任选';
+      }
+    }
+    if (out.assessMethod.length === 0) {
+      if (/考查|考察|非考试/.test(text)) {
+        out.assessMethod = '考查';
+      } else if (/考试/.test(text)) {
+        out.assessMethod = '考试';
+      }
+    }
+    return out;
   }
 
   private static tableCells(html: string): string[] {

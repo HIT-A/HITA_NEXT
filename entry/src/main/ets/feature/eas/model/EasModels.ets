@@ -91,6 +91,14 @@ export class EasCourseItem {
   weeks: string = '';
   teacher: string = '';
   classroom: string = '';
+  /** 课程性质（kcxz/kcxzmc，例如“必修”“限选”“任选”）。 */
+  courseProperty: string = '';
+  /** 课程类别或选课类别（kclb/kclbmc/xkfsmc 等）。 */
+  courseCategory: string = '';
+  /** 考核方式（khfs/khfsmc/是否考试课等）。 */
+  assessMethod: string = '';
+  /** 选课方式编码或名称（xkfsdm/xkfsmc/rwlxmc 等）。 */
+  selectionCategory: string = '';
   /** 星期几 1..7。 */
   dayOfWeek: number = 0;
   /** 起始节次。 */
