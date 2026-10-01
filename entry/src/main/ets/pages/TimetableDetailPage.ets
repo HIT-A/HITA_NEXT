@@ -10,6 +10,8 @@ import {
   EasTimetable
 } from '../common/model/timetable/TimetableModels';
 import { HitaColors } from '../common/theme/HitaColors';
+import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
+import { EventEditorForm } from './AddEventPage';
 
 const DAY_MS: number = 24 * 60 * 60 * 1000;
 const SUBJECT_PALETTE: number[] = [0xFF5C6BC0, 0xFF26A69A, 0xFFEF8E5A, 0xFFD93025,
@@ -29,6 +31,13 @@ struct TimetableDetailPage {
   @State startDateDraft: string = '';
   @State loading: boolean = true;
   @State savingStart: boolean = false;
+  /** 0=closed, 1=course detail, 2=course editor. */
+  @State eventSheetMode: number = 0;
+  @State selectedEvent: EasEventItem | undefined = undefined;
+  @State sheetEventId: string = '';
+  // Keep this page on one explicit vertical scroller so rebuilt event rows do
+  // not change the gesture/measurement path used by the parent container.
+  private detailScroller: Scroller = new Scroller();
   private timetableId: string = '';
 
   async aboutToAppear(): Promise<void> {
@@ -122,17 +131,21 @@ struct TimetableDetailPage {
   }
 
   private openAddEvent(): void {
-    this.getUIContext().getRouter().pushUrl({
-      url: 'pages/AddEventPage',
-      params: { 'timetableId': this.timetableId, 'type': 'CLASS' }
-    });
+    this.sheetEventId = '';
+    this.selectedEvent = undefined;
+    this.eventSheetMode = 2;
   }
 
   private openEditEvent(event: EasEventItem): void {
-    this.getUIContext().getRouter().pushUrl({
-      url: 'pages/AddEventPage',
-      params: { 'id': event.id, 'timetableId': this.timetableId }
-    });
+    this.sheetEventId = event.id;
+    this.selectedEvent = event;
+    this.eventSheetMode = 2;
+  }
+
+  private openEventDetail(event: EasEventItem): void {
+    this.sheetEventId = event.id;
+    this.selectedEvent = event;
+    this.eventSheetMode = 1;
   }
 
   private confirmDeleteEvent(event: EasEventItem): void {
@@ -147,6 +160,9 @@ struct TimetableDetailPage {
       if (ret.index !== 1) {
         return;
       }
+      this.eventSheetMode = 0;
+      this.selectedEvent = undefined;
+      this.sheetEventId = '';
       await RdbHelper.getInstance().deleteEvent(event.id);
       await this.load();
       this.getUIContext().getPromptAction().showToast({ message: '课程已删除' });
@@ -302,12 +318,6 @@ struct TimetableDetailPage {
     .padding({ left: 14, right: 14 })
     .backgroundColor('#FFFFFF')
     .borderRadius(16)
-    .gesture(
-      LongPressGesture({ repeat: false })
-        .onAction(() => {
-          this.confirmDeleteSubject(row);
-        })
-    )
   }
 
   @Builder
@@ -352,14 +362,8 @@ struct TimetableDetailPage {
     .backgroundColor('#FFFFFF')
     .borderRadius(16)
     .onClick(() => {
-      this.openEditEvent(event);
+      this.openEventDetail(event);
     })
-    .gesture(
-      LongPressGesture({ repeat: false })
-        .onAction(() => {
-          this.confirmDeleteEvent(event);
-        })
-    )
   }
 
   @Builder
@@ -400,6 +404,180 @@ struct TimetableDetailPage {
     .backgroundColor('#FFFFFF')
   }
 
+  @Builder
+  private eventSheetContent() {
+    if (this.eventSheetMode === 2) {
+      EventEditorForm({
+        eventId: this.sheetEventId,
+        targetTimetableId: this.timetableId,
+        initialType: 'CLASS',
+        sheetMode: true,
+        onCancel: () => {
+          this.eventSheetMode = 0;
+          this.selectedEvent = undefined;
+        },
+        onSaved: () => {
+          this.eventSheetMode = 0;
+          this.selectedEvent = undefined;
+          this.load();
+        }
+      })
+        .width('100%')
+        .height('100%');
+    } else if (this.selectedEvent !== undefined) {
+      this.courseDetailSheet(this.selectedEvent as EasEventItem);
+    }
+  }
+
+  @Builder
+  private courseDetailSheet(event: EasEventItem) {
+    Column() {
+      Row() {
+        Row()
+          .width(7)
+          .height(50)
+          .borderRadius(4)
+          .backgroundColor(TimetableDetailPage.css(event.color === 0 ?
+            TimetableDetailPage.eventColor(event.type) : event.color));
+        Column() {
+          Text(event.name === 'NULL' || event.name.length === 0 ? '未命名课程' : event.name)
+            .fontSize(21)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#202B45')
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis });
+          Text('课程详情')
+            .fontSize(13)
+            .fontColor('#72809A')
+            .margin({ top: 4 });
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: 12, right: 8 });
+
+        Text('编辑')
+          .fontSize(14)
+          .fontColor(HitaColors.primary)
+          .fontWeight(FontWeight.Medium)
+          .padding({ left: 8, right: 8, top: 8, bottom: 8 })
+          .onClick(() => {
+            this.openEditEvent(event);
+          });
+        Stack() {
+          Text('×')
+            .fontSize(25)
+            .fontColor('#4C566A');
+        }
+        .width(40)
+        .height(40)
+        .borderRadius(20)
+        .backgroundColor('#E9EEF5')
+        .alignContent(Alignment.Center)
+        .onClick(() => {
+          this.eventSheetMode = 0;
+          this.selectedEvent = undefined;
+        });
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .margin({ bottom: 14 });
+
+      this.courseDetailRow($r('sys.symbol.person_crop_circle_fill'), '老师',
+        event.teacher.trim().length > 0 ? event.teacher : '无');
+      this.courseDetailRow($r('sys.symbol.pin'), '教室',
+        event.place.trim().length > 0 ? event.place : '无');
+      this.courseDetailRow($r('sys.symbol.clock'), '时间',
+        EasTimeTools.printTime(event.from) + ' - ' + EasTimeTools.printTime(event.to));
+      this.courseDetailRow($r('sys.symbol.doc_plaintext'), '节次',
+        TimetableDetailPage.coursePeriodText(event));
+      this.courseDetailRow($r('sys.symbol.calendar'), '日期',
+        TimetableDetailPage.courseDateText(event.from));
+      this.courseDetailRow($r('sys.symbol.repeat_1'), '课程进度',
+        this.courseProgressText(event));
+
+      Row() {
+        Blank()
+        Text('删除课程')
+          .fontSize(14)
+          .fontColor(HitaColors.error)
+          .fontWeight(FontWeight.Medium)
+          .padding({ left: 14, right: 14, top: 9, bottom: 9 })
+          .backgroundColor('#FDECEC')
+          .borderRadius(18)
+          .onClick(() => {
+            this.confirmDeleteEvent(event);
+          });
+      }
+      .width('100%')
+      .margin({ top: 6 });
+    }
+    .width('100%')
+    .padding({ left: 20, right: 20, top: 4, bottom: 20 });
+  }
+
+  @Builder
+  private courseDetailRow(symbol: Resource, label: string, value: string) {
+    Row() {
+      Stack() {
+        SymbolGlyph(symbol)
+          .fontSize(20)
+          .fontColor([HitaColors.primary]);
+      }
+      .width(38)
+      .height(38)
+      .borderRadius(19)
+      .backgroundColor('#E4F0FF')
+      .alignContent(Alignment.Center);
+      Column() {
+        Text(label)
+          .fontSize(12)
+          .fontColor('#72809A');
+        Text(value)
+          .fontSize(17)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#202B45')
+          .margin({ top: 2 })
+          .maxLines(3)
+          .textOverflow({ overflow: TextOverflow.Ellipsis });
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      .margin({ left: 12 });
+    }
+    .width('100%')
+    .padding({ top: 8, bottom: 8 })
+    .alignItems(VerticalAlign.Center);
+  }
+
+  private courseProgressText(event: EasEventItem): string {
+    const instances: EasEventItem[] = this.eventRows.filter((item: EasEventItem): boolean =>
+      item.type === EasEventType.CLASS && item.subjectId === event.subjectId);
+    instances.sort((a: EasEventItem, b: EasEventItem): number => a.from - b.from);
+    let index: number = 0;
+    for (let i: number = 0; i < instances.length; i++) {
+      if (instances[i].id === event.id) {
+        index = i + 1;
+        break;
+      }
+    }
+    return index > 0 ? '第 ' + index.toString() + ' / ' + instances.length.toString() + ' 次课' :
+      '共 ' + instances.length.toString() + ' 次课';
+  }
+
+  private static courseDateText(timestamp: number): string {
+    const date: Date = new Date(timestamp);
+    return date.getFullYear().toString() + '年' + (date.getMonth() + 1).toString() + '月' +
+      date.getDate().toString() + '日 · ' + DOW_FULL[EasTimeTools.getDow(timestamp)];
+  }
+
+  private static coursePeriodText(event: EasEventItem): string {
+    if (event.fromNumber <= 0 || event.lastNumber <= 0) {
+      return '未记录节次';
+    }
+    return event.fromNumber === event.lastNumber ? '第 ' + event.fromNumber.toString() + ' 节' :
+      '第 ' + event.fromNumber.toString() + ' - ' + event.lastNumber.toString() + ' 节';
+  }
+
   build() {
     Column() {
       Row() {
@@ -436,7 +614,7 @@ struct TimetableDetailPage {
           .fontColor('#7B8498')
           .margin({ top: 80 })
       } else {
-        Scroll() {
+        Scroll(this.detailScroller) {
           Column() {
             this.infoCard(this.timetable as EasTimetable)
 
@@ -446,7 +624,7 @@ struct TimetableDetailPage {
                 .fontWeight(FontWeight.Bold)
                 .fontColor('#202633')
                 .layoutWeight(1)
-              Text('长按删除 · 点击编辑')
+              Text('点击查看详情 · 可编辑或删除')
                 .fontSize(11)
                 .fontColor('#9AA2B1')
             }
@@ -520,21 +698,43 @@ struct TimetableDetailPage {
             .borderRadius(18)
             .clip(true)
 
-            Text('课程可点击编辑，长按可删除；科目色条可切换颜色，长按科目可删除')
+            Text('点击课程查看老师、教室与节次；在详情弹窗中编辑或删除')
               .fontSize(12)
               .fontColor('#9AA2B1')
               .margin({ top: 14, bottom: 36 })
           }
           .width('100%')
-          .padding({ left: 16, right: 16 })
+          // Keep the final card above the system navigation gesture area.  A
+          // plain bottom margin is not included in the Scroll's measured
+          // content extent on some HarmonyOS builds, so use real padding.
+          .padding({ left: 16, right: 16, bottom: 72 })
         }
+        .width('100%')
         .layoutWeight(1)
+        .scrollable(ScrollDirection.Vertical)
+        .enableScrollInteraction(true)
+        .edgeEffect(EdgeEffect.None)
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         .scrollBar(BarState.Off)
       }
     }
     .width('100%')
     .height('100%')
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor('#F6F7FA')
+    .bindSheet(this.eventSheetMode > 0, this.eventSheetContent(), {
+      height: this.eventSheetMode === 2 ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
+      dragBar: true,
+      showClose: false,
+      preferType: SheetType.BOTTOM,
+      backgroundColor: '#F6F8FC',
+      maskColor: 'rgba(20,33,61,0.24)',
+      onDisappear: () => {
+        this.eventSheetMode = 0;
+        this.selectedEvent = undefined;
+        this.sheetEventId = '';
+      }
+    })
   }
 
   private static dateText(ms: number): string {

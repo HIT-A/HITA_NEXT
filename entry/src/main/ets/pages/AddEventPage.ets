@@ -20,9 +20,19 @@ const DAY_MS: number = 24 * 60 * 60 * 1000;
 const MAX_DAY_OFFSET: number = 370;
 const TYPE_ITEMS: string[] = ['日程', '课程', '考试', '备忘'];
 
-@Entry
 @Component
-struct AddEventPage {
+export struct EventEditorForm {
+  /**
+   * The editor is also used as a bottom sheet from TimetableDetailPage.
+   * Route parameters remain supported for the standalone timeline flow.
+   */
+  @Prop eventId: string = '';
+  @Prop targetTimetableId: string = '';
+  @Prop initialType: string = '';
+  @Prop sheetMode: boolean = false;
+  onCancel: () => void = () => {};
+  onSaved: () => void = () => {};
+
   @State typeIdx: number = 0;
   @State name: string = '';
   @State place: string = '';
@@ -41,19 +51,29 @@ struct AddEventPage {
 
   async aboutToAppear(): Promise<void> {
     const params: Object | undefined = this.getUIContext().getRouter().getParams();
-    if (params === undefined || params === null) {
-      return;
+    let id: string = this.eventId;
+    this.timetableId = this.targetTimetableId;
+    let routeType: string = this.initialType;
+    let offsetRaw: string = '';
+    if (params !== undefined && params !== null) {
+      const record = params as Record<string, string>;
+      if (id.length === 0) {
+        id = record['id'] === undefined ? '' : record['id'] as string;
+      }
+      if (this.timetableId.length === 0) {
+        this.timetableId = record['timetableId'] === undefined ? '' : record['timetableId'] as string;
+      }
+      if (routeType.length === 0) {
+        routeType = record['type'] === undefined ? '' : record['type'] as string;
+      }
+      offsetRaw = record['offset'] === undefined ? '' : record['offset'] as string;
     }
-    const record = params as Record<string, string>;
-    const id: string = record['id'] === undefined ? '' : record['id'] as string;
-    this.timetableId = record['timetableId'] === undefined ? '' : record['timetableId'] as string;
-    if (id.length === 0 && this.timetableId.length > 0) {
+    if (id.length === 0 && (this.timetableId.length > 0 || routeType === 'CLASS')) {
       // 课表详情页的“+课程”默认创建课程，而不是普通日程。
       this.typeIdx = 1;
     }
     if (id.length === 0) {
       // 新建：若从时间线某天进入，沿用该天（offset 参数）
-      const offsetRaw: string = record['offset'] === undefined ? '' : record['offset'] as string;
       if (offsetRaw.length > 0) {
         const n: number = Number(offsetRaw);
         if (!Number.isNaN(n)) {
@@ -81,7 +101,7 @@ struct AddEventPage {
     this.teacher = ev.teacher;
     this.timetableId = ev.timetableId.length > 0 ? ev.timetableId : this.timetableId;
     this.subjectId = ev.subjectId;
-    this.typeIdx = AddEventPage.idxOf(ev.type);
+    this.typeIdx = EventEditorForm.idxOf(ev.type);
     const d: Date = new Date(ev.from);
     this.hour = d.getHours();
     this.minute = Math.min(55, d.getMinutes());
@@ -111,19 +131,19 @@ struct AddEventPage {
 
   private dateText(): string {
     const d: Date = new Date(Date.now() + this.dayOffset * DAY_MS);
-    return d.getFullYear().toString() + '-' + AddEventPage.pad2(d.getMonth() + 1) + '-' +
-      AddEventPage.pad2(d.getDate());
+    return d.getFullYear().toString() + '-' + EventEditorForm.pad2(d.getMonth() + 1) + '-' +
+      EventEditorForm.pad2(d.getDate());
   }
 
   private startLabel(): string {
-    return AddEventPage.pad2(this.hour) + ':' + AddEventPage.pad2(this.minute);
+    return EventEditorForm.pad2(this.hour) + ':' + EventEditorForm.pad2(this.minute);
   }
 
   private endLabel(): string {
     const total: number = this.hour * 60 + this.minute + this.durations[this.durationIdx];
     const h: number = Math.floor(total / 60) % 24;
     const m: number = total % 60;
-    return AddEventPage.pad2(h) + ':' + AddEventPage.pad2(m);
+    return EventEditorForm.pad2(h) + ':' + EventEditorForm.pad2(m);
   }
 
   private shiftDay(delta: number): void {
@@ -171,7 +191,7 @@ struct AddEventPage {
     if (this.editId.length > 0) {
       ev.id = this.editId;
     }
-    ev.type = AddEventPage.typeOf(this.typeIdx);
+    ev.type = EventEditorForm.typeOf(this.typeIdx);
     ev.name = this.name.trim();
     ev.place = this.place.trim();
     ev.teacher = this.teacher.trim();
@@ -216,14 +236,18 @@ struct AddEventPage {
     }
     ev.from = base + this.hour * 60 * 60 * 1000 + this.minute * 60 * 1000;
     ev.to = ev.from + this.durations[this.durationIdx] * 60 * 1000;
-    ev.color = AddEventPage.typeColor(ev.type);
+    ev.color = EventEditorForm.typeColor(ev.type);
     ev.createdAt = Date.now();
     await RdbHelper.getInstance().saveEvent(ev);
     this.saved = true;
     this.hint = this.editId.length > 0 ? '已更新' : '已保存';
     this.getUIContext().getPromptAction().showToast({ message: this.editId.length > 0 ? '事件已更新' : '事件已保存' });
     setTimeout(() => {
-      this.getUIContext().getRouter().back();
+      if (this.sheetMode) {
+        this.onSaved();
+      } else {
+        this.getUIContext().getRouter().back();
+      }
     }, 500);
   }
 
@@ -268,30 +292,64 @@ struct AddEventPage {
 
   build() {
     Column() {
-      Row() {
-        Text('<')
-          .fontSize(22)
-          .fontColor('#FFFFFF')
-          .fontWeight(FontWeight.Bold)
+      if (this.sheetMode) {
+        Row() {
+          Column() {
+            Text(this.editId.length > 0 ? '编辑课程' : '添加课程')
+              .fontSize(20)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#1D2B45')
+            Text(this.editId.length > 0 ? '修改课程信息' : '将课程添加到当前课表')
+              .fontSize(12)
+              .fontColor('#72809A')
+              .margin({ top: 3 })
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          Stack() {
+            Text('×')
+              .fontSize(25)
+              .fontColor('#4C566A')
+          }
           .width(40)
           .height(40)
-          .textAlign(TextAlign.Center)
+          .borderRadius(20)
+          .backgroundColor('#E9EEF5')
+          .alignContent(Alignment.Center)
           .onClick(() => {
-            this.getUIContext().getRouter().back();
+            this.onCancel();
           })
+        }
+        .width('100%')
+        .height(58)
+        .padding({ left: 20, right: 16 })
+        .alignItems(VerticalAlign.Center)
+      } else {
+        Row() {
+          Text('<')
+            .fontSize(22)
+            .fontColor('#FFFFFF')
+            .fontWeight(FontWeight.Bold)
+            .width(40)
+            .height(40)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.getUIContext().getRouter().back();
+            })
 
-        Text(this.editId.length > 0 ? '编辑事件' : '新建事件')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-          .layoutWeight(1)
-          .margin({ left: 4 })
+          Text(this.editId.length > 0 ? '编辑事件' : '新建事件')
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+            .layoutWeight(1)
+            .margin({ left: 4 })
+        }
+        .width('100%')
+        .height(56)
+        .padding({ left: 8, right: 16 })
+        .backgroundColor('#3390EC')
+        .alignItems(VerticalAlign.Center)
       }
-      .width('100%')
-      .height(56)
-      .padding({ left: 8, right: 16 })
-      .backgroundColor('#3390EC')
-      .alignItems(VerticalAlign.Center)
 
       List({ space: 10 }) {
         ListItem() {
@@ -300,40 +358,73 @@ struct AddEventPage {
         ListItem() {
           Column() {
             Text('名称')
-              .fontSize(12)
-              .fontColor('#666666')
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#202B45')
             TextInput({ placeholder: '事件名称', text: this.name })
+              .fontSize(16)
+              .height(48)
+              .padding({ left: 14, right: 14 })
+              .backgroundColor('#FFFFFF')
+              .border({ width: 1, color: '#D7E0EC' })
+              .borderRadius(14)
+              .margin({ top: 8 })
               .onChange((value: string) => {
                 this.name = value;
               })
           }
           .width('100%')
+          .padding(14)
+          .backgroundColor('#FFFFFF')
+          .borderRadius(16)
           .alignItems(HorizontalAlign.Start)
         }
         ListItem() {
           Column() {
             Text('地点（可空）')
-              .fontSize(12)
-              .fontColor('#666666')
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#202B45')
             TextInput({ placeholder: '地点 / 教室 / 在线', text: this.place })
+              .fontSize(16)
+              .height(48)
+              .padding({ left: 14, right: 14 })
+              .backgroundColor('#FFFFFF')
+              .border({ width: 1, color: '#D7E0EC' })
+              .borderRadius(14)
+              .margin({ top: 8 })
               .onChange((value: string) => {
                 this.place = value;
               })
           }
           .width('100%')
+          .padding(14)
+          .backgroundColor('#FFFFFF')
+          .borderRadius(16)
           .alignItems(HorizontalAlign.Start)
         }
         ListItem() {
           Column() {
             Text('教师 / 组织者（可空）')
-              .fontSize(12)
-              .fontColor('#666666')
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#202B45')
             TextInput({ placeholder: '教师 / 联系人', text: this.teacher })
+              .fontSize(16)
+              .height(48)
+              .padding({ left: 14, right: 14 })
+              .backgroundColor('#FFFFFF')
+              .border({ width: 1, color: '#D7E0EC' })
+              .borderRadius(14)
+              .margin({ top: 8 })
               .onChange((value: string) => {
                 this.teacher = value;
               })
           }
           .width('100%')
+          .padding(14)
+          .backgroundColor('#FFFFFF')
+          .borderRadius(16)
           .alignItems(HorizontalAlign.Start)
         }
         ListItem() {
@@ -366,36 +457,45 @@ struct AddEventPage {
       }
       .width('100%')
       .layoutWeight(1)
-      .padding({ left: 12, right: 12 })
+      .padding({ left: this.sheetMode ? 20 : 12, right: this.sheetMode ? 20 : 12, bottom: 24 })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F5F6F8')
+    .backgroundColor(this.sheetMode ? '#F6F8FC' : '#F5F6F8')
   }
 
   @Builder
   typeRow() {
-    Row({ space: 8 }) {
+    Row() {
       ForEach(TYPE_ITEMS, (item: string, index: number) => {
         Button(item)
           .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .layoutWeight(1)
+          .height(38)
+          .margin({ left: index === 0 ? 0 : 3, right: index === TYPE_ITEMS.length - 1 ? 0 : 3 })
           .backgroundColor(this.typeIdx === index ? '#3390EC' : '#FFFFFF')
           .fontColor(this.typeIdx === index ? '#FFFFFF' : '#333333')
-          .border({ width: 1, color: this.typeIdx === index ? '#3390EC' : '#E0E0E0' })
+          .borderRadius(10)
           .onClick(() => {
             this.typeIdx = index;
           })
       }, (item: string) => item)
     }
     .width('100%')
+    .height(48)
+    .padding(5)
+    .backgroundColor('#E8EDF4')
+    .borderRadius(14)
   }
 
   @Builder
   dateRow() {
     Column() {
       Text('日期')
-        .fontSize(12)
-        .fontColor('#666666')
+        .fontSize(14)
+        .fontWeight(FontWeight.Medium)
+        .fontColor('#202B45')
       Row() {
         Button('今天')
           .fontSize(13)
@@ -419,6 +519,8 @@ struct AddEventPage {
             .width(34)
             .height(32)
             .fontSize(16)
+            .fontColor('#33415C')
+            .backgroundColor('#EDF1F7')
             .onClick(() => {
               this.shiftDay(-1);
             })
@@ -431,6 +533,8 @@ struct AddEventPage {
             .width(34)
             .height(32)
             .fontSize(16)
+            .fontColor('#33415C')
+            .backgroundColor('#EDF1F7')
             .onClick(() => {
               this.shiftDay(1);
             })
@@ -441,14 +545,18 @@ struct AddEventPage {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
+    .padding(14)
+    .backgroundColor('#FFFFFF')
+    .borderRadius(16)
   }
 
   @Builder
   timeRow() {
     Column() {
       Text('开始时间')
-        .fontSize(12)
-        .fontColor('#666666')
+        .fontSize(14)
+        .fontWeight(FontWeight.Medium)
+        .fontColor('#202B45')
       Row() {
         Button('-')
           .width(40)
@@ -472,10 +580,11 @@ struct AddEventPage {
           .fontSize(12)
           .height(32)
           .backgroundColor('#EDF1F7')
+          .fontColor('#33415C')
           .onClick(() => {
             this.shiftMinute(-5);
           })
-        Text(AddEventPage.pad2(this.minute) + '分')
+        Text(EventEditorForm.pad2(this.minute) + '分')
           .fontSize(14)
           .width(46)
           .textAlign(TextAlign.Center)
@@ -483,6 +592,7 @@ struct AddEventPage {
           .fontSize(12)
           .height(32)
           .backgroundColor('#EDF1F7')
+          .fontColor('#33415C')
           .onClick(() => {
             this.shiftMinute(5);
           })
@@ -497,6 +607,7 @@ struct AddEventPage {
           .fontSize(12)
           .height(30)
           .backgroundColor('#EDF1F7')
+          .fontColor('#33415C')
           .onClick(() => {
             this.hour = 9;
             this.minute = 0;
@@ -505,6 +616,7 @@ struct AddEventPage {
           .fontSize(12)
           .height(30)
           .backgroundColor('#EDF1F7')
+          .fontColor('#33415C')
           .onClick(() => {
             this.hour = 12;
             this.minute = 30;
@@ -513,6 +625,7 @@ struct AddEventPage {
           .fontSize(12)
           .height(30)
           .backgroundColor('#EDF1F7')
+          .fontColor('#33415C')
           .onClick(() => {
             this.hour = 14;
             this.minute = 0;
@@ -521,6 +634,7 @@ struct AddEventPage {
           .fontSize(12)
           .height(30)
           .backgroundColor('#EDF1F7')
+          .fontColor('#33415C')
           .onClick(() => {
             this.hour = 19;
             this.minute = 0;
@@ -531,14 +645,18 @@ struct AddEventPage {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
+    .padding(14)
+    .backgroundColor('#FFFFFF')
+    .borderRadius(16)
   }
 
   @Builder
   durationRow() {
     Column() {
       Text('时长（至 ' + this.endLabel() + '）')
-        .fontSize(12)
-        .fontColor('#666666')
+        .fontSize(14)
+        .fontWeight(FontWeight.Medium)
+        .fontColor('#202B45')
       Row({ space: 6 }) {
         ForEach(this.durations, (min: number, index: number) => {
           Button(min.toString() + ' 分钟')
@@ -556,5 +674,23 @@ struct AddEventPage {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
+    .padding(14)
+    .backgroundColor('#FFFFFF')
+    .borderRadius(16)
+  }
+}
+
+/** Route wrapper kept for the standalone timeline editor. */
+@Entry
+@Component
+struct AddEventPage {
+  build() {
+    Column() {
+      EventEditorForm()
+        .width('100%')
+        .height('100%');
+    }
+    .width('100%')
+    .height('100%');
   }
 }
