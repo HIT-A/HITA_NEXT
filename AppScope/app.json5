@@ -1,6 +1,6 @@
 {
   "app": {
-    "bundleName": "com.stupidtree.hitanext",
+    "bundleName": "cn.berry.hitanext",
     "vendor": "hitanext",
     "versionCode": 1000000,
     "versionName": "0.1.0",

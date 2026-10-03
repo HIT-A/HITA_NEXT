@@ -48,7 +48,7 @@ if errorlevel 1 (
 echo.
 echo [提示] 正在启动应用（请先点亮并解锁手机屏幕）...
 "%HDC_PATH%" shell power-shell wakeup
-"%HDC_PATH%" shell aa start -a EntryAbility -b com.stupidtree.hitanext
+"%HDC_PATH%" shell aa start -a EntryAbility -b cn.berry.hitanext
 
 echo.
 echo [完成] 应用已安装成功！如果手机处于锁屏状态，请解锁屏幕后在桌面点击 HITA 图标打开。

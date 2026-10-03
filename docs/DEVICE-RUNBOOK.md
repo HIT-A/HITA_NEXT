@@ -23,7 +23,7 @@
 ## 4. 安装与首跑（真机）
 ```bat
 hdc install -r <signed-hap路径>
-hdc shell aa start -a EntryAbility -b com.stupidtree.hitanext
+hdc shell aa start -a EntryAbility -b cn.berry.hitanext
 ```
 预期路径：
 - Home 四 Tab 正常；
