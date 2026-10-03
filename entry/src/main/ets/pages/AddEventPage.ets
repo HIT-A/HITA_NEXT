@@ -7,6 +7,8 @@
 import { promptAction, router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { RdbHelper } from '../common/db/RdbHelper';
+import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
+import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
 import {
   EasEventItem,
   EasEventType,
@@ -208,14 +210,26 @@ export struct EventEditorForm {
     ev.place = this.place.trim();
     ev.teacher = this.teacher.trim();
     ev.subjectId = this.subjectId;
-    // 从课表详情页新建的课程必须挂到目标课表，不能回退到演示课表。
+    // Prefer the explicit target, then the user's current timetable.
     ev.timetableId = this.timetableId;
     if (this.typeIdx === 1 && this.editId.length === 0) {
+      const rdb: RdbHelper = RdbHelper.getInstance();
       if (ev.timetableId.length === 0) {
-        const tt: EasTimetable | undefined = await RdbHelper.getInstance().getTimetableByEasCode('LOCAL_DEMO_001');
+        const selection: TimetableSelectionStore = TimetableSelectionStore.getInstance();
+        await selection.init(ctx);
+        const selectedId: string = await selection.load();
+        let tt: EasTimetable | undefined = selectedId.length > 0 ?
+          await rdb.getTimetableById(selectedId) : undefined;
+        if (tt === undefined) {
+          tt = await TimetableResolver.getForDisplay(rdb);
+        }
         if (tt !== undefined) {
           ev.timetableId = tt.id;
         }
+      }
+      if (ev.timetableId.length === 0 || await rdb.getTimetableById(ev.timetableId) === undefined) {
+        this.hint = '请先新建或导入课表，再添加课程';
+        return;
       }
       if (ev.timetableId.length > 0) {
         // 为手动课程建立一个可管理的科目记录，避免课程只存在于事件表中。

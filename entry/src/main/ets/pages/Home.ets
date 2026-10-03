@@ -9,7 +9,6 @@ import { common } from '@kit.AbilityKit';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTermSubject, EasTimetable } from '../common/model/timetable/TimetableModels';
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
-import { TimetableLocalDemo } from '../feature/timetable/data/TimetableLocalDemo';
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
 import { EasImportResult, EasTimetableImporter } from '../feature/eas/EasTimetableImporter';
@@ -48,12 +47,9 @@ const TIMETABLE_BOTTOM_SAFE_EXTENSION: number = 56;
 struct Home {
   @State todayItems: EasEventItem[] = [];
   @State timelineText: string = '暂无今日日程';
-  @State tableText: string = '课表尚未导入';
   @State sessionText: string = '未登录';
-  @State hasDemo: boolean = false;
   @State currentTab: number = 0;
   @State hasTimetable: boolean = false;
-  @State hasRealTimetable: boolean = false;
   @State timetableCount: number = 0;
   @State currentTimetable: EasTimetable | undefined = undefined;
   @State recentTimetable: EasTimetable | undefined = undefined;
@@ -195,22 +191,10 @@ struct Home {
       return;
     }
 
-    const demo: EasTimetable | undefined = await rdb.getTimetableByEasCode(TimetableLocalDemo.DEMO_CODE);
     const display: EasTimetable | undefined = selected !== undefined ? selected :
       (real !== undefined ? real : await TimetableResolver.getForDisplay(rdb));
-    this.hasDemo = demo !== undefined;
-    this.hasRealTimetable = real !== undefined;
     this.hasTimetable = display !== undefined;
     this.currentTimetable = display;
-    if (display === undefined) {
-      this.tableText = found === undefined ? '课表：请先登录并导入' : '课表：暂无数据，可点击导入';
-    } else {
-      const week: number = display.getWeekNumber(Date.now());
-      const sourceLabel: string = TimetableResolver.isReal(display) ? ' · 已导入' :
-        (TimetableResolver.isLocal(display) ? ' · 本地课表' : ' · 演示课表');
-      this.tableText = display.name + sourceLabel +
-        (week > 0 ? ' · 第 ' + week.toString() + ' 周' : '');
-    }
 
     const now0: number = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
     let allEvents: EasEventItem[] = [];
@@ -544,25 +528,6 @@ struct Home {
       this.importing = false;
       await this.refreshSummaries();
     }
-  }
-
-  async seed(): Promise<void> {
-    const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
-    this.getUIContext().getPromptAction().showDialog({
-      title: '生成本地演示数据',
-      message: '用于体验课表、今日时间线和科目页面。已有演示数据会被重建。',
-      buttons: [
-        { text: '取消', color: COLOR_TEXT_HINT },
-        { text: '生成', color: COLOR_PRIMARY }
-      ]
-    }).then(async (result) => {
-      if (result.index === 1) {
-        await TimetableLocalDemo.runSelfCheck(ctx);
-        this.getUIContext().getPromptAction().showToast({ message: '演示数据已生成' });
-        await this.refreshSummaries();
-      }
-    }).catch(() => {
-    });
   }
 
   private static typeTag(type: EasEventType): string {
@@ -1048,34 +1013,12 @@ struct Home {
         .fontSize(17)
         .fontWeight(FontWeight.Medium)
         .fontColor(COLOR_TEXT_SECONDARY)
-      Text(this.hasTimetable ? '切换到课表查看整周安排' : '登录后导入课表，或生成一份演示数据')
+      Text(this.hasTimetable ? '本周其余课程见时间表' : '暂无已导入或手动创建的课表')
         .fontSize(13)
         .fontColor(COLOR_TEXT_HINT)
         .margin({ top: 8, bottom: 20 })
       if (!this.hasTimetable) {
-        Row() {
-          Button('生成演示数据')
-            .fontSize(14)
-            .height(40)
-            .fontColor('#FFFFFF')
-            .backgroundColor(COLOR_PRIMARY)
-            .borderRadius(20)
-            .onClick(() => {
-              this.seed();
-            })
-          if (this.sessionInfo !== undefined) {
-            Button('导入课表')
-              .fontSize(14)
-              .height(40)
-              .fontColor(COLOR_PRIMARY)
-              .backgroundColor('#EBF4FC')
-              .borderRadius(20)
-              .margin({ left: 10 })
-              .onClick(() => {
-                this.importTimetable(true);
-              })
-          }
-        }
+        this.emptyTimetableActions();
       }
       Blank()
     }
@@ -1245,6 +1188,34 @@ struct Home {
   }
 
   @Builder
+  emptyTimetableActions() {
+    Row({ space: 10 }) {
+      Button(this.sessionInfo === undefined ? '登录教务' : '导入课表')
+        .fontSize(14)
+        .height(40)
+        .fontColor('#FFFFFF')
+        .backgroundColor(COLOR_PRIMARY)
+        .borderRadius(20)
+        .onClick(() => {
+          if (this.sessionInfo === undefined) {
+            this.openSessionSheet();
+          } else {
+            this.getUIContext().getRouter().pushUrl({ url: 'pages/ImportTimetablePage' });
+          }
+        });
+      Button('课表管理')
+        .fontSize(14)
+        .height(40)
+        .fontColor(COLOR_PRIMARY)
+        .backgroundColor(COLOR_NAV_ACTIVE)
+        .borderRadius(20)
+        .onClick(() => {
+          this.getUIContext().getRouter().pushUrl({ url: 'pages/TimetableManagerPage' });
+        });
+    }
+  }
+
+  @Builder
   tabTimetable() {
     Column() {
       Row() {
@@ -1279,33 +1250,11 @@ struct Home {
             .fontSize(16)
             .fontWeight(FontWeight.Medium)
             .fontColor(COLOR_TEXT_PRIMARY)
-          Text('登录后导入课表，或先生成一份演示课表。')
+          Text('暂无已导入或手动创建的课表')
             .fontSize(13)
             .fontColor(COLOR_TEXT_SECONDARY)
             .margin({ top: 8, bottom: 16 })
-          Row() {
-            Button('生成演示数据')
-              .fontSize(14)
-              .height(40)
-              .fontColor('#FFFFFF')
-              .backgroundColor(COLOR_PRIMARY)
-              .borderRadius(20)
-              .onClick(() => {
-                this.seed();
-              })
-            if (this.sessionInfo !== undefined) {
-              Button('导入课表')
-                .fontSize(14)
-                .height(40)
-                .fontColor(COLOR_PRIMARY)
-                .backgroundColor(COLOR_NAV_ACTIVE)
-                .borderRadius(20)
-                .margin({ left: 8 })
-                .onClick(() => {
-                  this.importTimetable(true);
-                });
-            }
-          }
+          this.emptyTimetableActions();
         }
         .width('100%')
         .layoutWeight(1)

@@ -12,14 +12,13 @@ import { EasTimePeriodInDay } from '../../common/model/timetable/TimetableModels
 import { easWebLoginConfigFor, EasCampusUrls } from './webLogin/EasWebLoginConfig';
 import { EasLegacyTimetableParser } from './data/EasLegacyTimetableParser';
 import { EasLegacyCourseCatalogParser, LegacyCourseAttributes } from './data/EasLegacyCourseCatalogParser';
-import { ParsedShenzhenWebScores, parseShenzhenWebScores, testShenzhenScoreParser } from './data/ShenzhenWebScores';
+import { ParsedShenzhenWebScores, parseShenzhenWebScores } from './data/ShenzhenWebScores';
 import {
   parseShenzhenWebSelectedSubjects,
   parseShenzhenWebTerms,
   parseShenzhenWebTimetable,
   ShenzhenSubjectMeta,
-  parseShenzhenWebScheduleStructure,
-  testShenzhenTimetableParser
+  parseShenzhenWebScheduleStructure
 } from './data/ShenzhenWebTimetableParser';
 
 const DOMAIN: number = 0x0000;
@@ -634,7 +633,4 @@ export class EasDataProvider {
     return [];
   }
 
-  static runParserSelfCheck(): string {
-    return testShenzhenScoreParser() + '\n' + testShenzhenTimetableParser();
-  }
 }

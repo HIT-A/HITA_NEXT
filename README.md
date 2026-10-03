@@ -39,8 +39,8 @@ HITA NEXT 是基于开源项目 [HITA Android](https://github.com/HIT-A/HITA_And
 - 查看当前账号、校区和会话状态。
 - 按校区管理会话并退出登录。
 - 在本地数据中搜索事件名称、教师和地点。
-- 将本地课表数据导出为 JSON 备份，并从备份恢复。
-- 清除本地课表及会话数据。
+- 管理课表、手动添加课程，以及导入和导出 ICS 课表。
+- 查看版本更新、服务与故障公告。
 
 ## 技术基线
 
@@ -76,7 +76,7 @@ HitaNEXT/
 │       │   ├── entryability/         # EntryAbility 应用入口
 │       │   ├── pages/                # 今日、时间表、更多及功能页面
 │       │   ├── feature/eas/          # 登录、会话、教务请求与课表导入
-│       │   ├── feature/timetable/    # 周课表绘制与本地演示数据
+│       │   ├── feature/timetable/    # 周课表绘制、课表选择与 ICS 导入
 │       │   └── common/               # 数据库、模型与通用工具
 │       └── resources/                # 字符串、颜色、图标等资源
 ├── docs/                             # 迁移记录、接口笔记与设备调试文档

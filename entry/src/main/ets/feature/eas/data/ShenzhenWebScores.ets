@@ -108,36 +108,3 @@ export function parseShenzhenWebScores(body: string, term: EasTermItem): ParsedS
   }
   return parsed;
 }
-
-/**
- * 离线样例（用于开发期自检解析链路；真机端点与真实报文以 M0 抓包为准，勿当契约）。
- */
-export const SHENZHEN_SCORES_SAMPLE: string =
-  '{"code":0,"msg":"success","content":{"list":[' +
-  '{"kcdm":"CS101","kcmc":"数据结构","xscj":"92","xf":4.0,"xs":64,' +
-  '"kcxz":"必修","kclb":"专业基础课","yxmc":"计算机科学与技术学院","khfs":"考试","xnxqmc":"2023-2024-1"},' +
-  '{"kcdm":"MA102","kcmc":"线性代数","xscj":"优秀","xf":3.5,"xs":48,' +
-  '"kcxz":"必修","kclb":"学科基础课","yxmc":"数学学院","khfs":"考试"},' +
-  '{"kcdm":"EN201","kcmc":"大学英语","zzcj":"88","xf":2.0,"xs":32,' +
-  '"kcxz":"选修","kclb":"通识课","yxmc":"外国语学院","khfs":"考查","xnxqmc":"2023-2024-1"}' +
-  ']}}';
-
-/** 离线自检：解析样例并返回可读摘要（供开发页/调试）。 */
-export function testShenzhenScoreParser(): string {
-  const term: EasTermItem = new EasTermItem();
-  term.yearName = '2023-2024';
-  term.termName = '-1';
-  const parsed: ParsedShenzhenWebScores | undefined = parseShenzhenWebScores(SHENZHEN_SCORES_SAMPLE, term);
-  if (parsed === undefined) {
-    return '解析失败：非 JSON/非对象';
-  }
-  const sb: string[] = [];
-  sb.push('code=' + parsed.code.toString() + ' msg=' + parsed.msg + ' count=' + parsed.list.length.toString());
-  for (let i = 0; i < parsed.list.length; i++) {
-    const it: EasCourseScoreItem = parsed.list[i];
-    sb.push((i + 1).toString() + '. ' + it.courseName + ' | ' + it.displayScore() +
-      ' | 学分=' + it.credits.toString() + ' | ' + it.assessMethod + ' | ' + it.termName +
-      ' | finalScores=' + it.finalScores.toString());
-  }
-  return sb.join('\n');
-}

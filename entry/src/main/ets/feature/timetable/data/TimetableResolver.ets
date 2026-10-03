@@ -1,13 +1,16 @@
-/** Selects the user's imported timetable while keeping the local demo as a fallback. */
+/** Selects an imported or manually created timetable for automatic display. */
 import { RdbHelper } from '../../../common/db/RdbHelper';
 import { EasTimetable } from '../../../common/model/timetable/TimetableModels';
-import { TimetableLocalDemo } from './TimetableLocalDemo';
+
+// Exclude legacy generated records from automatic selection without deleting
+// stored data: users can still manage those records in the timetable library.
+const LEGACY_SAMPLE_CODE: string = 'LOCAL_DEMO_001';
 
 export class TimetableResolver {
   static isReal(timetable: EasTimetable): boolean {
     // A blank timetable created from the manager is local-only. It must not
     // replace the imported EAS timetable selected by the main timetable view.
-    return timetable.code !== TimetableLocalDemo.DEMO_CODE &&
+    return timetable.code !== LEGACY_SAMPLE_CODE &&
       !timetable.code.startsWith('LOCAL:');
   }
 
@@ -36,7 +39,7 @@ export class TimetableResolver {
         return all[i];
       }
     }
-    return await rdb.getTimetableByEasCode(TimetableLocalDemo.DEMO_CODE);
+    return undefined;
   }
 
   /** Android recent timetable semantics: latest timetable whose term has started. */

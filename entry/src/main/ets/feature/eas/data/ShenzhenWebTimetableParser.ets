@@ -476,28 +476,3 @@ function parseClock(raw: string): number[] {
   }
   return [];
 }
-
-/** 离线自检样例，供首页开发入口调用。 */
-export const SHENZHEN_TIMETABLE_SAMPLE: string =
-  '{"content":[{"list":[' +
-  '{"KSJC":"1","JSJC":"2","XQJ":"1","ZC":"1-16","RWH":"A1",' +
-  '"SKSJ":"数据结构 [张老师][A101]"},' +
-  '{"KSJC":5,"JSJC":6,"XQJ":3,"ZC":"0100000000000000000",' +
-  '"RWH":"A2","SKSJ":"大学英语 [李老师][B202]"}' +
-  '] }],"meta": {"ignored": true}}';
-
-export function testShenzhenTimetableParser(): string {
-  const subjects: ShenzhenSubjectMeta[] = [];
-  const first: ShenzhenSubjectMeta = new ShenzhenSubjectMeta();
-  first.key = 'A1';
-  first.code = 'CS101';
-  first.name = '数据结构';
-  subjects.push(first);
-  const courses: EasCourseItem[] | undefined = parseShenzhenWebTimetable(SHENZHEN_TIMETABLE_SAMPLE, subjects);
-  if (courses === undefined) {
-    return '解析失败：非 JSON';
-  }
-  return 'courses=' + courses.length.toString() +
-    ' first=' + (courses.length > 0 ? courses[0].name : 'none') +
-    ' weeks=' + (courses.length > 0 ? courses[0].weekNumbers.join(',') : '');
-}

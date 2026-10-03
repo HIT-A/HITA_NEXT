@@ -1,24 +1,3 @@
 {
-  "notices": [
-    {
-      "id": "hello-2026",
-      "kind": "service",
-      "severity": "info",
-      "title": "欢迎使用 HitaNEXT",
-      "body": "这是第一条示例公告。编辑本文件的 notices 数组即可发布公告：多条公告就多写几个花括号对象，记得用逗号分隔，id 不要重复。",
-      "starts_at": -1,
-      "ends_at": -1,
-      "affected_min_version": -1
-    },
-    {
-      "id": "example-critical",
-      "kind": "incident",
-      "severity": "critical",
-      "title": "示例：重要通知",
-      "body": "severity 填 critical 的公告会置顶并显示为红色。修复后把这条对象删掉即可。",
-      "starts_at": -1,
-      "ends_at": -1,
-      "affected_min_version": -1
-    }
-  ]
+  "notices": []
 }

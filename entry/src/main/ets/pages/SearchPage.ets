@@ -1,14 +1,9 @@
 /**
- * SearchPage.ets — 本地搜索（教师/地点）。
- *
- * 数据：RDB events 中 distinct teacher / place（含演示数据即生效）。
- * 真实网络（校教师库/新闻讲座，hita.store/GitHub 静态源）后续按映射表接入。
+ * SearchPage.ets — 搜索本地课程、教师与地点。
  */
-import { router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem } from '../common/model/timetable/TimetableModels';
-import { TimetableLocalDemo } from '../feature/timetable/data/TimetableLocalDemo';
 
 class SearchResultRow {
   kind: string = '';   // 教师 / 地点
@@ -21,12 +16,8 @@ class SearchResultRow {
 struct SearchPage {
   @State rows: SearchResultRow[] = [];
   @State keyword: string = '';
-  @State note: string = '输入关键字（教师/地点）搜索本地事件…';
+  @State note: string = '搜索课程、教师或地点';
   @State searched: boolean = false;
-
-  private static pad2(n: number): string {
-    return n < 10 ? '0' + n.toString() : n.toString();
-  }
 
   async doSearch(): Promise<void> {
     const kw: string = this.keyword.trim().toLowerCase();
@@ -98,13 +89,6 @@ struct SearchPage {
       ' / 地点 ' + placeMap.size.toString() + ' / 事件 ' + nameMap.size.toString() + '）';
   }
 
-  async seedDemo(): Promise<void> {
-    const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
-    await TimetableLocalDemo.runSelfCheck(ctx);
-    this.note = '已生成演示数据，请再次搜索';
-    this.searched = false;
-  }
-
   build() {
     Column() {
       Row() {
@@ -133,7 +117,7 @@ struct SearchPage {
       .alignItems(VerticalAlign.Center)
 
       Row({ space: 8 }) {
-        TextInput({ placeholder: '教师 / 地点关键字', text: this.keyword })
+        TextInput({ placeholder: '课程 / 教师 / 地点', text: this.keyword })
           .layoutWeight(1)
           .height(40)
           .backgroundColor('#FFFFFF')
@@ -169,14 +153,6 @@ struct SearchPage {
             .fontSize(14)
             .fontColor('#888888')
             .margin({ bottom: 12 })
-          if (!this.searched) {
-            Button('生成本地演示数据后搜索')
-              .fontSize(13)
-              .backgroundColor('#2E7D32')
-              .onClick(() => {
-                this.seedDemo();
-              })
-          }
         }
         .width('100%')
         .margin({ top: 40 })
