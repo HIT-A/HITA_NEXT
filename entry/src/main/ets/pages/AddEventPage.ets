@@ -47,17 +47,37 @@ export struct EventEditorForm {
   @State endMinute: number = 0;
   @State hint: string = '';
   @State saved: boolean = false;
+  @State loading: boolean = true;
+  @State loadFailed: boolean = false;
+  @State saving: boolean = false;
   private editId: string = '';
   private timetableId: string = '';
   private subjectId: string = '';
+  private editorActive: boolean = false;
 
   async aboutToAppear(): Promise<void> {
+    this.editorActive = true;
+    try {
+      await this.loadEvent();
+    } catch (_) {
+      this.loadFailed = true;
+      this.hint = '读取失败，请关闭后重试';
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  aboutToDisappear(): void {
+    this.editorActive = false;
+  }
+
+  private async loadEvent(): Promise<void> {
     const params: Object | undefined = this.getUIContext().getRouter().getParams();
     let id: string = this.eventId;
     this.timetableId = this.targetTimetableId;
     let routeType: string = this.initialType;
     let offsetRaw: string = '';
-    if (params !== undefined && params !== null) {
+    if (!this.sheetMode && params !== undefined && params !== null) {
       const record = params as Record<string, string>;
       if (id.length === 0) {
         id = record['id'] === undefined ? '' : record['id'] as string;
@@ -96,6 +116,8 @@ export struct EventEditorForm {
     await RdbHelper.getInstance().init(ctx);
     const ev: EasEventItem | undefined = await RdbHelper.getInstance().getEventById(id);
     if (ev === undefined) {
+      this.loadFailed = true;
+      this.hint = '这条记录已不存在，请关闭后刷新列表';
       return;
     }
     this.name = ev.name;
@@ -112,14 +134,8 @@ export struct EventEditorForm {
     this.endMinute = end.getMinutes();
     const todayMidnight: number = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
     const fromMidnight: number = new Date(new Date(ev.from).setHours(0, 0, 0, 0)).getTime();
-    let off: number = Math.round((fromMidnight - todayMidnight) / DAY_MS);
-    if (off < -MAX_DAY_OFFSET) {
-      off = -MAX_DAY_OFFSET;
-    }
-    if (off > MAX_DAY_OFFSET) {
-      off = MAX_DAY_OFFSET;
-    }
-    this.dayOffset = off;
+    // Editing an older record must not silently move its original date.
+    this.dayOffset = Math.round((fromMidnight - todayMidnight) / DAY_MS);
   }
 
   private static pad2(n: number): string {
@@ -195,16 +211,41 @@ export struct EventEditorForm {
   }
 
   private async save(): Promise<void> {
+    if (this.loading || this.loadFailed || this.saving || this.saved) {
+      return;
+    }
     if (this.name.trim().length === 0) {
       this.hint = '请填写名称';
       return;
     }
+    if (this.endHour * 60 + this.endMinute <= this.hour * 60 + this.minute) {
+      this.hint = '结束时间必须晚于开始时间';
+      return;
+    }
+    this.saving = true;
+    try {
+      await this.persistEvent();
+    } catch (_) {
+      this.hint = '保存失败，请重试';
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  private async persistEvent(): Promise<void> {
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
-    await RdbHelper.getInstance().init(ctx);
+    const rdb: RdbHelper = RdbHelper.getInstance();
+    await rdb.init(ctx);
     const base: number = new Date(new Date().setHours(0, 0, 0, 0)).getTime() + this.dayOffset * DAY_MS;
-    const ev: EasEventItem = new EasEventItem();
+    let ev: EasEventItem = new EasEventItem();
     if (this.editId.length > 0) {
-      ev.id = this.editId;
+      const existing: EasEventItem | undefined = await rdb.getEventById(this.editId);
+      if (existing === undefined) {
+        this.loadFailed = true;
+        this.hint = '这条记录已不存在，请关闭后刷新列表';
+        return;
+      }
+      ev = existing;
     }
     ev.type = EventEditorForm.typeOf(this.typeIdx);
     ev.name = this.name.trim();
@@ -214,7 +255,6 @@ export struct EventEditorForm {
     // Prefer the explicit target, then the user's current timetable.
     ev.timetableId = this.timetableId;
     if (this.typeIdx === 1 && this.editId.length === 0) {
-      const rdb: RdbHelper = RdbHelper.getInstance();
       if (ev.timetableId.length === 0) {
         const selection: TimetableSelectionStore = TimetableSelectionStore.getInstance();
         await selection.init(ctx);
@@ -262,26 +302,25 @@ export struct EventEditorForm {
       }
     }
     ev.from = base + this.hour * 60 * 60 * 1000 + this.minute * 60 * 1000;
-    const endMinutes: number = this.endHour * 60 + this.endMinute;
-    const startMinutes: number = this.hour * 60 + this.minute;
-    if (endMinutes <= startMinutes) {
-      this.hint = '结束时间必须晚于开始时间';
-      return;
-    }
     ev.to = base + this.endHour * 60 * 60 * 1000 + this.endMinute * 60 * 1000;
     ev.color = EventEditorForm.typeColor(ev.type);
-    ev.createdAt = Date.now();
-    await RdbHelper.getInstance().saveEvent(ev);
+    if (this.editId.length > 0) {
+      await rdb.updateEvent(ev);
+    } else {
+      await rdb.saveEvent(ev);
+    }
+    // A pending write may finish after the user has closed this editor.
+    if (!this.editorActive) {
+      return;
+    }
     this.saved = true;
     this.hint = this.editId.length > 0 ? '已更新' : '已保存';
     this.getUIContext().getPromptAction().showToast({ message: this.editId.length > 0 ? '事件已更新' : '事件已保存' });
-    setTimeout(() => {
-      if (this.sheetMode) {
-        this.onSaved();
-      } else {
-        this.getUIContext().getRouter().back();
-      }
-    }, 500);
+    if (this.sheetMode) {
+      this.onSaved();
+    } else {
+      this.getUIContext().getRouter().back();
+    }
   }
 
   static idxOf(t: EasEventType): number {
@@ -396,7 +435,7 @@ export struct EventEditorForm {
         .alignItems(VerticalAlign.Center)
       }
 
-      List({ space: 10 }) {
+      List({ space: 8 }) {
         if (!this.sheetMode) {
           ListItem() {
             this.typeRow()
@@ -410,20 +449,20 @@ export struct EventEditorForm {
               .fontColor('#202B45')
             TextInput({ placeholder: '事件名称', text: this.name })
               .fontSize(16)
-              .height(48)
-              .padding({ left: 14, right: 14 })
+              .height(46)
+              .padding({ left: 12, right: 12 })
               .backgroundColor('#FFFFFF')
               .border({ width: 1, color: '#D7E0EC' })
-              .borderRadius(14)
-              .margin({ top: 8 })
+              .borderRadius(13)
+              .margin({ top: 6 })
               .onChange((value: string) => {
                 this.name = value;
               })
           }
           .width('100%')
-          .padding(14)
+          .padding(12)
           .backgroundColor('#FFFFFF')
-          .borderRadius(16)
+          .borderRadius(14)
           .alignItems(HorizontalAlign.Start)
         }
         ListItem() {
@@ -434,20 +473,20 @@ export struct EventEditorForm {
               .fontColor('#202B45')
             TextInput({ placeholder: '地点 / 教室 / 在线', text: this.place })
               .fontSize(16)
-              .height(48)
-              .padding({ left: 14, right: 14 })
+              .height(46)
+              .padding({ left: 12, right: 12 })
               .backgroundColor('#FFFFFF')
               .border({ width: 1, color: '#D7E0EC' })
-              .borderRadius(14)
-              .margin({ top: 8 })
+              .borderRadius(13)
+              .margin({ top: 6 })
               .onChange((value: string) => {
                 this.place = value;
               })
           }
           .width('100%')
-          .padding(14)
+          .padding(12)
           .backgroundColor('#FFFFFF')
-          .borderRadius(16)
+          .borderRadius(14)
           .alignItems(HorizontalAlign.Start)
         }
         ListItem() {
@@ -458,20 +497,20 @@ export struct EventEditorForm {
               .fontColor('#202B45')
             TextInput({ placeholder: '教师 / 联系人', text: this.teacher })
               .fontSize(16)
-              .height(48)
-              .padding({ left: 14, right: 14 })
+              .height(46)
+              .padding({ left: 12, right: 12 })
               .backgroundColor('#FFFFFF')
               .border({ width: 1, color: '#D7E0EC' })
-              .borderRadius(14)
-              .margin({ top: 8 })
+              .borderRadius(13)
+              .margin({ top: 6 })
               .onChange((value: string) => {
                 this.teacher = value;
               })
           }
           .width('100%')
-          .padding(14)
+          .padding(12)
           .backgroundColor('#FFFFFF')
-          .borderRadius(16)
+          .borderRadius(14)
           .alignItems(HorizontalAlign.Start)
         }
         ListItem() {
@@ -480,28 +519,39 @@ export struct EventEditorForm {
         ListItem() {
           this.timeRow()
         }
-        if (this.hint.length > 0) {
-          ListItem() {
-            Text(this.hint)
-              .fontSize(13)
-              .fontColor(this.saved ? '#2E7D32' : '#D93025')
-              .width('100%')
-          }
-        }
-        ListItem() {
-          Button('保存')
-            .width('100%')
-            .height(44)
-            .backgroundColor('#3390EC')
-            .borderRadius(22)
-            .onClick(() => {
-              this.save();
-            })
-        }
       }
       .width('100%')
       .layoutWeight(1)
-      .padding({ left: this.sheetMode ? 20 : 12, right: this.sheetMode ? 20 : 12, bottom: 24 })
+      .padding({ left: this.sheetMode ? 20 : 12, right: this.sheetMode ? 20 : 12, bottom: 10 })
+
+      Column() {
+        if (this.hint.length > 0) {
+          Text(this.hint)
+            .fontSize(12)
+            .fontColor(this.saved ? '#2E7D32' : '#D93025')
+            .width('100%')
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ bottom: 6 })
+        }
+        Button(this.loading ? '正在读取' : (this.saving ? '正在保存' : '保存'))
+          .width('100%')
+          .height(44)
+          .backgroundColor('#3390EC')
+          .borderRadius(22)
+          .enabled(!this.loading && !this.loadFailed && !this.saving && !this.saved)
+          .onClick(() => {
+            this.save();
+          })
+      }
+      .width('100%')
+      .padding({
+        left: this.sheetMode ? 20 : 12,
+        right: this.sheetMode ? 20 : 12,
+        top: 8,
+        bottom: 10
+      })
+      .backgroundColor(this.sheetMode ? '#F6F8FC' : '#F5F6F8')
     }
     .width('100%')
     .height('100%')

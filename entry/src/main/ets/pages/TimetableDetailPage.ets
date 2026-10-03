@@ -777,7 +777,7 @@ struct TimetableDetailPage {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor('#F6F7FA')
     .bindSheet(this.sheetVisible, this.eventSheetContent(), {
-      height: this.eventSheetMode === 2 ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
+      height: this.eventSheetMode === 2 ? '78%' : SheetSize.FIT_CONTENT,
       dragBar: true,
       showClose: false,
       preferType: SheetType.BOTTOM,

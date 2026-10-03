@@ -346,7 +346,25 @@ export class RdbHelper {
   // ------------------------------------------------------------------
 
   async saveEvent(e: EasEventItem): Promise<void> {
-    const b: relationalStore.ValuesBucket = {
+    await this.replaceRow('events', RdbHelper.eventValues(e), 'id', e.id);
+  }
+
+  /** Edit in place: failed writes must not remove or recreate an existing event. */
+  async updateEvent(e: EasEventItem): Promise<void> {
+    try {
+      const count: number = await this.s().update(RdbHelper.eventValues(e),
+        new relationalStore.RdbPredicates('events').equalTo('id', e.id));
+      if (count !== 1) {
+        throw new Error('Event no longer exists');
+      }
+    } catch (e) {
+      hilog.error(DOMAIN, TAG, 'update event failed %{public}s', String(e));
+      throw new Error(String(e));
+    }
+  }
+
+  private static eventValues(e: EasEventItem): relationalStore.ValuesBucket {
+    return {
       'id': e.id,
       'type': e.type.toString(),
       'name': e.name,
@@ -360,7 +378,6 @@ export class RdbHelper {
       'lastNumber': e.lastNumber,
       'createdAt': e.createdAt
     };
-    await this.replaceRow('events', b, 'id', e.id);
   }
 
   /** 区间内事件（对应 getEventsDuringSync：from/to 四向包含）。 */
