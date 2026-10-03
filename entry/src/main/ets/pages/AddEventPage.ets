@@ -6,6 +6,7 @@
  */
 import { promptAction, router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
+import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
 import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
@@ -353,6 +354,10 @@ export struct EventEditorForm {
     Column() {
       if (this.sheetMode) {
         Row() {
+          HeaderBackButton({
+            onBack: () => this.onCancel()
+          })
+            .margin({ right: 12 })
           Column() {
             Text(this.sheetTitle())
               .fontSize(20)
@@ -365,18 +370,6 @@ export struct EventEditorForm {
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
-          Button() {
-            Text('×')
-              .fontSize(25)
-              .fontColor('#4C566A')
-          }
-          .width(44)
-          .height(44)
-          .borderRadius(22)
-          .backgroundColor('#E9EEF5')
-          .onClick(() => {
-            this.onCancel();
-          })
         }
         .width('100%')
         .height(58)
@@ -384,27 +377,21 @@ export struct EventEditorForm {
         .alignItems(VerticalAlign.Center)
       } else {
         Row() {
-          Text('<')
-            .fontSize(22)
-            .fontColor('#FFFFFF')
-            .fontWeight(FontWeight.Bold)
-            .width(40)
-            .height(40)
-            .textAlign(TextAlign.Center)
-            .onClick(() => {
-              this.getUIContext().getRouter().back();
-            })
-
+          HeaderBackButton({
+            onBack: () => this.getUIContext().getRouter().back()
+          })
+            .margin({ right: 12 })
           Text(this.editId.length > 0 ? '编辑事件' : '新建事件')
             .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .fontColor('#FFFFFF')
             .layoutWeight(1)
-            .margin({ left: 4 })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .width('100%')
         .height(56)
-        .padding({ left: 8, right: 16 })
+        .padding({ left: 16, right: 16 })
         .backgroundColor('#3390EC')
         .alignItems(VerticalAlign.Center)
       }

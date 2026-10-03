@@ -2,7 +2,7 @@
  * EasLoginPage.ets — ArkWeb 网页登录页（对应 Android WebViewLoginActivity / WebViewLoginScreen）。
  *
  * UI 布局对齐安卓：
- *  - 顶部 TopAppBar：Material 风格品牌蓝（#3390EC）导航栏，左侧返回箭头（支持 WebView 历史回退），中间标题“统一认证登录”，右侧校区标。
+ *  - 顶部标题栏：左侧返回应用，右侧网页回退和刷新，各自占用独立布局空间。
  *  - 线性进度条：3vp 高度，仅在加载中展示。
  *  - Web 组件：直接绑定登录 URL，并在控制器附着后完成登录状态初始化。
  *  - MFA 覆盖层：仅在触发二次认证时浮层提示。
@@ -16,6 +16,7 @@ import { EasWebLoginController } from './EasWebLoginController';
 import { EasMfaOverlayState } from './EasWebMfaBridge';
 import { easWebLoginConfigFor, EasCampusConfig } from './EasWebLoginConfig';
 import { HitaColors } from '../../../common/theme/HitaColors';
+import { HeaderBackButton } from '../../../common/components/HeaderBackButton';
 
 const TAG: string = 'HitaLoginPage';
 const DOMAIN: number = 0x0000;
@@ -36,6 +37,7 @@ export struct EasLoginPage {
   @State initialUrl: string = '';
   @State campusDisplayName: string = '统一认证登录';
   @State webReady: boolean = false;
+  @State canGoBack: boolean = false;
 
   // —— 原生 MFA 覆盖层 ——
   @State mfaState: EasMfaOverlayState = new EasMfaOverlayState();
@@ -86,13 +88,24 @@ export struct EasLoginPage {
     this.loginController.stop();
   }
 
-  private handleBack(): void {
+  private updateWebNavigation(): void {
+    try {
+      this.canGoBack = this.webController.accessBackward();
+    } catch (e) {
+      this.canGoBack = false;
+    }
+  }
+
+  private navigateWebBack(): void {
     try {
       if (this.webController.accessBackward()) {
         this.webController.backward();
-        return;
       }
     } catch (e) {}
+    this.updateWebNavigation();
+  }
+
+  private cancelLogin(): void {
     this.loginController.stop();
     this.onCancel();
   }
@@ -101,52 +114,57 @@ export struct EasLoginPage {
     Column() {
       // Android WebViewLoginActivity uses a compact white app bar with a thin
       // brand accent, leaving the authentication page itself visually calm.
-      Row() {
-        Stack() {
-          SymbolGlyph($r('sys.symbol.chevron_left'))
-            .fontSize(22)
-            .fontColor([HitaColors.onSurface]);
-        }
-        .width(42)
-        .height(42)
-        .borderRadius(21)
-        .alignContent(Alignment.Center)
-        .backgroundColor('#F2F4F7')
-        .onClick(() => {
-          this.handleBack();
+      Row({ space: 8 }) {
+        HeaderBackButton({
+          accessibilityLabel: '返回应用',
+          onBack: () => this.cancelLogin()
         });
 
         Column() {
           Text('统一认证登录')
             .fontSize(17)
             .fontWeight(FontWeight.Medium)
-            .fontColor(HitaColors.onSurface);
-          Text('HITA NEXT')
-            .fontSize(10)
-            .fontColor(HitaColors.onSurfaceVariant)
+            .fontColor(HitaColors.onSurface)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis });
+          Text(this.campusDisplayName)
+            .fontSize(12)
+            .fontColor(HitaColors.primary)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
             .margin({ top: 2 });
         }
         .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        .margin({ left: 12 });
+        .alignItems(HorizontalAlign.Start);
 
-        Text(this.campusDisplayName)
-          .fontSize(12)
-          .fontColor(HitaColors.primary)
-          .padding({ left: 9, right: 9, top: 5, bottom: 5 })
-          .borderRadius(11)
-          .backgroundColor(HitaColors.primaryContainer)
-          .margin({ right: 8 });
+        Button({ type: ButtonType.Circle }) {
+          SymbolGlyph($r('sys.symbol.arrow_left'))
+            .fontSize(18)
+            .fontColor([HitaColors.onSurface]);
+        }
+        .width(36)
+        .height(44)
+        .padding(0)
+        .flexShrink(0)
+        .backgroundColor(Color.Transparent)
+        .enabled(this.canGoBack)
+        .opacity(this.canGoBack ? 1 : 0.35)
+        .accessibilityText('返回上一网页')
+        .onClick(() => {
+          this.navigateWebBack();
+        });
 
-        Stack() {
+        Button({ type: ButtonType.Circle }) {
           SymbolGlyph($r('sys.symbol.repeat_1'))
             .fontSize(20)
             .fontColor([HitaColors.primary]);
         }
         .width(40)
-        .height(40)
-        .borderRadius(20)
-        .alignContent(Alignment.Center)
+        .height(44)
+        .padding(0)
+        .flexShrink(0)
+        .backgroundColor(Color.Transparent)
+        .accessibilityText('刷新认证网页')
         .onClick(() => {
           try {
             this.webReady = false;
@@ -154,10 +172,11 @@ export struct EasLoginPage {
             this.webController.refresh();
           } catch (e) {}
         });
+
       }
       .width('100%')
       .height(62)
-      .padding({ left: 14, right: 10 })
+      .padding({ left: 16, right: 16 })
       .backgroundColor('#FFFFFF')
       .border({ width: { bottom: 1 }, color: HitaColors.divider })
       .alignItems(VerticalAlign.Center)
@@ -224,11 +243,13 @@ export struct EasLoginPage {
               const u: string = event !== undefined && event !== null ? event.url : '';
               this.progressValue = 0;
               this.webReady = false;
+              this.updateWebNavigation();
               this.loginController.notifyPageBegin(u);
             })
             .onPageEnd((event) => {
               const u: string = event !== undefined && event !== null ? event.url : '';
               this.webReady = true;
+              this.updateWebNavigation();
               this.loginController.notifyPageEnd(u);
             })
             .onProgressChange((event) => {

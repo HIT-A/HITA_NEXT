@@ -1,5 +1,6 @@
 /** Android HITA-style timetable detail and course management. */
 import { common } from '@kit.AbilityKit';
+import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { promptAction } from '@kit.ArkUI';
 import { RdbHelper } from '../common/db/RdbHelper';
 import {
@@ -529,6 +530,10 @@ struct TimetableDetailPage {
   private courseDetailSheet(event: EasEventItem) {
     Column() {
       Row() {
+        HeaderBackButton({
+          onBack: () => this.closeSheet()
+        })
+          .margin({ right: 12 });
         Row()
           .width(7)
           .height(50)
@@ -559,18 +564,6 @@ struct TimetableDetailPage {
           .onClick(() => {
             this.openEditEvent(event);
           });
-        Button() {
-          Text('×')
-            .fontSize(25)
-            .fontColor('#4C566A');
-        }
-        .width(44)
-        .height(44)
-        .borderRadius(22)
-        .backgroundColor('#E9EEF5')
-        .onClick(() => {
-          this.closeSheet();
-        });
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
@@ -675,25 +668,21 @@ struct TimetableDetailPage {
   build() {
     Column() {
       Row() {
-        Text('<')
-          .fontSize(24)
-          .fontWeight(FontWeight.Medium)
-          .width(44)
-          .height(44)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            this.getUIContext().getRouter().back();
-          })
+        HeaderBackButton({
+          onBack: () => this.getUIContext().getRouter().back()
+        })
+          .margin({ right: 12 })
         Text('课表详情')
           .fontSize(22)
           .fontWeight(FontWeight.Bold)
           .fontColor('#202633')
           .layoutWeight(1)
-          .margin({ left: 4 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
       .width('100%')
       .height(64)
-      .padding({ left: 6, right: 16 })
+      .padding({ left: 16, right: 16 })
       .alignItems(VerticalAlign.Center)
 
       if (this.loading) {

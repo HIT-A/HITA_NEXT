@@ -6,6 +6,7 @@
  * timetable/session data layer already used by the app.
  */
 import { common } from '@kit.AbilityKit';
+import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTermSubject, EasTimetable } from '../common/model/timetable/TimetableModels';
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
@@ -60,6 +61,7 @@ struct Home {
   @State nextClass: EasEventItem | undefined = undefined;
   @State nowTick: number = Date.now();
   @State sessionInfo: EasSession | undefined = undefined;
+  @State activeSheetVisible: boolean = false;
   @State sessionSheetOpen: boolean = false;
   @State sessionSheetCampus: string = 'WEIHAI';
   @State sessionSheetInfo: EasSession | undefined = undefined;
@@ -329,6 +331,7 @@ struct Home {
         event.from <= tappedTime && event.to >= tappedTime) {
         this.selectedCourse = event;
         this.courseSheetOpen = true;
+        this.activeSheetVisible = true;
         return;
       }
     }
@@ -661,6 +664,7 @@ struct Home {
     this.sessionSheetCampus = campus.toString();
     this.sessionSheetInfo = await EasSessionStore.getInstance().load(campus);
     this.sessionSheetOpen = true;
+    this.activeSheetVisible = true;
   }
 
   private async selectSessionCampus(code: string): Promise<void> {
@@ -672,13 +676,14 @@ struct Home {
     this.loginCampusCode = this.sessionSheetCampus;
     this.sessionSheetOpen = false;
     this.loginSheetOpen = true;
+    this.activeSheetVisible = true;
   }
 
   private async logoutSession(): Promise<void> {
     const campus: EasCampus = Home.campusFromCode(this.sessionSheetCampus);
     await EasSessionStore.getInstance().clear(campus);
     this.sessionSheetInfo = undefined;
-    this.sessionSheetOpen = false;
+    this.activeSheetVisible = false;
     await this.refreshSummaries();
     this.getUIContext().getPromptAction().showToast({ message: '已退出' + Home.campusName(campus) + '教务会话' });
   }
@@ -708,17 +713,18 @@ struct Home {
     .height('100%')
     .backgroundColor(this.currentTab === 1 ? 'transparent' : COLOR_SURFACE)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-    .bindSheet(this.sessionSheetOpen || this.loginSheetOpen || this.courseSheetOpen, this.activeSheet(), {
+    .bindSheet(this.activeSheetVisible, this.activeSheet(), {
       height: this.loginSheetOpen ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
       dragBar: true,
-      // The full-page web login keeps the system close control. The compact
-      // session and course sheets use their own header control so the title
-      // is not squeezed between the drag handle and a floating close bubble.
-      showClose: this.loginSheetOpen,
+      // Every sheet owns its header control; the system close bubble overlaps
+      // the web login toolbar's trailing actions.
+      showClose: false,
       preferType: SheetType.BOTTOM,
       backgroundColor: COLOR_SURFACE,
       maskColor: 'rgba(20,33,61,0.24)',
       onDisappear: () => {
+        // Keep content and height stable until the dismissal animation finishes.
+        this.activeSheetVisible = false;
         this.sessionSheetOpen = false;
         this.loginSheetOpen = false;
         this.courseSheetOpen = false;
@@ -734,10 +740,10 @@ struct Home {
         campusCode: this.loginCampusCode,
         studentType: '1',
         onCancel: () => {
-          this.loginSheetOpen = false;
+          this.activeSheetVisible = false;
         },
         onLoggedIn: (session: EasSession) => {
-          this.loginSheetOpen = false;
+          this.activeSheetVisible = false;
           this.sessionSheetInfo = session;
           this.refreshSummaries();
         }
@@ -1516,6 +1522,12 @@ struct Home {
   courseDetailSheet(event: EasEventItem) {
     Column() {
       Row() {
+        HeaderBackButton({
+          onBack: () => {
+            this.activeSheetVisible = false;
+          }
+        })
+          .margin({ right: 12 });
         Row()
           .width(7)
           .height(50)
@@ -1538,10 +1550,6 @@ struct Home {
         .alignItems(HorizontalAlign.Start)
         .margin({ left: 12, right: 10 });
 
-        this.sheetCloseButton(() => {
-          this.courseSheetOpen = false;
-          this.selectedCourse = undefined;
-        });
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
@@ -1559,22 +1567,6 @@ struct Home {
     }
     .width('100%')
     .padding({ left: 20, right: 20, top: 4, bottom: 20 });
-  }
-
-  @Builder
-  sheetCloseButton(action: () => void) {
-    Stack() {
-      Text('×')
-        .fontSize(28)
-        .fontWeight(FontWeight.Regular)
-        .fontColor(COLOR_TEXT_SECONDARY);
-    }
-    .width(40)
-    .height(40)
-    .borderRadius(20)
-    .backgroundColor('#E9EEF5')
-    .alignContent(Alignment.Center)
-    .onClick(action);
   }
 
   @Builder
@@ -1622,6 +1614,12 @@ struct Home {
   sessionSheet() {
     Column() {
       Row() {
+        HeaderBackButton({
+          onBack: () => {
+            this.activeSheetVisible = false;
+          }
+        })
+          .margin({ right: 12 });
         Column() {
           Text('教务认证')
             .fontSize(22)
@@ -1635,9 +1633,6 @@ struct Home {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start);
 
-        this.sheetCloseButton(() => {
-          this.sessionSheetOpen = false;
-        });
       }
       .width('100%')
       .alignItems(VerticalAlign.Center);

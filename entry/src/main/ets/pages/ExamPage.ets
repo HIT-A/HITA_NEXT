@@ -5,6 +5,7 @@
  * 右上角「添加考试」可将考试事件录入当前课表。
  */
 import { common } from '@kit.AbilityKit';
+import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { EasExamItem } from '../feature/eas/model/EasModels';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTimetable } from '../common/model/timetable/TimetableModels';
@@ -86,23 +87,17 @@ struct ExamPage {
   build() {
     Column() {
       Row() {
-        Text('‹')
-          .fontSize(30)
-          .fontColor('#1A1A1A')
-          .fontWeight(FontWeight.Bold)
-          .width(44)
-          .height(44)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            this.navigateBack();
-          })
-
+        HeaderBackButton({
+          onBack: () => this.navigateBack()
+        })
+          .margin({ right: 12 })
         Text('考试查询')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
           .fontColor('#1A1A1A')
           .layoutWeight(1)
-          .margin({ left: 4 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
 
         Text('+ 添加考试')
           .fontSize(13)
@@ -118,7 +113,7 @@ struct ExamPage {
           })
       }
       .width('100%')
-      .padding({ left: 8, right: 16, top: 8, bottom: 8 })
+      .padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .backgroundColor('#FFFFFF')
       .border({ width: { bottom: 1 }, color: '#EAECF0' })
       .alignItems(VerticalAlign.Center)

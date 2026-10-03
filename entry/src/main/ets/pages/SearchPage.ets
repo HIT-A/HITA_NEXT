@@ -2,6 +2,7 @@
  * SearchPage.ets — 搜索本地课程、教师与地点。
  */
 import { common } from '@kit.AbilityKit';
+import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem } from '../common/model/timetable/TimetableModels';
 
@@ -92,26 +93,20 @@ struct SearchPage {
   build() {
     Column() {
       Row() {
-        Text('‹')
-          .fontSize(30)
-          .fontColor('#1A1A1A')
-          .fontWeight(FontWeight.Bold)
-          .width(44)
-          .height(44)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            this.getUIContext().getRouter().back();
-          })
-
+        HeaderBackButton({
+          onBack: () => this.getUIContext().getRouter().back()
+        })
+          .margin({ right: 12 })
         Text('本地搜索')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
           .fontColor('#1A1A1A')
           .layoutWeight(1)
-          .margin({ left: 4 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
       .width('100%')
-      .padding({ left: 8, right: 16, top: 8, bottom: 8 })
+      .padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .backgroundColor('#FFFFFF')
       .border({ width: { bottom: 1 }, color: '#EAECF0' })
       .alignItems(VerticalAlign.Center)

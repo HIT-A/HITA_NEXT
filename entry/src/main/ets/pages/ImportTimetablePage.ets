@@ -1,5 +1,6 @@
 /** Android-style timetable import configuration page. */
 import { common } from '@kit.AbilityKit';
+import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { EasApiClient } from '../feature/eas/EasApiClient';
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
@@ -216,18 +217,17 @@ struct ImportTimetablePage {
   build() {
     Column() {
       Row() {
-        Text('<')
-          .fontSize(24)
-          .fontColor(TEXT_PRIMARY)
-          .width(44)
-          .height(44)
-          .textAlign(TextAlign.Center)
-          .onClick(() => this.getUIContext().getRouter().back());
+        HeaderBackButton({
+          onBack: () => this.getUIContext().getRouter().back()
+        })
+          .margin({ right: 12 });
         Text('导入课表')
           .fontSize(22)
           .fontWeight(FontWeight.Bold)
           .fontColor(TEXT_PRIMARY)
-          .layoutWeight(1);
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis });
         Button(this.importing ? '导入中' : '导入')
           .fontSize(14)
           .fontColor('#FFFFFF')
@@ -240,7 +240,7 @@ struct ImportTimetablePage {
       }
       .width('100%')
       .height(64)
-      .padding({ left: 6, right: 12 })
+      .padding({ left: 16, right: 16 })
       .alignItems(VerticalAlign.Center);
 
       if (this.loading) {

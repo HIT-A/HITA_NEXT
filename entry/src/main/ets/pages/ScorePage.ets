@@ -4,6 +4,7 @@
  * 需要教务会话：无会话 → 空态引导去登录；有会话 → 拉取学期成绩并渲染。
  */
 import { common } from '@kit.AbilityKit';
+import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
 import { EasDataProvider } from '../feature/eas/EasDataProvider';
@@ -75,23 +76,17 @@ struct ScorePage {
     Column() {
       // ── Header Bar ──
       Row() {
-        Text('‹')
-          .fontSize(30)
-          .fontColor('#1A1A1A')
-          .fontWeight(FontWeight.Bold)
-          .width(44)
-          .height(44)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            this.getUIContext().getRouter().back();
-          })
-
+        HeaderBackButton({
+          onBack: () => this.getUIContext().getRouter().back()
+        })
+          .margin({ right: 12 })
         Text('成绩查询')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
           .fontColor('#1A1A1A')
           .layoutWeight(1)
-          .margin({ left: 4 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
 
         Text('查询')
           .fontSize(13)
@@ -107,7 +102,7 @@ struct ScorePage {
           })
       }
       .width('100%')
-      .padding({ left: 8, right: 16, top: 8, bottom: 8 })
+      .padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .backgroundColor('#FFFFFF')
       .border({ width: { bottom: 1 }, color: '#EAECF0' })
       .alignItems(VerticalAlign.Center)

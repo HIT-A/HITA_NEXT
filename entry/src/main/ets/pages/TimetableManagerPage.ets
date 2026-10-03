@@ -1,5 +1,6 @@
 /** Android HITA-style timetable library. */
 import { common } from '@kit.AbilityKit';
+import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { RdbHelper } from '../common/db/RdbHelper';
@@ -363,26 +364,24 @@ struct TimetableManagerPage {
   build() {
     Column() {
       Row() {
-        Text('<')
-          .fontSize(24)
-          .fontWeight(FontWeight.Medium)
-          .width(44)
-          .height(44)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
+        HeaderBackButton({
+          onBack: () => {
             if (this.selectionMode) {
               this.selectedIds = [];
               this.selectionMode = false;
             } else {
               this.getUIContext().getRouter().back();
             }
-          })
+          }
+        })
+          .margin({ right: 12 });
         Text(this.selectionMode ? '已选择 ' + this.selectedIds.length.toString() + ' 项' : '课表管理')
           .fontSize(22)
           .fontWeight(FontWeight.Bold)
           .fontColor('#202633')
           .layoutWeight(1)
-          .margin({ left: 4 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
         if (this.selectionMode) {
           Text('删除')
             .fontSize(15)
@@ -405,7 +404,7 @@ struct TimetableManagerPage {
       }
       .width('100%')
       .height(64)
-      .padding({ left: 6, right: 12 })
+      .padding({ left: 16, right: 16 })
       .alignItems(VerticalAlign.Center)
 
       if (this.loading) {
