@@ -28,7 +28,8 @@ import {
   drawTimetablePlaces,
   drawTimetableWeek,
   drawTimetableWeekHeader,
-  eventsOfWeek
+  eventsOfWeek,
+  timetableEventSpan
 } from '../feature/timetable/views/TimetableWeekDraw';
 
 const DAY_MS: number = 24 * 60 * 60 * 1000;
@@ -394,14 +395,29 @@ struct Home {
       this.timetableEvents, this.timetableWeek);
     for (let i: number = weekEvents.length - 1; i >= 0; i--) {
       const event: EasEventItem = weekEvents[i];
-      if (event.type === EasEventType.CLASS && event.getDow() === day &&
-        event.from <= tappedTime && event.to >= tappedTime) {
+      const span = timetableEventSpan(this.currentTimetable, event, this.timetableWeek);
+      const isCourseOrExam: boolean = event.type === EasEventType.CLASS || event.type === EasEventType.EXAM;
+      if (isCourseOrExam && event.getDow() === day && span !== undefined &&
+        span.from <= tappedTime && span.to >= tappedTime) {
         this.selectedCourse = event;
         this.courseSheetOpen = true;
         this.activeSheetVisible = true;
         return;
       }
     }
+  }
+
+  private eventDetailEndTime(event: EasEventItem): number {
+    if (event.to > event.from) {
+      return event.to;
+    }
+    if (this.currentTimetable !== undefined) {
+      const span = timetableEventSpan(this.currentTimetable, event, this.timetableWeek);
+      if (span !== undefined && span.to > span.from) {
+        return span.to;
+      }
+    }
+    return event.from + 60 * 60 * 1000;
   }
 
   private courseProgressText(event: EasEventItem): string {
@@ -1626,7 +1642,7 @@ struct Home {
             .fontColor(COLOR_TEXT_PRIMARY)
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis });
-          Text('课程详情')
+          Text(event.type === EasEventType.EXAM ? '考试详情' : '课程详情')
             .fontSize(13)
             .fontColor(COLOR_TEXT_SECONDARY)
             .margin({ top: 4 });
@@ -1642,13 +1658,19 @@ struct Home {
 
       this.courseDetailRow($r('sys.symbol.person_crop_circle_fill'), '老师',
         event.teacher.trim().length > 0 ? event.teacher : '无');
-      this.courseDetailRow($r('sys.symbol.pin'), '教室',
+      this.courseDetailRow($r('sys.symbol.pin'), event.type === EasEventType.EXAM ? '考场' : '教室',
         event.place.trim().length > 0 ? event.place : '无');
       this.courseDetailRow($r('sys.symbol.clock'), '时间',
-        EasTimeTools.printTime(event.from) + ' - ' + EasTimeTools.printTime(event.to));
-      this.courseDetailRow($r('sys.symbol.doc_plaintext'), '节次', Home.coursePeriodText(event));
+        EasTimeTools.printTime(event.from) + ' - ' + EasTimeTools.printTime(this.eventDetailEndTime(event)));
+      if (event.type !== EasEventType.EXAM) {
+        this.courseDetailRow($r('sys.symbol.doc_plaintext'), '节次', Home.coursePeriodText(event));
+      }
       this.courseDetailRow($r('sys.symbol.calendar'), '日期', Home.courseDateText(event.from));
-      this.courseDetailRow($r('sys.symbol.repeat_1'), '课程进度', this.courseProgressText(event));
+      if (event.type === EasEventType.EXAM) {
+        this.courseDetailRow($r('sys.symbol.checkmark'), '类型', '考试');
+      } else {
+        this.courseDetailRow($r('sys.symbol.repeat_1'), '课程进度', this.courseProgressText(event));
+      }
     }
     .width('100%')
     .padding({ left: 20, right: 20, top: 4, bottom: 20 });

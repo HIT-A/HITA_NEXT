@@ -23,7 +23,7 @@ function load(file) {
 }
 const { placeMarqueeFrame, PLACE_MARQUEE_PAUSE_MS, PLACE_MARQUEE_SPEED } =
   load('feature/timetable/views/PlaceMarquee.ets');
-const { drawTimetableWeek, drawTimetablePlaces, TimetablePlaceLabel } =
+const { drawTimetableWeek, drawTimetablePlaces, TimetablePlaceLabel, timetableEventSpan } =
   load('feature/timetable/views/TimetableWeekDraw.ets');
 const { EasEventItem, EasTimetable } = load('common/model/timetable/TimetableModels.ets');
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 0.0001, `${actual} != ${expected}`);
@@ -115,6 +115,43 @@ test('static layout draws short classrooms but caches only overflowing labels fo
   assert.ok(!labels[0].matches(repeated[0]));
 });
 
+test('events with only a start hour or one section keep readable title and place text', () => {
+  const { timetable } = fixture();
+  const hourOnly = new EasEventItem();
+  hourOnly.name = '办公时间安排';
+  hourOnly.place = 'N-118';
+  hourOnly.from = timetable.startTime + 8 * 3600000;
+  hourOnly.to = 0;
+  const hourSpan = timetableEventSpan(timetable, hourOnly, 1);
+  assert.ok(hourSpan);
+  assert.equal(hourSpan.to - hourSpan.from, 3600000);
+  const hourCanvas = canvas();
+  const hourLabels = drawTimetableWeek(hourCanvas, 380, 830, timetable, [hourOnly], 1, false, 50, 0, false);
+  const hourTitleCalls = hourCanvas.calls.filter(c =>
+    c[0] === 'fillText' && c[3] >= 30 && c[3] <= 60);
+  assert.equal(hourTitleCalls.length, 2);
+  assert.ok(hourTitleCalls[1][3] > hourTitleCalls[0][3]);
+  assert.ok(hourLabels.some(label => label.text === 'N-118') ||
+    hourCanvas.calls.some(c => c[0] === 'fillText' && String(c[1]).includes('N-118')));
+
+  const onePeriod = new EasEventItem();
+  onePeriod.name = '单节课程';
+  onePeriod.place = 'M-201';
+  onePeriod.from = timetable.startTime + 8 * 3600000 + 30 * 60000;
+  onePeriod.to = 0;
+  onePeriod.fromNumber = 1;
+  onePeriod.lastNumber = 1;
+  const periodSpan = timetableEventSpan(timetable, onePeriod, 1);
+  assert.ok(periodSpan);
+  assert.equal(periodSpan.from, onePeriod.from);
+  assert.equal(periodSpan.to - periodSpan.from, 50 * 60000);
+  const periodCanvas = canvas();
+  const periodLabels = drawTimetableWeek(periodCanvas, 380, 830, timetable, [onePeriod], 1, false, 50, 0, false);
+  assert.ok(periodCanvas.calls.some(c => c[0] === 'fillText' && String(c[1]).includes('单节')));
+  assert.ok(periodLabels.some(label => label.text === 'M-201') ||
+    periodCanvas.calls.some(c => c[0] === 'fillText' && String(c[1]).includes('M-201')));
+});
+
 test('animation redraws only clipped classroom text without measuring text or repainting the grid', () => {
   const { timetable, events } = fixture();
   const labels = drawTimetableWeek(canvas(), 380, 830, timetable, events, 1, false, 50, 0, false);
@@ -166,4 +203,16 @@ test('the host uses cancellable-by-generation vsync callbacks and a non-interact
   assert.doesNotMatch(home, /timetableMarqueeTimer|timetableMarqueeOffset/);
   assert.match(home, /onPageHide\(\): void \{[\s\S]*?this\.stopTimetableMarquee\(\)/);
   assert.match(home, /Canvas\(this\.timetablePlaceCanvas\)[\s\S]*?\.hitTestBehavior\(HitTestMode\.None\)/);
+});
+
+test('timetable taps open detail for exams as well as classes', () => {
+  const home = fs.readFileSync(path.join(root, 'pages/Home.ets'), 'utf8');
+  const tap = home.slice(home.indexOf('  private openCourseAt'), home.indexOf('  private courseProgressText'));
+  assert.match(tap, /event\.type === EasEventType\.CLASS \|\| event\.type === EasEventType\.EXAM/);
+  assert.match(tap, /timetableEventSpan/);
+  const detail = home.slice(home.indexOf('  courseDetailSheet'), home.indexOf('  courseDetailRow'));
+  assert.match(detail, /event\.type === EasEventType\.EXAM \? '考试详情' : '课程详情'/);
+  assert.match(home, /event\.type === EasEventType\.EXAM \? '考场' : '教室'/);
+  assert.match(home, /if \(event\.type !== EasEventType\.EXAM\) \{[\s\S]*?Home\.coursePeriodText\(event\)/);
+  assert.match(home, /'类型', '考试'/);
 });

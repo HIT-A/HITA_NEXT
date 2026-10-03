@@ -80,12 +80,60 @@ export class TimetableDrawStyle {
 
 class TimetableBlockLayout {
   event: EasEventItem;
+  from: number;
+  to: number;
   lane: number = 0;
   lanes: number = 1;
 
-  constructor(event: EasEventItem) {
+  constructor(event: EasEventItem, from: number, to: number) {
     this.event = event;
+    this.from = from;
+    this.to = to;
   }
+}
+
+/**
+ * The timetable can contain hand-created events whose end time was not
+ * persisted.  Keep the original event untouched, but provide a stable span
+ * for drawing and hit testing.  A one-period event uses the timetable's
+ * section timestamps when available; otherwise it falls back to one hour.
+ */
+export class TimetableEventSpan {
+  from: number;
+  to: number;
+
+  constructor(from: number, to: number) {
+    this.from = from;
+    this.to = to;
+  }
+}
+
+export function timetableEventSpan(timetable: EasTimetable, event: EasEventItem,
+  weekNumber: number): TimetableEventSpan | undefined {
+  if (event.from <= 0 || event.from !== event.from) {
+    return undefined;
+  }
+  let from: number = event.from;
+  let to: number = event.to;
+  if (to <= from || to !== to) {
+    const dow: number = event.getDow();
+    if (dow >= 1 && dow <= 7 && event.fromNumber > 0 &&
+      event.lastNumber >= event.fromNumber &&
+      event.lastNumber <= timetable.scheduleStructure.length) {
+      const timestamps: number[] = timetable.getTimestamps(weekNumber, dow,
+        event.fromNumber, event.lastNumber);
+      if (timestamps.length >= 2 && timestamps[1] > timestamps[0]) {
+        // Preserve a persisted start timestamp (manual events may begin at a
+        // minute that differs from the timetable's nominal section start).
+        from = event.from > 0 ? event.from : timestamps[0];
+        to = timestamps[1];
+      }
+    }
+    if (to <= from || to !== to) {
+      to = from + 60 * 60 * 1000;
+    }
+  }
+  return new TimetableEventSpan(from, to);
 }
 
 export class TimetablePlaceLabel {
@@ -94,13 +142,14 @@ export class TimetablePlaceLabel {
   left: number = 0;
   top: number = 0;
   width: number = 0;
+  height: number = 16;
   textWidth: number = 0;
   baseline: number = 0;
 
   matches(other: TimetablePlaceLabel): boolean {
     return this.text === other.text && this.font === other.font &&
       this.left === other.left && this.top === other.top && this.width === other.width &&
-      this.textWidth === other.textWidth && this.baseline === other.baseline;
+      this.height === other.height && this.textWidth === other.textWidth && this.baseline === other.baseline;
   }
 }
 
@@ -121,7 +170,8 @@ export function drawTimetablePlaces(ctx: CanvasRenderingContext2D, w: number, h:
     ctx.font = label.font;
     ctx.save();
     ctx.beginPath();
-    ctx.rect(label.left, label.top, label.width, 16);
+    const labelHeight: number = label.height > 0 ? label.height : 16;
+    ctx.rect(label.left, label.top, label.width, labelHeight);
     ctx.clip();
     const textX: number = label.left - frame.offset;
     ctx.fillText(label.text, textX, label.baseline);
@@ -316,25 +366,37 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     if (dow < 1 || dow > 7) {
       continue;
     }
-    const layout: TimetableBlockLayout = new TimetableBlockLayout(events[i]);
+    const span: TimetableEventSpan | undefined = timetableEventSpan(timetable, events[i], weekNumber);
+    if (span === undefined) {
+      continue;
+    }
+    const axisStart: number = weekMonday + (dow - 1) * DAY_MILLIS + axisStartMsOffset;
+    const axisEnd: number = weekMonday + (dow - 1) * DAY_MILLIS +
+      AXIS_END_HOUR * 60 * 60 * 1000;
+    const visibleFrom: number = Math.max(span.from, axisStart);
+    const visibleTo: number = Math.min(span.to, axisEnd);
+    if (visibleTo <= visibleFrom) {
+      continue;
+    }
+    const layout: TimetableBlockLayout = new TimetableBlockLayout(events[i], visibleFrom, visibleTo);
     dayLayouts[dow - 1].push(layout);
     layouts.push(layout);
   }
   for (let d = 0; d < 7; d++) {
     dayLayouts[d].sort((a: TimetableBlockLayout, b: TimetableBlockLayout): number => {
-      return a.event.from - b.event.from;
+      return a.from - b.from;
     });
     const laneEnds: number[] = [];
     for (let i = 0; i < dayLayouts[d].length; i++) {
       const layout: TimetableBlockLayout = dayLayouts[d][i];
       let lane: number = 0;
-      while (lane < laneEnds.length && laneEnds[lane] > layout.event.from) {
+      while (lane < laneEnds.length && laneEnds[lane] > layout.from) {
         lane++;
       }
       if (lane === laneEnds.length) {
-        laneEnds.push(layout.event.to);
+        laneEnds.push(layout.to);
       } else {
-        laneEnds[lane] = layout.event.to;
+        laneEnds[lane] = layout.to;
       }
       layout.lane = lane;
     }
@@ -345,8 +407,8 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
         if (i === j) {
           continue;
         }
-        const other: EasEventItem = dayLayouts[d][j].event;
-        if (other.from < layout.event.to && other.to > layout.event.from) {
+        const other: TimetableBlockLayout = dayLayouts[d][j];
+        if (other.from < layout.to && other.to > layout.from) {
           overlapCount++;
         }
       }
@@ -359,8 +421,8 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     const ev: EasEventItem = layout.event;
     const dow: number = ev.getDow();
     const dayStart: number = weekMonday + (dow - 1) * DAY_MILLIS;
-    const topMs: number = ev.from - dayStart - axisStartMsOffset;
-    const durMs: number = ev.to - ev.from;
+    const topMs: number = layout.from - dayStart - axisStartMsOffset;
+    const durMs: number = layout.to - layout.from;
     if (topMs < 0 || durMs <= 0) {
       continue;
     }
@@ -389,18 +451,32 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     const lengthScale: number = nameLength <= 4 ? 1.15 :
       (nameLength <= 6 ? 0.92 : (nameLength <= 8 ? 0.75 : 0.62));
     const hasPlace: boolean = ev.place.trim().length > 0;
-    const titlePaddingScreen: number = 5 * marginScale;
-    const placePaddingScreen: number = hasPlace ? 14 * textScale : 0;
+    const compactCard: boolean = cardHeightScreen < 60;
+    // One-hour cards are the common manual-event size.  Keep their text
+    // breathing room small enough to retain Android-like title sizing.
+    const titlePaddingScreen: number = (compactCard ? 3 : 5) * marginScale;
+    // A 45-minute class is a normal Android timetable card.  Reserve a
+    // smaller, but still readable, place row instead of dropping the place
+    // or squeezing the title into an invalid negative area.
+    const canShowPlace: boolean = hasPlace && cardHeightScreen >= 30;
+    const placeHeight: number = canShowPlace ?
+      (compactCard ? Math.min(13, Math.max(10, cardHeightScreen * 0.28)) :
+        Math.min(16, Math.max(10, cardHeightScreen * 0.34))) : 0;
+    const placePaddingScreen: number = canShowPlace ? placeHeight + 2 : 0;
     const titleAvailableScreen: number = Math.max(10,
       cardHeightScreen - titlePaddingScreen * 2 - placePaddingScreen);
     const maxTitleLines: number = cardHeightScreen < 40 ? 1 :
       (cardHeightScreen < 60 ? 2 : 3);
-    const maxTitleFromSpace: number = Math.min(16, titleAvailableScreen / 1.2);
+    // Fit all requested lines into the title area.  The previous calculation
+    // only accounted for one line, so a one-hour card could draw its second
+    // line below the title area and make the text look clipped or misplaced.
+    const maxTitleFromSpace: number = Math.min(16,
+      titleAvailableScreen / (Math.max(1, maxTitleLines) * 1.15));
     const minTitleSize: number = layout.lanes > 1 ? 5 : 6;
     const titleScreen: number = Math.max(minTitleSize,
       Math.min(maxTitleFromSpace, 13 * textScale * lengthScale));
     const titleFont: number = Math.max(1, Math.round(titleScreen));
-    const titleLineHeight: number = Math.max(1, Math.round(titleScreen * 1.2));
+    const titleLineHeight: number = Math.max(1, Math.round(titleScreen * 1.15));
     // Chinese glyphs are close to one em wide.  A small allowance lets a
     // three-line card retain the full subject name instead of truncating at
     // only two characters on narrow day columns.
@@ -411,32 +487,37 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.font = 'bold ' + titleFont.toString() + fontUnit;
     ctx.fillStyle = '#FFFFFF';
     ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     if (titleLines.length > 0) {
-      const titleAreaBottom: number = hasPlace && cardHeightScreen >= 38 ?
-        y + bh - 17 : y + bh - 8;
+      const titleAreaBottom: number = canShowPlace ?
+        y + bh - placeHeight - 2 : y + bh - 8;
       const titleAreaTop: number = y + Math.round(titlePaddingScreen);
       const titleHeight: number = titleLines.length * titleLineHeight;
-      let titleY: number = titleAreaTop + Math.max(0, (titleAreaBottom - titleAreaTop - titleHeight) / 2);
+      let titleY: number = titleAreaTop +
+        Math.max(0, (titleAreaBottom - titleAreaTop - titleHeight) / 2) + titleLineHeight / 2;
       for (let line = 0; line < titleLines.length; line++) {
-        if (titleY + titleLineHeight > titleAreaBottom + titleLineHeight) {
+        if (titleY + titleLineHeight / 2 > titleAreaBottom ||
+          titleY - titleLineHeight / 2 < titleAreaTop) {
           break;
         }
         ctx.fillText(titleLines[line], x + bw / 2, titleY);
         titleY += titleLineHeight;
       }
     }
-    if (hasPlace && cardHeightScreen >= 38) {
+    if (canShowPlace) {
       ctx.fillStyle = 'rgba(255,255,255,0.78)';
       const placeFont: number = Math.round(10 * textScale);
       ctx.font = placeFont.toString() + fontUnit;
       ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
       const placeText: string = ev.place.trim();
       const placeAvailableWidth: number = Math.max(4, cardWidthScreen - titlePaddingScreen * 2);
       const placeTextWidth: number = ctx.measureText(placeText).width;
-      const placeY: number = y + bh - 9;
+      const placeTop: number = y + bh - placeHeight;
+      const placeY: number = y + bh - Math.max(4, placeHeight * 0.28);
       ctx.save();
       ctx.beginPath();
-      ctx.rect(x + titlePaddingScreen, y + bh - 18, placeAvailableWidth, 16);
+      ctx.rect(x + titlePaddingScreen, placeTop, placeAvailableWidth, placeHeight);
       ctx.clip();
       if (placeTextWidth <= placeAvailableWidth) {
         ctx.fillText(placeText, x + bw / 2, placeY);
@@ -446,8 +527,9 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
         // ArkUI may normalize the font getter to px; preserve the requested vp size.
         label.font = placeFont.toString() + fontUnit;
         label.left = x + titlePaddingScreen;
-        label.top = y + bh - 18;
+        label.top = placeTop;
         label.width = placeAvailableWidth;
+        label.height = placeHeight;
         label.textWidth = placeTextWidth;
         label.baseline = placeY;
         scrollingPlaces.push(label);
