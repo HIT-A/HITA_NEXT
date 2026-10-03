@@ -731,7 +731,8 @@ struct Home {
       }
       .width('100%')
       .height('100%')
-      .padding({ bottom: this.currentTab === 1 ? 0 : 64 })
+      // 时间表/更多页：内容延伸进底部安全区，导航胶囊悬浮在内容之上（与时间表一致）。
+      .padding({ bottom: this.currentTab === 0 ? 64 : 0 })
       .backgroundColor(this.currentTab === 1 ? 'transparent' : COLOR_SURFACE)
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
 
@@ -1495,7 +1496,7 @@ struct Home {
           .backgroundColor(COLOR_CARD)
           .borderRadius(16);
 
-          Blank().height(88);
+          Blank().height(110);
         }
         .width('100%')
         // Single source of truth for the tab's horizontal inset: every card,
@@ -1503,7 +1504,8 @@ struct Home {
         .padding({ left: 16, right: 16, bottom: 16 });
       }
       .layoutWeight(1)
-      .scrollBar(BarState.Off);
+      .scrollBar(BarState.Off)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM]);
     }
     .width('100%')
     .height('100%');

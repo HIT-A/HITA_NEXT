@@ -15,10 +15,21 @@ struct NoticesPage {
 
   async aboutToAppear(): Promise<void> {
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
-    this.notices = AppNoticeCenter.activeNotices(await AppNoticeCenter.cachedNotices(ctx));
-    this.loading = false;
-    const fetched: AppNotice[] = await AppNoticeCenter.fetch(ctx);
-    this.notices = AppNoticeCenter.activeNotices(fetched);
+    try {
+      this.notices = AppNoticeCenter.activeNotices(await AppNoticeCenter.cachedNotices(ctx));
+    } catch (e) {
+      this.notices = [];
+    }
+    // 有缓存时立即显示；没有缓存时保留加载态，避免把网络等待误报成空公告。
+    this.loading = this.notices.length === 0;
+    try {
+      const fetched: AppNotice[] = await AppNoticeCenter.fetch(ctx);
+      this.notices = AppNoticeCenter.activeNotices(fetched);
+    } catch (e) {
+      // fetch 内部会回落缓存；这里只兜底处理页面生命周期中的异常。
+    } finally {
+      this.loading = false;
+    }
   }
 
   build() {

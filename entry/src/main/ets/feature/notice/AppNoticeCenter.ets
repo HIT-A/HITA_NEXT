@@ -104,8 +104,25 @@ export class AppNoticeCenter {
       if (text.length === 0) {
         return [];
       }
-      const parsed: AppNotice[] | undefined = JSON.parse(text) as AppNotice[] | undefined;
-      return parsed === undefined ? [] : parsed;
+      // 缓存是 JSON 文本，解析出的是没有方法的原生对象，必须重建为 AppNotice 实例，
+      // 否则 activeNotices/页面里调用 isCritical() 会直接抛异常（表现为一直加载）。
+      const parsed: Array<Record<string, Object>> | undefined =
+        JSON.parse(text) as Array<Record<string, Object>> | undefined;
+      if (parsed === undefined || !Array.isArray(parsed)) {
+        return [];
+      }
+      const out: AppNotice[] = [];
+      for (let i: number = 0; i < parsed.length; i++) {
+        const record: Record<string, Object> = parsed[i] as Record<string, Object>;
+        if (record === undefined || record === null) {
+          continue;
+        }
+        const notice: AppNotice | undefined = AppNoticeCenter.parseNotice(record);
+        if (notice !== undefined) {
+          out.push(notice);
+        }
+      }
+      return out;
     } catch (e) {
       return [];
     }
@@ -129,8 +146,9 @@ export class AppNoticeCenter {
     const out: AppNotice[] = notices.filter((notice: AppNotice): boolean => {
       const started: boolean = notice.startsAt < 0 ? true : now >= notice.startsAt;
       const ended: boolean = notice.endsAt < 0 ? true : now <= notice.endsAt;
+      const supported: boolean = notice.minAppVersion < 0 ? true : currentVersion >= notice.minAppVersion;
       const affected: boolean = notice.affectedMinVersion < 0 ? true : currentVersion >= notice.affectedMinVersion;
-      return started && ended && affected;
+      return started && ended && supported && affected;
     });
     out.sort((a: AppNotice, b: AppNotice): number => {
       const av: number = a.isCritical() ? 0 : 1;
@@ -154,19 +172,20 @@ export class AppNoticeCenter {
         }
       } as http.HttpRequestOptions);
       if (resp.responseCode < 200 || resp.responseCode > 299) {
-        return [];
+        throw new Error('公告请求失败: HTTP ' + resp.responseCode.toString());
       }
       const body: string = typeof resp.result === 'string' ? resp.result : JSON.stringify(resp.result);
       const root: Record<string, Object> = JSON.parse(body) as Record<string, Object>;
       const array: Array<Record<string, Object>> | undefined =
         root['notices'] as Array<Record<string, Object>> | undefined;
+      if (array === undefined || !Array.isArray(array)) {
+        throw new Error('公告响应缺少 notices 数组');
+      }
       const out: AppNotice[] = [];
-      if (array !== undefined) {
-        for (let i: number = 0; i < array.length; i++) {
-          const notice: AppNotice | undefined = AppNoticeCenter.parseNotice(array[i]);
-          if (notice !== undefined) {
-            out.push(notice);
-          }
+      for (let i: number = 0; i < array.length; i++) {
+        const notice: AppNotice | undefined = AppNoticeCenter.parseNotice(array[i]);
+        if (notice !== undefined) {
+          out.push(notice);
         }
       }
       return out;
@@ -176,6 +195,9 @@ export class AppNoticeCenter {
   }
 
   private static parseNotice(obj: Record<string, Object>): AppNotice | undefined {
+    if (obj === undefined || obj === null) {
+      return undefined;
+    }
     const id: string = AppNoticeCenter.textOf(obj['id']);
     if (id.length === 0) {
       return undefined;
@@ -186,11 +208,20 @@ export class AppNoticeCenter {
     notice.severity = AppNoticeCenter.textOr(obj['severity'], 'info');
     notice.title = AppNoticeCenter.textOr(obj['title'], '公告');
     notice.body = AppNoticeCenter.textOf(obj['body']);
-    notice.minAppVersion = AppNoticeCenter.numOr(obj['min_app_version'], -1);
-    notice.affectedMinVersion = AppNoticeCenter.numOr(obj['affected_min_version'], -1);
-    notice.startsAt = AppNoticeCenter.numOr(obj['starts_at'], -1);
-    notice.endsAt = AppNoticeCenter.numOr(obj['ends_at'], -1);
+    notice.minAppVersion = AppNoticeCenter.numOr(
+      AppNoticeCenter.firstOf(obj, 'min_app_version', 'minAppVersion'), -1);
+    notice.affectedMinVersion = AppNoticeCenter.numOr(
+      AppNoticeCenter.firstOf(obj, 'affected_min_version', 'affectedMinVersion'), -1);
+    notice.startsAt = AppNoticeCenter.numOr(
+      AppNoticeCenter.firstOf(obj, 'starts_at', 'startsAt'), -1);
+    notice.endsAt = AppNoticeCenter.numOr(
+      AppNoticeCenter.firstOf(obj, 'ends_at', 'endsAt'), -1);
     return notice;
+  }
+
+  private static firstOf(obj: Record<string, Object>, primary: string, fallback: string): Object | undefined {
+    const value: Object | undefined = obj[primary];
+    return value === undefined || value === null ? obj[fallback] : value;
   }
 
   private static textOf(value: Object | undefined): string {
