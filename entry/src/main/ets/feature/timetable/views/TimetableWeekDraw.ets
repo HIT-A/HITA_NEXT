@@ -17,6 +17,7 @@ import {
   EasEventItem,
   EasTimetable
 } from '../../../common/model/timetable/TimetableModels';
+import { PlaceMarqueeFrame, placeMarqueeFrame } from './PlaceMarquee';
 
 export const DOW_NAMES: string[] = ['一', '二', '三', '四', '五', '六', '日'];
 /** 轴起点 08:00（对应源 startTime=800）。 */
@@ -85,6 +86,49 @@ class TimetableBlockLayout {
   constructor(event: EasEventItem) {
     this.event = event;
   }
+}
+
+export class TimetablePlaceLabel {
+  text: string = '';
+  font: string = '';
+  left: number = 0;
+  top: number = 0;
+  width: number = 0;
+  textWidth: number = 0;
+  baseline: number = 0;
+
+  matches(other: TimetablePlaceLabel): boolean {
+    return this.text === other.text && this.font === other.font &&
+      this.left === other.left && this.top === other.top && this.width === other.width &&
+      this.textWidth === other.textWidth && this.baseline === other.baseline;
+  }
+}
+
+/** Only the transparent classroom layer changes on animation frames. */
+export function drawTimetablePlaces(ctx: CanvasRenderingContext2D, w: number, h: number,
+  labels: TimetablePlaceLabel[], elapsedMs: number): number {
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = 'rgba(255,255,255,0.78)';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  let nextDelay: number = -1;
+  for (let i: number = 0; i < labels.length; i++) {
+    const label: TimetablePlaceLabel = labels[i];
+    const frame: PlaceMarqueeFrame = placeMarqueeFrame(elapsedMs, label.textWidth, label.width);
+    if (frame.nextFrameDelayMs >= 0) {
+      nextDelay = nextDelay < 0 ? frame.nextFrameDelayMs : Math.min(nextDelay, frame.nextFrameDelayMs);
+    }
+    ctx.font = label.font;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(label.left, label.top, label.width, 16);
+    ctx.clip();
+    const textX: number = label.left - frame.offset;
+    ctx.fillText(label.text, textX, label.baseline);
+    ctx.fillText(label.text, textX + label.textWidth + label.width / 3, label.baseline);
+    ctx.restore();
+  }
+  return nextDelay;
 }
 
 /** ARGB int → css rgba 字符串。 */
@@ -185,10 +229,10 @@ export function drawTimetableWeekHeader(ctx: CanvasRenderingContext2D, w: number
 export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: number,
   timetable: EasTimetable, events: EasEventItem[], weekNumber: number,
   isCurrentWeek: boolean, hourHeightOverride: number = 0,
-  headerHeightOverride: number = 0, drawHeader: boolean = true,
-  placeScrollOffset: number = 0): boolean {
+  headerHeightOverride: number = 0, drawHeader: boolean = true): TimetablePlaceLabel[] {
+  const scrollingPlaces: TimetablePlaceLabel[] = [];
   if (w <= 0 || h <= 0) {
-    return false;
+    return scrollingPlaces;
   }
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = TimetableDrawStyle.bg;
@@ -208,7 +252,6 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   const fontUnit: string = 'vp sans-serif';
   const weekMonday: number = timetable.startTime + (weekNumber - 1) * WEEK_MILLIS;
   const todayDow: number = EasTimetable.dowOfMs(Date.now());
-  let hasScrollingPlace: boolean = false;
 
   if (drawHeader) {
     drawWeekHeader(ctx, w, headerH, timetable, weekNumber, isCurrentWeek);
@@ -398,17 +441,20 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
       if (placeTextWidth <= placeAvailableWidth) {
         ctx.fillText(placeText, x + bw / 2, placeY);
       } else {
-        hasScrollingPlace = true;
-        const gap: number = 18;
-        const cycleWidth: number = placeTextWidth + gap;
-        const textX: number = x + titlePaddingScreen - (placeScrollOffset % cycleWidth);
-        ctx.textAlign = 'left';
-        ctx.fillText(placeText, textX, placeY);
-        ctx.fillText(placeText, textX + cycleWidth, placeY);
+        const label: TimetablePlaceLabel = new TimetablePlaceLabel();
+        label.text = placeText;
+        // ArkUI may normalize the font getter to px; preserve the requested vp size.
+        label.font = placeFont.toString() + fontUnit;
+        label.left = x + titlePaddingScreen;
+        label.top = y + bh - 18;
+        label.width = placeAvailableWidth;
+        label.textWidth = placeTextWidth;
+        label.baseline = placeY;
+        scrollingPlaces.push(label);
       }
       ctx.restore();
       ctx.textAlign = 'start';
     }
   }
-  return hasScrollingPlace;
+  return scrollingPlaces;
 }

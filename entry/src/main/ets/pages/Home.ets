@@ -6,6 +6,7 @@
  * timetable/session data layer already used by the app.
  */
 import { common } from '@kit.AbilityKit';
+import { FrameCallback } from '@kit.ArkUI';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTermSubject, EasTimetable } from '../common/model/timetable/TimetableModels';
@@ -23,6 +24,8 @@ import {
   TIMETABLE_GRID_TOP_PADDING,
   TIMETABLE_HEADER_HEIGHT,
   TIMETABLE_HOUR_HEIGHT,
+  TimetablePlaceLabel,
+  drawTimetablePlaces,
   drawTimetableWeek,
   drawTimetableWeekHeader,
   eventsOfWeek
@@ -42,6 +45,19 @@ const COLOR_EXAM: string = '#8A2E42';
 const COLOR_OTHER: string = '#1B4F9C';
 const COLOR_TAG: string = '#0F6E56';
 const TIMETABLE_BOTTOM_SAFE_EXTENSION: number = 56;
+
+class TimetableMarqueeCallback extends FrameCallback {
+  private callback: (timeMs: number) => void;
+
+  constructor(callback: (timeMs: number) => void) {
+    super();
+    this.callback = callback;
+  }
+
+  onFrame(frameTimeInNano: number): void {
+    this.callback(frameTimeInNano / 1000000);
+  }
+}
 
 @Entry
 @Component
@@ -78,20 +94,26 @@ struct Home {
   @State timetableAnimating: boolean = false;
   private importRequested: boolean = false;
   private clockTimer: number = -1;
-  private timetableMarqueeTimer: number = -1;
-  private timetableMarqueeOffset: number = 0;
-  private timetableHasScrollingPlace: boolean = false;
+  private pageVisible: boolean = false;
+  private timetablePlaceLabels: TimetablePlaceLabel[] = [];
+  private timetableMarqueeCallback: TimetableMarqueeCallback | undefined = undefined;
+  private timetableMarqueeGeneration: number = 0;
+  private timetableMarqueeElapsedMs: number = 0;
+  private timetableMarqueeLastFrameMs: number = -1;
   private timetableAnimationTimer: number = -1;
   private dayKey: string = EasTimeTools.printDate(Date.now());
   private timetableCanvas: CanvasRenderingContext2D =
     new CanvasRenderingContext2D(new RenderingContextSettings(true));
   private timetableHeaderCanvas: CanvasRenderingContext2D =
     new CanvasRenderingContext2D(new RenderingContextSettings(true));
+  private timetablePlaceCanvas: CanvasRenderingContext2D =
+    new CanvasRenderingContext2D(new RenderingContextSettings(true));
   private timetableAreaW: number = 0;
   private timetableAreaH: number = 0;
   @State private timetableCanvasHeight: number = 0;
 
   async aboutToAppear(): Promise<void> {
+    this.pageVisible = true;
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     await EasSessionStore.getInstance().init(ctx);
     await TimetableSelectionStore.getInstance().init(ctx);
@@ -108,18 +130,23 @@ struct Home {
   }
 
   async onPageShow(): Promise<void> {
+    this.pageVisible = true;
     this.startClock();
     await this.refreshSummaries();
+    this.drawTimetableNow();
+  }
+
+  onPageHide(): void {
+    this.pageVisible = false;
+    this.stopTimetableMarquee();
   }
 
   aboutToDisappear(): void {
+    this.pageVisible = false;
+    this.stopTimetableMarquee();
     if (this.clockTimer >= 0) {
       clearInterval(this.clockTimer);
       this.clockTimer = -1;
-    }
-    if (this.timetableMarqueeTimer >= 0) {
-      clearInterval(this.timetableMarqueeTimer);
-      this.timetableMarqueeTimer = -1;
     }
     if (this.timetableAnimationTimer >= 0) {
       clearTimeout(this.timetableAnimationTimer);
@@ -140,15 +167,42 @@ struct Home {
         }
       }, 60000);
     }
-    if (this.timetableMarqueeTimer < 0) {
-      this.timetableMarqueeTimer = setInterval(() => {
-        if (this.currentTab === 1 && this.currentTimetable !== undefined &&
-          this.timetableHasScrollingPlace) {
-          this.timetableMarqueeOffset = (this.timetableMarqueeOffset + 1.2) % 100000;
-          this.drawTimetableNow();
-        }
-      }, 100);
+  }
+
+  private stopTimetableMarquee(): void {
+    // Queued frame callbacks cannot be cancelled; invalidate their generation.
+    this.timetableMarqueeGeneration++;
+    this.timetableMarqueeCallback = undefined;
+    this.timetableMarqueeLastFrameMs = -1;
+  }
+
+  private startTimetableMarquee(): void {
+    if (this.timetableMarqueeCallback !== undefined || !this.pageVisible ||
+      this.currentTab !== 1 || this.timetablePlaceLabels.length === 0) {
+      return;
     }
+    const generation: number = this.timetableMarqueeGeneration;
+    const callback: TimetableMarqueeCallback = new TimetableMarqueeCallback((timeMs: number) => {
+      if (generation !== this.timetableMarqueeGeneration || !this.pageVisible || this.currentTab !== 1) {
+        return;
+      }
+      if (this.timetableMarqueeLastFrameMs >= 0) {
+        this.timetableMarqueeElapsedMs += Math.max(0, timeMs - this.timetableMarqueeLastFrameMs);
+      }
+      this.timetableMarqueeLastFrameMs = timeMs;
+      const nextDelay: number = drawTimetablePlaces(this.timetablePlaceCanvas,
+        this.timetableAreaW, this.timetableCanvasHeight, this.timetablePlaceLabels,
+        this.timetableMarqueeElapsedMs);
+      if (nextDelay < 0) {
+        this.stopTimetableMarquee();
+      } else if (nextDelay > 0) {
+        this.getUIContext().postDelayedFrameCallback(callback, Math.ceil(nextDelay));
+      } else {
+        this.getUIContext().postFrameCallback(callback);
+      }
+    });
+    this.timetableMarqueeCallback = callback;
+    this.getUIContext().postFrameCallback(callback);
   }
 
   async refreshSummaries(): Promise<void> {
@@ -249,6 +303,7 @@ struct Home {
 
   private drawTimetableNow(): void {
     if (this.timetableAreaW <= 0 || this.timetableAreaH <= 0 || this.currentTimetable === undefined) {
+      this.stopTimetableMarquee();
       return;
     }
     const weekEvents: EasEventItem[] = eventsOfWeek(this.currentTimetable,
@@ -263,10 +318,20 @@ struct Home {
     if (this.timetableCanvasHeight !== canvasHeight) {
       this.timetableCanvasHeight = canvasHeight;
     }
-    this.timetableHasScrollingPlace = drawTimetableWeek(this.timetableCanvas,
+    const labels: TimetablePlaceLabel[] = drawTimetableWeek(this.timetableCanvas,
       this.timetableAreaW, canvasHeight,
       this.currentTimetable, weekEvents, this.timetableWeek, current === this.timetableWeek,
-      hourHeight, 0, false, this.timetableMarqueeOffset);
+      hourHeight, 0, false);
+    if (labels.length !== this.timetablePlaceLabels.length ||
+      labels.some((label: TimetablePlaceLabel, index: number): boolean =>
+        !label.matches(this.timetablePlaceLabels[index]))) {
+      this.stopTimetableMarquee();
+      this.timetableMarqueeElapsedMs = 0;
+    }
+    this.timetablePlaceLabels = labels;
+    drawTimetablePlaces(this.timetablePlaceCanvas, this.timetableAreaW, canvasHeight,
+      labels, this.timetableMarqueeElapsedMs);
+    this.startTimetableMarquee();
     drawTimetableWeekHeader(this.timetableHeaderCanvas, this.timetableAreaW,
       TIMETABLE_HEADER_HEIGHT, this.currentTimetable, this.timetableWeek,
       current === this.timetableWeek);
@@ -286,6 +351,8 @@ struct Home {
       return;
     }
     this.timetableWeek = next;
+    this.stopTimetableMarquee();
+    this.timetableMarqueeElapsedMs = 0;
     this.drawTimetableNow();
   }
 
@@ -813,6 +880,10 @@ struct Home {
     .borderRadius(22)
     .opacity(1)
     .onClick(() => {
+      if (this.currentTab !== index) {
+        this.stopTimetableMarquee();
+        this.timetableMarqueeElapsedMs = 0;
+      }
       this.currentTab = index;
     })
   }
@@ -1277,16 +1348,30 @@ struct Home {
             })
 
           Scroll() {
-            Canvas(this.timetableCanvas)
-              .width('100%')
-              .height(this.timetableCanvasHeight)
-              .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-              .onReady(() => {
-                this.drawTimetableNow();
-              })
-              .onClick((event: ClickEvent) => {
-                this.openCourseAt(event.x, event.y);
-              })
+            Stack({ alignContent: Alignment.TopStart }) {
+              Canvas(this.timetableCanvas)
+                .width('100%')
+                .height('100%')
+                .onReady(() => {
+                  this.drawTimetableNow();
+                })
+                .onClick((event: ClickEvent) => {
+                  this.openCourseAt(event.x, event.y);
+                })
+              Canvas(this.timetablePlaceCanvas)
+                .width('100%')
+                .height('100%')
+                .hitTestBehavior(HitTestMode.None)
+                .onReady(() => {
+                  this.drawTimetableNow();
+                })
+            }
+            .width('100%')
+            .height(this.timetableCanvasHeight)
+            .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+            .onDisAppear(() => {
+              this.stopTimetableMarquee();
+            })
           }
           .width('100%')
           .layoutWeight(1)
