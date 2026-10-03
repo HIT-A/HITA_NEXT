@@ -15,7 +15,6 @@ import {
   DAY_MILLIS,
   WEEK_MILLIS,
   EasEventItem,
-  EasEventType,
   EasTimetable
 } from '../../../common/model/timetable/TimetableModels';
 
@@ -264,15 +263,12 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.stroke();
   }
 
-  // 事件块：真实时刻分钟映射。课程重叠时按 lane 缩窄，避免互相覆盖。
+  // 事件块（课程/考试等全部类型）：真实时刻分钟映射。重叠时按 lane 缩窄，避免互相覆盖。
   const axisStartMsOffset: number = AXIS_START_HOUR * 60 * 60 * 1000;
   const m: number = TimetableDrawStyle.blockMargin;
   const layouts: TimetableBlockLayout[] = [];
   const dayLayouts: TimetableBlockLayout[][] = [[], [], [], [], [], [], []];
   for (let i = 0; i < events.length; i++) {
-    if (events[i].type !== EasEventType.CLASS) {
-      continue;
-    }
     const dow: number = events[i].getDow();
     if (dow < 1 || dow > 7) {
       continue;

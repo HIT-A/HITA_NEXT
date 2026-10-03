@@ -11,6 +11,7 @@ import { EasCourseItem, EasCourseScoreItem, EasExamItem, EasTermItem } from './m
 import { EasTimePeriodInDay } from '../../common/model/timetable/TimetableModels';
 import { easWebLoginConfigFor, EasCampusUrls } from './webLogin/EasWebLoginConfig';
 import { EasLegacyTimetableParser } from './data/EasLegacyTimetableParser';
+import { EasLegacyCourseCatalogParser, LegacyCourseAttributes } from './data/EasLegacyCourseCatalogParser';
 import { ParsedShenzhenWebScores, parseShenzhenWebScores, testShenzhenScoreParser } from './data/ShenzhenWebScores';
 import {
   parseShenzhenWebSelectedSubjects,
@@ -47,6 +48,18 @@ export class EasBenbuEndpoints {
   static timetableTermsPath: string = '/kbcx/queryGrkb';
   static timetablePath: string = '/kbcx/queryGrkb';
   static scoresPath: string = '';
+}
+
+/** 本部/威海共用的课程属性表页面（两校区传统教务路径一致）。 */
+export class EasLegacyCatalogEndpoints {
+  static executionPlanPath: string = '/zxjh/queryZxkc';
+  static finalScoresPath: string = '/cjcx/queryQmcj';
+}
+
+/** 一次属性表读取的行数与简短诊断（会拼进导入提示，便于在真机上直接看到结果）。 */
+export class LegacyCatalogFetch {
+  rows: LegacyCourseAttributes[] = [];
+  diag: string = '';
 }
 
 export class EasScoresResult {
@@ -152,10 +165,119 @@ export class EasDataProvider {
     return courses;
   }
 
-  private async getHtml(session: EasSession, path: string): Promise<EasApiResponse> {
+  /**
+   * 本部/威海：课表 HTML 不含课程性质、学分与“是否考试课”，从执行计划和期末成绩
+   * 两张表补读。尽力而为：任何一步失败都只返回已拿到的部分，不影响课表导入；
+   * diag 记录每张表实际读到的行数或失败原因。
+   */
+  async getLegacyCourseAttributes(session: EasSession, term: EasTermItem): Promise<LegacyCatalogFetch> {
+    const out: LegacyCatalogFetch = new LegacyCatalogFetch();
+    if (session.campus === EasCampus.SHENZHEN) {
+      return out;
+    }
+    const planOverrides: Map<string, string> = new Map<string, string>();
+    planOverrides.set('pageNo', '1');
+    planOverrides.set('pageSize', '1000');
+    const plan: LegacyCatalogFetch = await this.fetchLegacyCourseTable(session,
+      EasLegacyCatalogEndpoints.executionPlanPath, 'pageSize', planOverrides);
+    const scoreOverrides: Map<string, string> = new Map<string, string>();
+    scoreOverrides.set('pageXnxq', term.getCode());
+    scoreOverrides.set('pageBkcxbj', '0');
+    scoreOverrides.set('pageSfjg', '');
+    scoreOverrides.set('pageKcmc', '');
+    const scores: LegacyCatalogFetch = await this.fetchLegacyCourseTable(session,
+      EasLegacyCatalogEndpoints.finalScoresPath, 'pageXnxq', scoreOverrides);
+    out.rows = scores.rows.concat(plan.rows);
+    out.diag = '计划' + plan.diag + '/成绩' + scores.diag;
+    hilog.info(DOMAIN, TAG, 'legacy course attributes plan=%{public}s scores=%{public}s',
+      plan.diag, scores.diag);
+    return out;
+  }
+
+  private async fetchLegacyCourseTable(session: EasSession, path: string, formMarker: string,
+    overrides: Map<string, string>): Promise<LegacyCatalogFetch> {
+    const out: LegacyCatalogFetch = new LegacyCatalogFetch();
+    try {
+      const page: EasApiResponse = await this.getHtml(session, path, 12000);
+      if (!EasDataProvider.isHttpOk(page)) {
+        out.diag = 'HTTP' + page.statusCode.toString();
+        hilog.warn(DOMAIN, TAG, 'legacy catalog GET path=%{public}s status=%{public}d', path, page.statusCode);
+        return out;
+      }
+      if (EasDataProvider.isLoginResponse(page.body)) {
+        out.diag = '会话失效';
+        return out;
+      }
+      let rows: LegacyCourseAttributes[] = EasLegacyCourseCatalogParser.parseTables(page.body);
+      const fields: Map<string, string> | undefined =
+        EasLegacyCourseCatalogParser.parseFormFields(page.body, formMarker);
+      if (fields !== undefined) {
+        overrides.forEach((value: string, key: string) => {
+          fields.set(key, value);
+        });
+        hilog.info(DOMAIN, TAG, 'legacy catalog POST path=%{public}s fields=%{public}d', path, fields.size);
+        const posted: EasApiResponse = await this.postForm(session, path, fields, 15000);
+        const postedRows: LegacyCourseAttributes[] = EasDataProvider.isLegacyCatalogPage(posted) ?
+          EasLegacyCourseCatalogParser.parseTables(posted.body) : [];
+        if (postedRows.length > rows.length) {
+          rows = postedRows;
+        }
+      }
+      if (rows.length === 0) {
+        // 页面上找不到完整表单（或表单不含查询控件）时，按文档参数直接 POST 一次。
+        hilog.warn(DOMAIN, TAG, 'legacy catalog direct POST path=%{public}s overrides=%{public}d',
+          path, overrides.size);
+        const direct: EasApiResponse = await this.postForm(session, path, overrides, 15000);
+        const directRows: LegacyCourseAttributes[] = EasDataProvider.isLegacyCatalogPage(direct) ?
+          EasLegacyCourseCatalogParser.parseTables(direct.body) : [];
+        if (directRows.length > rows.length) {
+          rows = directRows;
+        }
+      }
+      out.rows = rows;
+      out.diag = rows.length.toString() + '条';
+      return out;
+    } catch (e) {
+      const text: string = e instanceof Error ? e.message : String(e);
+      out.diag = text.length > 0 && text.length <= 12 ? text : '读取异常';
+      hilog.warn(DOMAIN, TAG, 'legacy catalog failed path=%{public}s %{public}s', path, text);
+      return out;
+    }
+  }
+
+  /** 菜单里常带 loginCAS 链接；出现课程表头时按业务页处理。 */
+  private static isLegacyCatalogPage(resp: EasApiResponse): boolean {
+    if (!EasDataProvider.isHttpOk(resp)) {
+      return false;
+    }
+    return resp.body.indexOf('课程名称') >= 0 || !EasDataProvider.isLoginResponse(resp.body);
+  }
+
+  private async postForm(session: EasSession, path: string, fields: Map<string, string>,
+    timeoutMs: number): Promise<EasApiResponse> {
+    const parts: string[] = [];
+    fields.forEach((value: string, key: string) => {
+      parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(value));
+    });
+    const opts: EasApiClientOptions = new EasApiClientOptions();
+    opts.method = EasHttpMethod.POST;
+    opts.timeoutMs = timeoutMs;
+    opts.body = parts.join('&');
+    opts.extraHeaders.set('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+    opts.extraHeaders.set('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
+    opts.extraHeaders.set('Accept-Language', 'zh-CN,zh-Hans;q=0.9');
+    if (session.campus === EasCampus.WEIHAI) {
+      opts.extraHeaders.set('Origin', EasCampusUrls.WEIHAI_BASE);
+      opts.extraHeaders.set('Referer', EasApiClient.joinUrl(EasCampusUrls.WEIHAI_EAS_PREFIX, path));
+    }
+    const cfg = easWebLoginConfigFor(session.campus, session.getStudentType());
+    return await this.api.request(session, cfg, path, opts);
+  }
+
+  private async getHtml(session: EasSession, path: string, timeoutMs: number = 20000): Promise<EasApiResponse> {
     const opts: EasApiClientOptions = new EasApiClientOptions();
     opts.method = EasHttpMethod.GET;
-    opts.timeoutMs = 20000;
+    opts.timeoutMs = timeoutMs;
     opts.extraHeaders.set('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
     opts.extraHeaders.set('Accept-Language', 'zh-CN,zh-Hans;q=0.9');
     if (session.campus === EasCampus.WEIHAI) {

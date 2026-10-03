@@ -96,7 +96,7 @@ struct TimetablePreview {
   private refreshLabel(): void {
     const weekEvents: EasEventItem[] = eventsOfWeek(this.demo.timetable, this.demo.events, this.week);
     this.label = '第 ' + this.week.toString() + ' 周 · 本周 ' + weekEvents.length.toString() +
-      ' 项 / 共 ' + this.demo.events.length.toString() + ' 个课程实例';
+      ' 项 / 共 ' + this.demo.events.length.toString() + ' 节课';
   }
 
   private shiftWeek(delta: number): void {

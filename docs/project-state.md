@@ -21,7 +21,7 @@
 
 ## 代码布局（entry/src/main/ets）
 - 入口：`entryability/EntryAbility` → 首屏 `pages/Home`（3-Tab：今日/课表/我的；成绩与考试从“我的”进入）
-- 页面（13 路由）：Home、Index(开发入口)、TimetablePreview、TimeLinePage、AddEventPage、ScorePage、ExamPage、SubjectsPage、SearchPage、ProfilePage、AboutPage、TimetableManagerPage、TimetableDetailPage
+- 页面（13 路由）：Home、TimetablePreview、TimeLinePage、AddEventPage、ScorePage、ExamPage、SubjectsPage、SearchPage、ProfilePage、AboutPage、TimetableManagerPage、TimetableDetailPage、ImportTimetablePage
 - EAS 登录核心：`feature/eas/webLogin/*`（EasSession 模型、CampusConfig、谓词、Controller、MfaBridge、EasLoginPage）+ `EasSessionStore/EasApiClient/EasDataProvider`
 - 数据模型/解析：`feature/eas/model|data`（深圳成绩与网页登录课表 JSON 解析+样例）、`common/model/timetable`（课表域）、`common/util`（时间工具/ICS）、`common/db`（relationalStore 三表）
 - 视图：`feature/timetable/views/TimetableWeekDraw`（Canvas：真实分钟轴/圆角块/今日遮罩/手势切周）

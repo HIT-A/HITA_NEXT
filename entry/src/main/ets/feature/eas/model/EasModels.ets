@@ -99,6 +99,8 @@ export class EasCourseItem {
   assessMethod: string = '';
   /** 选课方式编码或名称（xkfsdm/xkfsmc/rwlxmc 等）。 */
   selectionCategory: string = '';
+  /** 学分；未知时为 0。 */
+  credit: number = 0;
   /** 星期几 1..7。 */
   dayOfWeek: number = 0;
   /** 起始节次。 */

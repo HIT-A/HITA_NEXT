@@ -1,13 +1,17 @@
 /** Android HITA-style timetable library. */
 import { common } from '@kit.AbilityKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasTimetable } from '../common/model/timetable/TimetableModels';
 import { HitaColors } from '../common/theme/HitaColors';
 import { IcsExporter } from '../common/util/ICSExport';
 import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
+import { IcsImportResult, TimetableIcsImporter } from '../feature/timetable/data/TimetableIcsImporter';
 
 const WEEK_MS: number = 7 * 24 * 60 * 60 * 1000;
+const DOMAIN: number = 0x0000;
+const TAG: string = 'HitaTimetableMgr';
 
 @Entry
 @Component
@@ -17,6 +21,7 @@ struct TimetableManagerPage {
   @State selectionMode: boolean = false;
   @State loading: boolean = true;
   @State exporting: boolean = false;
+  @State deleting: boolean = false;
   @State activeTimetableId: string = '';
 
   async onPageShow(): Promise<void> {
@@ -72,16 +77,40 @@ struct TimetableManagerPage {
       title: '添加课表',
       buttons: [
         { text: '新建空课表', color: HitaColors.primary },
-        { text: '从教务导入', color: HitaColors.primary }
+        { text: '从教务导入', color: HitaColors.primary },
+        { text: '导入 ICS 文件', color: HitaColors.primary }
       ]
     }).then((ret) => {
       if (ret.index === 0) {
         this.createEmptyTimetable();
       } else if (ret.index === 1) {
         this.openImportPage();
+      } else if (ret.index === 2) {
+        this.importIcs();
       }
     }).catch(() => {
     });
+  }
+
+  private async importIcs(): Promise<void> {
+    const ctx: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    try {
+      const result: IcsImportResult | undefined = await TimetableIcsImporter.pickAndImport(ctx);
+      if (result === undefined) {
+        return;
+      }
+      this.getUIContext().getPromptAction().showToast({ message: result.message });
+      if (result.success) {
+        this.activeTimetableId = result.timetableId;
+        await this.load();
+        this.getUIContext().getRouter().pushUrl({
+          url: 'pages/TimetableDetailPage',
+          params: { 'timetableId': result.timetableId }
+        });
+      }
+    } catch (e) {
+      this.getUIContext().getPromptAction().showToast({ message: '导入 ICS 失败' });
+    }
   }
 
   private openImportPage(): void {
@@ -150,8 +179,9 @@ struct TimetableManagerPage {
   }
 
   private confirmDelete(): void {
-    const count: number = this.selectedIds.length;
-    if (count === 0) {
+    const ids: string[] = this.selectedIds.slice();
+    const count: number = ids.length;
+    if (count === 0 || this.deleting) {
       return;
     }
     this.getUIContext().getPromptAction().showDialog({
@@ -161,20 +191,46 @@ struct TimetableManagerPage {
         { text: '取消', color: '#7B8190' },
         { text: '删除', color: HitaColors.error }
       ]
-    }).then(async (ret) => {
+    }).then((ret) => {
       if (ret.index !== 1) {
         return;
       }
-      await RdbHelper.getInstance().deleteTimetablesCascade(this.selectedIds);
-      for (let i: number = 0; i < this.selectedIds.length; i++) {
-        await TimetableSelectionStore.getInstance().clearIf(this.selectedIds[i]);
+      // 不在弹窗回调里做长耗时异步操作：部分版本上回调未返回会阻塞 UI 线程。
+      setTimeout(() => {
+        this.performDelete(ids);
+      }, 0);
+    }).catch(() => {
+    });
+  }
+
+  private async performDelete(ids: string[]): Promise<void> {
+    if (this.deleting) {
+      return;
+    }
+    this.deleting = true;
+    try {
+      hilog.info(DOMAIN, TAG, 'delete timetables start count=%{public}d', ids.length);
+      await RdbHelper.getInstance().deleteTimetablesCascade(ids);
+      hilog.info(DOMAIN, TAG, 'delete timetables rows done');
+      for (let i: number = 0; i < ids.length; i++) {
+        await TimetableSelectionStore.getInstance().clearIf(ids[i]);
       }
       this.selectedIds = [];
       this.selectionMode = false;
       await this.load();
+      hilog.info(DOMAIN, TAG, 'delete timetables done');
       this.getUIContext().getPromptAction().showToast({ message: '课表已删除' });
-    }).catch(() => {
-    });
+    } catch (e) {
+      const text: string = e instanceof Error ? e.message : String(e);
+      hilog.error(DOMAIN, TAG, 'delete timetables failed %{public}s', text);
+      this.getUIContext().getPromptAction().showToast({ message: '删除失败：' + text });
+      // 出错时退出选择模式并刷新，避免界面停留在无效的多选状态。
+      this.selectedIds = [];
+      this.selectionMode = false;
+      await this.load();
+    } finally {
+      this.deleting = false;
+    }
   }
 
   @Builder
@@ -278,7 +334,7 @@ struct TimetableManagerPage {
         this.openImportPage();
       });
       this.addActionGlyph($r('sys.symbol.doc_plaintext'), () => {
-        this.getUIContext().getPromptAction().showToast({ message: 'ICS 导入暂未适配' });
+        this.importIcs();
       });
     }
     .width('100%')

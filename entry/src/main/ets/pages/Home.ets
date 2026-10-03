@@ -16,6 +16,7 @@ import { EasImportResult, EasTimetableImporter } from '../feature/eas/EasTimetab
 import { EasLoginPage } from '../feature/eas/webLogin/EasLoginPage';
 import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
 import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
+import { IcsImportResult, TimetableIcsImporter } from '../feature/timetable/data/TimetableIcsImporter';
 import {
   AXIS_END_HOUR,
   AXIS_START_HOUR,
@@ -96,6 +97,14 @@ struct Home {
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     await EasSessionStore.getInstance().init(ctx);
     await TimetableSelectionStore.getInstance().init(ctx);
+    const params: Object | undefined = this.getUIContext().getRouter().getParams();
+    if (params !== undefined && params !== null) {
+      const record: Record<string, string> = params as Record<string, string>;
+      // ScorePage 等页面的“去登录”直达会话弹层（原开发入口页已移除）。
+      if (record['openSession'] === '1') {
+        this.openSessionSheet();
+      }
+    }
     await this.refreshSummaries();
     this.startClock();
   }
@@ -476,6 +485,26 @@ struct Home {
       (AXIS_END_HOUR - AXIS_START_HOUR) * hourHeight + 8;
     this.timetableCanvasHeight = Math.max(bodyViewportHeight, contentHeight);
     this.drawTimetableNow();
+  }
+
+  private async importIcsTimetable(): Promise<void> {
+    const ctx: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    try {
+      const result: IcsImportResult | undefined = await TimetableIcsImporter.pickAndImport(ctx);
+      if (result === undefined) {
+        return;
+      }
+      this.getUIContext().getPromptAction().showToast({ message: result.message });
+      if (result.success) {
+        await this.refreshSummaries();
+        this.getUIContext().getRouter().pushUrl({
+          url: 'pages/TimetableDetailPage',
+          params: { 'timetableId': result.timetableId }
+        });
+      }
+    } catch (e) {
+      this.getUIContext().getPromptAction().showToast({ message: '导入 ICS 失败' });
+    }
   }
 
   async importTimetable(showToast: boolean = true): Promise<void> {
@@ -1378,7 +1407,7 @@ struct Home {
       }
       .width('100%')
       .height(56)
-      .padding({ left: 20, right: 20 })
+      .padding({ left: 16, right: 16 })
       .alignItems(VerticalAlign.Center);
 
       Scroll() {
@@ -1404,7 +1433,7 @@ struct Home {
               });
           }
           .width('100%')
-          .padding({ left: 16, right: 16, top: 8 });
+          .padding({ top: 8 });
 
           this.moreSectionTitle('课表工具');
           Column() {
@@ -1414,14 +1443,13 @@ struct Home {
               });
             this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '导入 ICS 课表',
               '从日历文件导入课程', () => {
-                this.getUIContext().getPromptAction().showToast({ message: 'ICS 导入暂未适配' });
+                this.importIcsTimetable();
               });
           }
           .width('100%')
           .padding({ top: 4, bottom: 4 })
           .backgroundColor(COLOR_CARD)
-          .borderRadius(16)
-          .margin({ left: 16, right: 16 });
+          .borderRadius(16);
 
           this.moreSectionTitle('教务功能');
           Column() {
@@ -1441,8 +1469,7 @@ struct Home {
           .width('100%')
           .padding({ top: 4, bottom: 4 })
           .backgroundColor(COLOR_CARD)
-          .borderRadius(16)
-          .margin({ left: 16, right: 16 });
+          .borderRadius(16);
 
           this.moreSectionTitle('课程资源');
           Column() {
@@ -1454,31 +1481,26 @@ struct Home {
           .width('100%')
           .padding({ top: 4, bottom: 4 })
           .backgroundColor(COLOR_CARD)
-          .borderRadius(16)
-          .margin({ left: 16, right: 16 });
+          .borderRadius(16);
 
           this.moreSectionTitle('设置');
           Column() {
-            this.moreNavigationRow($r('sys.symbol.person_crop_circle_fill'), '会话管理',
-              this.sessionInfo === undefined ? '登录并管理教务会话' :
-                Home.campusName(this.sessionInfo.campus) + ' · ' + this.sessionText, () => {
-                this.openSessionSheet();
-              });
-            this.moreNavigationRow($r('sys.symbol.more'), '关于 HITA NEXT',
-              '版本信息与开源说明', () => {
-                this.getUIContext().getRouter().pushUrl({ url: 'pages/AboutPage' });
+            this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '公告',
+              '版本更新 · 服务与故障通知', () => {
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/NoticesPage' });
               });
           }
           .width('100%')
           .padding({ top: 4, bottom: 4 })
           .backgroundColor(COLOR_CARD)
-          .borderRadius(16)
-          .margin({ left: 16, right: 16 });
+          .borderRadius(16);
 
           Blank().height(88);
         }
         .width('100%')
-        .padding({ bottom: 16 });
+        // Single source of truth for the tab's horizontal inset: every card,
+        // title and shortcut row below spans this padded content area.
+        .padding({ left: 16, right: 16, bottom: 16 });
       }
       .layoutWeight(1)
       .scrollBar(BarState.Off);
@@ -1533,7 +1555,7 @@ struct Home {
     .padding(16)
     .backgroundColor(COLOR_CARD)
     .borderRadius(16)
-    .margin({ left: 16, right: 16, top: 8, bottom: 8 })
+    .margin({ top: 8, bottom: 8 })
     .onClick(() => {
       this.openSessionSheet();
     });
@@ -1902,7 +1924,7 @@ struct Home {
       .fontSize(18)
       .fontWeight(FontWeight.Bold)
       .fontColor(COLOR_TEXT_PRIMARY)
-      .margin({ left: 16, right: 16, top: 16, bottom: 4 })
+      .margin({ top: 16, bottom: 4 })
       .alignSelf(ItemAlign.Start);
   }
 

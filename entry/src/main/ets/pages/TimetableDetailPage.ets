@@ -1,5 +1,6 @@
 /** Android HITA-style timetable detail and course management. */
 import { common } from '@kit.AbilityKit';
+import { promptAction } from '@kit.ArkUI';
 import { RdbHelper } from '../common/db/RdbHelper';
 import {
   EasEventItem,
@@ -20,6 +21,8 @@ const SUBJECT_PALETTE: number[] = [0xFF5C6BC0, 0xFF26A69A, 0xFFEF8E5A, 0xFFD9302
 class TimetableSubjectRow {
   subject: EasTermSubject = new EasTermSubject();
   classCount: number = 0;
+  /** 该科目的全部上课记录（按开始时间升序）。 */
+  sessions: EasEventItem[] = [];
 }
 
 @Entry
@@ -28,13 +31,17 @@ struct TimetableDetailPage {
   @State timetable: EasTimetable | undefined = undefined;
   @State subjectRows: TimetableSubjectRow[] = [];
   @State eventRows: EasEventItem[] = [];
-  @State startDateDraft: string = '';
   @State loading: boolean = true;
-  @State savingStart: boolean = false;
   /** 0=closed, 1=course detail, 2=course editor. */
   @State eventSheetMode: number = 0;
+  /** bindSheet 只看这一个开关；内容状态在收起动画结束前保持不变。 */
+  @State sheetVisible: boolean = false;
   @State selectedEvent: EasEventItem | undefined = undefined;
   @State sheetEventId: string = '';
+  /** 当前展开课时列表的科目 id（空串 = 全部收起）。 */
+  @State expandedSubjectId: string = '';
+  /** 展开科目里“学分”输入框的草稿值。 */
+  @State creditDraft: string = '';
   // Keep this page on one explicit vertical scroller so rebuilt event rows do
   // not change the gesture/measurement path used by the parent container.
   private detailScroller: Scroller = new Scroller();
@@ -70,9 +77,18 @@ struct TimetableDetailPage {
       for (let i: number = 0; i < subjects.length; i++) {
         colorById.set(subjects[i].id, subjects[i].color);
         const subjectEvents: EasEventItem[] = await rdb.getClassesOfSubject(subjects[i].id);
+        const sessions: EasEventItem[] = [];
+        for (let j: number = 0; j < subjectEvents.length; j++) {
+          if (subjectEvents[j].type !== EasEventType.CLASS) {
+            continue;
+          }
+          subjectEvents[j].color = subjects[i].color;
+          sessions.push(subjectEvents[j]);
+        }
         const row: TimetableSubjectRow = new TimetableSubjectRow();
         row.subject = subjects[i];
-        row.classCount = subjectEvents.length;
+        row.classCount = sessions.length;
+        row.sessions = sessions;
         rows.push(row);
       }
       const timetableEvents: EasEventItem[] = await rdb.getEventsOfTimetable(this.timetable.id);
@@ -82,70 +98,76 @@ struct TimetableDetailPage {
         event.color = subjectColor === undefined ? TimetableDetailPage.eventColor(event.type) : subjectColor;
         events.push(event);
       }
-      this.startDateDraft = TimetableDetailPage.dateInput(this.timetable.startTime);
     }
     this.subjectRows = rows;
     this.eventRows = events;
     this.loading = false;
   }
 
-  private async saveStartDate(): Promise<void> {
-    if (this.timetable === undefined || this.savingStart) {
-      return;
-    }
-    const parsedStart: number = TimetableDetailPage.parseDate(this.startDateDraft);
-    const nextStart: number = parsedStart <= 0 ? 0 : EasTimetable.mondayMsOf(parsedStart);
-    if (nextStart <= 0) {
-      this.getUIContext().getPromptAction().showToast({ message: '日期格式应为 YYYY-MM-DD' });
-      return;
-    }
-    const delta: number = nextStart - this.timetable.startTime;
-    if (delta === 0) {
-      this.getUIContext().getPromptAction().showToast({ message: '开学日期未变化' });
-      return;
-    }
-    this.savingStart = true;
-    try {
-      const rdb: RdbHelper = RdbHelper.getInstance();
-      const events: EasEventItem[] = await rdb.getEventsOfTimetable(this.timetable.id);
-      const changed: EasTimetable = this.timetable;
-      changed.startTime = nextStart;
-      changed.endTime += delta;
-      await rdb.saveTimetable(changed);
-      for (let i: number = 0; i < events.length; i++) {
-        // Android 端只平移课表中的课程实例，考试/标签等独立事件保留原时间。
-        if (events[i].type !== EasEventType.CLASS) {
-          continue;
-        }
-        events[i].from += delta;
-        events[i].to += delta;
-        await rdb.saveEvent(events[i]);
-      }
-      this.getUIContext().getPromptAction().showToast({ message: '开学日期已更新，课程已同步平移' });
-      await this.load();
-    } catch (e) {
-      this.getUIContext().getPromptAction().showToast({ message: '更新开学日期失败' });
-    } finally {
-      this.savingStart = false;
-    }
-  }
-
   private openAddEvent(): void {
     this.sheetEventId = '';
     this.selectedEvent = undefined;
     this.eventSheetMode = 2;
+    this.sheetVisible = true;
   }
 
   private openEditEvent(event: EasEventItem): void {
     this.sheetEventId = event.id;
     this.selectedEvent = event;
     this.eventSheetMode = 2;
+    this.sheetVisible = true;
   }
 
   private openEventDetail(event: EasEventItem): void {
     this.sheetEventId = event.id;
     this.selectedEvent = event;
     this.eventSheetMode = 1;
+    this.sheetVisible = true;
+  }
+
+  /**
+   * 关闭弹层只翻可见性。若在同一帧里清空内容/模式，bindSheet 的显示条件、
+   * builder 内容和高度会同时变化，退场动画被打断（真机上残留空白半屏弹层）。
+   * 内容状态统一在 onDisappear 里清空。
+   */
+  private closeSheet(): void {
+    this.sheetVisible = false;
+  }
+
+  private resetSheetState(): void {
+    this.eventSheetMode = 0;
+    this.selectedEvent = undefined;
+    this.sheetEventId = '';
+  }
+
+  private toggleSubject(row: TimetableSubjectRow): void {
+    if (this.expandedSubjectId === row.subject.id) {
+      this.expandedSubjectId = '';
+      return;
+    }
+    this.expandedSubjectId = row.subject.id;
+    this.creditDraft = row.subject.credit > 0 ? TimetableDetailPage.numberText(row.subject.credit) : '';
+  }
+
+  /** 手动修正学分（教务属性表缺失或同名多Variant时自动读取会失败）。 */
+  private async saveSubjectCredit(row: TimetableSubjectRow): Promise<void> {
+    const text: string = this.creditDraft.trim();
+    if (text.length === 0) {
+      return;
+    }
+    const value: number = Number(text);
+    if (Number.isNaN(value) || value < 0 || value > 100) {
+      this.getUIContext().getPromptAction().showToast({ message: '学分应为 0-100 的数字' });
+      return;
+    }
+    if (value === row.subject.credit) {
+      return;
+    }
+    row.subject.credit = value;
+    await RdbHelper.getInstance().saveSubject(row.subject);
+    await this.load();
+    this.creditDraft = value > 0 ? TimetableDetailPage.numberText(value) : '';
+    this.getUIContext().getPromptAction().showToast({ message: '学分已更新' });
   }
 
   private confirmDeleteEvent(event: EasEventItem): void {
@@ -160,9 +182,7 @@ struct TimetableDetailPage {
       if (ret.index !== 1) {
         return;
       }
-      this.eventSheetMode = 0;
-      this.selectedEvent = undefined;
-      this.sheetEventId = '';
+      this.closeSheet();
       await RdbHelper.getInstance().deleteEvent(event.id);
       await this.load();
       this.getUIContext().getPromptAction().showToast({ message: '课程已删除' });
@@ -180,6 +200,34 @@ struct TimetableDetailPage {
     }
     RdbHelper.getInstance().changeSubjectColor(row.subject.id, next).then(() => {
       this.load();
+    }).catch(() => {
+    });
+  }
+
+  /** 教务数据未提供考核方式时，允许手动纠正课程类型。 */
+  private chooseSubjectType(row: TimetableSubjectRow): void {
+    const types: EasSubjectType[] = [EasSubjectType.COM_A, EasSubjectType.COM_B, EasSubjectType.OPT_A,
+      EasSubjectType.OPT_B, EasSubjectType.MOOC, EasSubjectType.TAG];
+    const button = (type: EasSubjectType): promptAction.Button => {
+      const item: promptAction.Button = {
+        text: TimetableDetailPage.typeName(type),
+        color: type === row.subject.type ? HitaColors.primary : '#303746'
+      };
+      return item;
+    };
+    this.getUIContext().getPromptAction().showActionMenu({
+      title: '课程类型',
+      buttons: [button(types[0]), button(types[1]), button(types[2]), button(types[3]), button(types[4]),
+        button(types[5])]
+    }).then(async (ret) => {
+      const next: EasSubjectType | undefined = types[ret.index];
+      if (next === undefined || next === row.subject.type) {
+        return;
+      }
+      const subject: EasTermSubject = row.subject;
+      subject.type = next;
+      await RdbHelper.getInstance().saveSubject(subject);
+      await this.load();
     }).catch(() => {
     });
   }
@@ -236,27 +284,10 @@ struct TimetableDetailPage {
           .fontSize(13)
           .fontColor('#7B8498')
         Blank()
-        TextInput({ text: this.startDateDraft, placeholder: 'YYYY-MM-DD' })
+        Text(TimetableDetailPage.dateText(timetable.startTime))
           .fontSize(14)
+          .fontWeight(FontWeight.Medium)
           .fontColor('#303746')
-          .width(126)
-          .height(34)
-          .textAlign(TextAlign.End)
-          .backgroundColor('#F4F7FB')
-          .borderRadius(8)
-          .padding({ left: 8, right: 8 })
-          .onChange((value: string) => {
-            this.startDateDraft = value;
-          })
-        Button(this.savingStart ? '保存中' : '保存')
-          .fontSize(12)
-          .fontColor(HitaColors.primary)
-          .height(30)
-          .backgroundColor('#E8F3FD')
-          .margin({ left: 8 })
-          .onClick(() => {
-            this.saveStartDate();
-          })
       }
       .width('100%')
       .margin({ top: 18 })
@@ -312,57 +343,124 @@ struct TimetableDetailPage {
       Text('›')
         .fontSize(24)
         .fontColor('#B2B8C4')
+        .rotate({ angle: this.expandedSubjectId === row.subject.id ? 90 : 0 })
     }
     .width('100%')
     .height(76)
     .padding({ left: 14, right: 14 })
+    .onClick(() => {
+      this.toggleSubject(row);
+    })
+  }
+
+  /** 一门课程一栏：科目行 + 点击展开后的课时列表。 */
+  @Builder
+  private courseGroupCard(row: TimetableSubjectRow) {
+    Column() {
+      this.subjectCard(row)
+      if (this.expandedSubjectId === row.subject.id) {
+        Divider()
+          .color('#EEF1F6')
+          .margin({ left: 14, right: 14 })
+        Row() {
+          Text('课程类型')
+            .fontSize(13)
+            .fontColor('#7B8498')
+          Blank()
+          Text(TimetableDetailPage.typeName(row.subject.type))
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(HitaColors.primary)
+          Text('›')
+            .fontSize(20)
+            .fontColor('#B2B8C4')
+            .margin({ left: 6 })
+        }
+        .width('100%')
+        .height(44)
+        .padding({ left: 14, right: 14 })
+        .onClick(() => {
+          this.chooseSubjectType(row);
+        })
+        Row() {
+          Text('学分')
+            .fontSize(13)
+            .fontColor('#7B8498')
+          Blank()
+          TextInput({ text: this.creditDraft, placeholder: '未设置' })
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(HitaColors.primary)
+            .textAlign(TextAlign.End)
+            .width(84)
+            .height(32)
+            .padding({ left: 8, right: 8 })
+            .backgroundColor('#F4F7FB')
+            .borderRadius(8)
+            .enterKeyType(EnterKeyType.Done)
+            .onChange((value: string) => {
+              this.creditDraft = value;
+            })
+            .onSubmit(() => {
+              this.saveSubjectCredit(row);
+            })
+        }
+        .width('100%')
+        .height(44)
+        .padding({ left: 14, right: 14 })
+        if (row.sessions.length === 0) {
+          Text('暂无课时记录')
+            .fontSize(12)
+            .fontColor('#9AA2B1')
+            .width('100%')
+            .textAlign(TextAlign.Center)
+            .padding({ top: 12, bottom: 14 })
+        } else {
+          Column({ space: 6 }) {
+            ForEach(row.sessions, (session: EasEventItem) => {
+              this.sessionRow(session)
+            }, (session: EasEventItem) => session.id)
+          }
+          .width('100%')
+          .padding({ left: 10, right: 10, top: 10, bottom: 10 })
+        }
+      }
+    }
+    .width('100%')
     .backgroundColor('#FFFFFF')
     .borderRadius(16)
   }
 
   @Builder
-  private eventCard(event: EasEventItem) {
+  private sessionRow(session: EasEventItem) {
     Row() {
-      Row()
-        .width(8)
-        .height(62)
-        .borderRadius(4)
-        .backgroundColor(TimetableDetailPage.css(event.color))
-      Column() {
-        Text(event.name.length > 0 ? event.name : '未命名课程')
-          .fontSize(16)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#242A36')
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(TimetableDetailPage.eventDateText(event.from) + ' · ' +
-          TimetableDetailPage.timeRange(event))
-          .fontSize(12)
-          .fontColor('#7B8498')
-          .margin({ top: 6 })
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(TimetableDetailPage.eventMeta(event))
-          .fontSize(12)
-          .fontColor('#9AA2B1')
-          .margin({ top: 4 })
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-      .margin({ left: 12 })
+      Text(TimetableDetailPage.sessionDateText(session.from))
+        .fontSize(13)
+        .fontWeight(FontWeight.Medium)
+        .fontColor('#303746')
+      Text(TimetableDetailPage.timeRange(session))
+        .fontSize(12)
+        .fontColor('#7B8498')
+        .margin({ left: 10 })
+      Blank()
+      Text(TimetableDetailPage.sessionPlaceText(session))
+        .fontSize(12)
+        .fontColor('#8B93A3')
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .constraintSize({ maxWidth: '38%' })
       Text('›')
-        .fontSize(24)
+        .fontSize(20)
         .fontColor('#B2B8C4')
+        .margin({ left: 6 })
     }
     .width('100%')
-    .height(82)
-    .padding({ left: 14, right: 14 })
-    .backgroundColor('#FFFFFF')
-    .borderRadius(16)
+    .height(44)
+    .padding({ left: 12, right: 12 })
+    .backgroundColor('#F6F8FC')
+    .borderRadius(10)
     .onClick(() => {
-      this.openEventDetail(event);
+      this.openEventDetail(session);
     })
   }
 
@@ -413,12 +511,10 @@ struct TimetableDetailPage {
         initialType: 'CLASS',
         sheetMode: true,
         onCancel: () => {
-          this.eventSheetMode = 0;
-          this.selectedEvent = undefined;
+          this.closeSheet();
         },
         onSaved: () => {
-          this.eventSheetMode = 0;
-          this.selectedEvent = undefined;
+          this.closeSheet();
           this.load();
         }
       })
@@ -463,19 +559,17 @@ struct TimetableDetailPage {
           .onClick(() => {
             this.openEditEvent(event);
           });
-        Stack() {
+        Button() {
           Text('×')
             .fontSize(25)
             .fontColor('#4C566A');
         }
-        .width(40)
-        .height(40)
-        .borderRadius(20)
+        .width(44)
+        .height(44)
+        .borderRadius(22)
         .backgroundColor('#E9EEF5')
-        .alignContent(Alignment.Center)
         .onClick(() => {
-          this.eventSheetMode = 0;
-          this.selectedEvent = undefined;
+          this.closeSheet();
         });
       }
       .width('100%')
@@ -619,52 +713,23 @@ struct TimetableDetailPage {
             this.infoCard(this.timetable as EasTimetable)
 
             Row() {
-              Text('课程实例')
+              Text('我的课程')
                 .fontSize(18)
                 .fontWeight(FontWeight.Bold)
                 .fontColor('#202633')
                 .layoutWeight(1)
-              Text('点击查看详情 · 可编辑或删除')
+              Text(this.subjectRows.length.toString() + ' 门课程 · 点击展开课时')
                 .fontSize(11)
                 .fontColor('#9AA2B1')
             }
             .width('100%')
             .margin({ top: 24, bottom: 10 })
-            if (this.eventRows.length === 0) {
-              Column() {
-                Text('暂无课程实例')
-                  .fontSize(15)
-                  .fontColor('#7B8498')
-                Text('点击上方“+ 课程”手动添加课程')
-                  .fontSize(12)
-                  .fontColor('#A0A7B5')
-                  .margin({ top: 6 })
-              }
-              .width('100%')
-              .padding({ top: 26, bottom: 26 })
-              .backgroundColor('#FFFFFF')
-              .borderRadius(16)
-            } else {
-              Column({ space: 8 }) {
-                ForEach(this.eventRows, (event: EasEventItem) => {
-                  this.eventCard(event)
-                }, (event: EasEventItem) => event.id)
-              }
-              .width('100%')
-            }
-
-            Text('科目')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .fontColor('#202633')
-              .width('100%')
-              .margin({ top: 24, bottom: 10 })
             if (this.subjectRows.length === 0) {
               Column() {
-                Text('暂无科目')
+                Text('暂无课程')
                   .fontSize(15)
                   .fontColor('#7B8498')
-                Text('从教务导入或在课表中添加课程后会显示在这里')
+                Text('从教务导入或点击上方“+ 课程”添加后显示在这里')
                   .fontSize(12)
                   .fontColor('#A0A7B5')
                   .margin({ top: 6 })
@@ -676,7 +741,7 @@ struct TimetableDetailPage {
             } else {
               Column({ space: 8 }) {
                 ForEach(this.subjectRows, (row: TimetableSubjectRow) => {
-                  this.subjectCard(row)
+                  this.courseGroupCard(row)
                 }, (row: TimetableSubjectRow) => row.subject.id)
               }
               .width('100%')
@@ -698,7 +763,7 @@ struct TimetableDetailPage {
             .borderRadius(18)
             .clip(true)
 
-            Text('点击课程查看老师、教室与节次；在详情弹窗中编辑或删除')
+            Text('点击课程展开每次上课记录；点击具体课时查看详情、编辑或删除')
               .fontSize(12)
               .fontColor('#9AA2B1')
               .margin({ top: 14, bottom: 36 })
@@ -722,7 +787,7 @@ struct TimetableDetailPage {
     .height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor('#F6F7FA')
-    .bindSheet(this.eventSheetMode > 0, this.eventSheetContent(), {
+    .bindSheet(this.sheetVisible, this.eventSheetContent(), {
       height: this.eventSheetMode === 2 ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
       dragBar: true,
       showClose: false,
@@ -730,9 +795,7 @@ struct TimetableDetailPage {
       backgroundColor: '#F6F8FC',
       maskColor: 'rgba(20,33,61,0.24)',
       onDisappear: () => {
-        this.eventSheetMode = 0;
-        this.selectedEvent = undefined;
-        this.sheetEventId = '';
+        this.resetSheetState();
       }
     })
   }
@@ -740,31 +803,6 @@ struct TimetableDetailPage {
   private static dateText(ms: number): string {
     const d: Date = new Date(ms);
     return d.getFullYear().toString() + '年' + (d.getMonth() + 1).toString() + '月' + d.getDate().toString() + '日';
-  }
-
-  private static dateInput(ms: number): string {
-    const d: Date = new Date(ms);
-    return d.getFullYear().toString() + '-' + TimetableDetailPage.pad2(d.getMonth() + 1) + '-' +
-      TimetableDetailPage.pad2(d.getDate());
-  }
-
-  private static parseDate(raw: string): number {
-    const parts: string[] = raw.trim().split('-');
-    if (parts.length !== 3) {
-      return 0;
-    }
-    const year: number = Number(parts[0]);
-    const month: number = Number(parts[1]);
-    const day: number = Number(parts[2]);
-    if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day) || year < 1970 || month < 1 || month > 12 ||
-      day < 1 || day > 31) {
-      return 0;
-    }
-    const d: Date = new Date(year, month - 1, day, 0, 0, 0, 0);
-    if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) {
-      return 0;
-    }
-    return d.getTime();
   }
 
   private static pad2(value: number): string {
@@ -799,9 +837,19 @@ struct TimetableDetailPage {
     return '其他';
   }
 
-  private static eventDateText(ms: number): string {
+  private static sessionDateText(ms: number): string {
     const d: Date = new Date(ms);
-    return (d.getMonth() + 1).toString() + '月' + d.getDate().toString() + '日';
+    return (d.getMonth() + 1).toString() + '月' + d.getDate().toString() + '日 · ' +
+      DOW_FULL[EasTimeTools.getDow(ms)];
+  }
+
+  private static sessionPlaceText(session: EasEventItem): string {
+    const place: string = session.place.trim();
+    if (place.length > 0) {
+      return place;
+    }
+    const teacher: string = session.teacher.trim();
+    return teacher.length > 0 ? teacher : '未填写地点';
   }
 
   private static timeRange(event: EasEventItem): string {
@@ -809,34 +857,6 @@ struct TimetableDetailPage {
     const to: Date = new Date(event.to);
     return TimetableDetailPage.pad2(from.getHours()) + ':' + TimetableDetailPage.pad2(from.getMinutes()) + ' - ' +
       TimetableDetailPage.pad2(to.getHours()) + ':' + TimetableDetailPage.pad2(to.getMinutes());
-  }
-
-  private static eventMeta(event: EasEventItem): string {
-    const teacher: string = event.teacher.trim();
-    const place: string = event.place.trim();
-    if (teacher.length > 0 && place.length > 0) {
-      return teacher + ' · ' + place;
-    }
-    if (teacher.length > 0) {
-      return teacher;
-    }
-    if (place.length > 0) {
-      return place;
-    }
-    return TimetableDetailPage.eventTypeName(event.type);
-  }
-
-  private static eventTypeName(type: EasEventType): string {
-    if (type === EasEventType.CLASS) {
-      return '课程';
-    }
-    if (type === EasEventType.EXAM) {
-      return '考试';
-    }
-    if (type === EasEventType.TAG) {
-      return '标签';
-    }
-    return '其他';
   }
 
   private static eventColor(type: EasEventType): number {

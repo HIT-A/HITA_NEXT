@@ -622,13 +622,6 @@ struct ProfilePage {
             this.ActionItem('📥', '从备份恢复', '#00796B', () => {
               this.importLocalJson();
             })
-
-            Divider().color('#F0F0F0').margin({ left: 60, right: 16 })
-
-            // 关于
-            this.ActionItem('i', '关于', '#808080', () => {
-              this.getUIContext().getRouter().pushUrl({ url: 'pages/AboutPage' });
-            })
           }
           .width('100%')
           .backgroundColor('#FFFFFF')

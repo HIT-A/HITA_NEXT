@@ -1,8 +1,8 @@
 {
   "src": [
     "pages/Home",
-    "pages/Index",
     "pages/TimetablePreview",
+    "pages/NoticesPage",
     "pages/TimeLinePage",
     "pages/ScorePage",
     "pages/AddEventPage",
@@ -10,7 +10,6 @@
     "pages/SubjectsPage",
     "pages/ExamPage",
     "pages/SearchPage",
-    "pages/AboutPage",
     "pages/TimetableManagerPage",
     "pages/TimetableDetailPage",
     "pages/ImportTimetablePage"

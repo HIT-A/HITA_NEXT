@@ -1,34 +1,26 @@
 /**
- * ScorePage.ets — 成绩查询（HITA_X ui/eas/score → ArkUI）。
+ * ScorePage.ets — 成绩查询。
  *
- * 数据面：EasDataProvider（EasApiClient + 深圳 JSON 解析，已就位）。
- * 深圳真链路使用网页登录会话 Cookie：
- *  - 无会话 → 提示先去登录；
- *  - 有会话 → "真实查询"请求深圳教务成绩接口；
- *  - "载入样例成绩(离线)" → 用解析器内置样例填充表格，预览成绩页 UI。
- * 网络返回与离线样例使用同一张表格渲染。
+ * 需要教务会话：无会话 → 空态引导去登录；有会话 → 拉取学期成绩并渲染。
  */
 import { common } from '@kit.AbilityKit';
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
 import { EasDataProvider } from '../feature/eas/EasDataProvider';
-import { parseShenzhenWebScores, SHENZHEN_SCORES_SAMPLE } from '../feature/eas/data/ShenzhenWebScores';
 import { EasCourseScoreItem, EasTermItem } from '../feature/eas/model/EasModels';
 import { EasApiClient } from '../feature/eas/EasApiClient';
 
 @Entry
 @Component
 struct ScorePage {
-  @State modeText: string = '（未选择）';
+  @State modeText: string = '';
   @State msg: string = '';
   @State scores: EasCourseScoreItem[] = [];
   @State loading: boolean = false;
+  @State hasSession: boolean = false;
   private session: EasSession | undefined = undefined;
-  private sampleTerm: EasTermItem = new EasTermItem();
 
   async aboutToAppear(): Promise<void> {
-    this.sampleTerm.yearName = '2023-2024';
-    this.sampleTerm.termName = '-1';
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     await EasSessionStore.getInstance().init(ctx);
     // 依次找深圳/本部/威海的可用会话
@@ -41,20 +33,17 @@ struct ScorePage {
       }
     }
     if (this.session !== undefined) {
-      this.modeText = '会话：' + this.session.campus.toString() +
-        '（cookies=' + this.session.webCookies.size.toString() + '）';
-      if (this.session.campus === EasCampus.SHENZHEN && this.session.webBaseUrl.length > 0) {
-        this.modeText += '\nbase=' + this.session.webBaseUrl;
-      }
+      this.hasSession = true;
+      this.modeText = '当前会话：' + ScorePage.campusText(this.session.campus);
     } else {
-      this.modeText = '（无会话：请先在首页完成网页登录）';
+      this.modeText = '未登录教务';
     }
   }
 
-  /** 深圳真链路：需要网页登录会话 Cookie。 */
+  /** 拉取当前学期成绩：需要网页登录会话。 */
   async queryReal(): Promise<void> {
     if (this.session === undefined) {
-      this.msg = '尚无会话：请先在首页登录';
+      this.msg = '请先登录教务';
       return;
     }
     this.loading = true;
@@ -62,34 +51,24 @@ struct ScorePage {
     try {
       const provider: EasDataProvider = new EasDataProvider(new EasApiClient());
       const terms: EasTermItem[] = await provider.getAllTerms(this.session);
-      const term: EasTermItem = terms.length > 0 ? terms[0] : this.sampleTerm;
+      if (terms.length === 0) {
+        this.msg = '未获取到学期信息，请稍后重试';
+        return;
+      }
+      const term: EasTermItem = terms[0];
       const result = await provider.getPersonalScores(this.session, term);
       if (result.ok) {
         this.scores = result.items;
-        this.modeText = this.session.campus.toString() + ' · ' + term.name;
-        this.msg = '共 ' + result.items.length.toString() + ' 条成绩（code=' +
-          result.code.toString() + ' msg=' + result.msg + '）';
+        this.modeText = ScorePage.campusText(this.session.campus) + ' · ' + term.name;
+        this.msg = result.items.length > 0 ? '共 ' + result.items.length.toString() + ' 条成绩' : '本学期暂无成绩';
       } else {
-        this.msg = result.msg;
+        this.msg = result.msg.length > 0 ? result.msg : '查询失败，请稍后重试';
       }
     } catch (e) {
-      this.msg = (e as Error).message;
+      this.msg = '查询失败：' + (e as Error).message;
     } finally {
       this.loading = false;
     }
-  }
-
-  /** 离线样例：验证解析+预览成绩表格。 */
-  loadSample(): void {
-    const parsed = parseShenzhenWebScores(SHENZHEN_SCORES_SAMPLE, this.sampleTerm);
-    if (parsed === undefined) {
-      this.msg = '样例解析失败';
-      return;
-    }
-    this.scores = parsed.list;
-    this.modeText = '深圳样例成绩（离线）· ' + this.sampleTerm.name;
-    this.msg = '共 ' + parsed.list.length.toString() + ' 条成绩（code=' + parsed.code.toString() +
-      ' msg=' + parsed.msg + '）';
   }
 
   build() {
@@ -114,7 +93,7 @@ struct ScorePage {
           .layoutWeight(1)
           .margin({ left: 4 })
 
-        Text('真实查询')
+        Text('查询')
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor('#3390EC')
@@ -126,23 +105,9 @@ struct ScorePage {
           .onClick(() => {
             this.queryReal();
           })
-
-        Text('载入样例')
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#667085')
-          .height(32)
-          .padding({ left: 12, right: 12 })
-          .borderRadius(16)
-          .backgroundColor('#F2F4F7')
-          .textAlign(TextAlign.Center)
-          .margin({ left: 8 })
-          .onClick(() => {
-            this.loadSample();
-          })
       }
       .width('100%')
-      .padding({ left: 8, right: 12, top: 8, bottom: 8 })
+      .padding({ left: 8, right: 16, top: 8, bottom: 8 })
       .backgroundColor('#FFFFFF')
       .border({ width: { bottom: 1 }, color: '#EAECF0' })
       .alignItems(VerticalAlign.Center)
@@ -195,24 +160,29 @@ struct ScorePage {
             .fontWeight(FontWeight.Medium)
             .fontColor('#1A1A1A')
             .margin({ bottom: 8 })
-          Text('点击"载入样例"预览离线数据\n或"真实查询"获取网络成绩')
+          Text(this.hasSession ? '点击右上角“查询”获取成绩' : '登录教务后即可查询成绩')
             .fontSize(13)
             .fontColor('#808080')
             .textAlign(TextAlign.Center)
             .lineHeight(20)
             .margin({ bottom: 24 })
-          Text('去登录')
-            .fontSize(15)
-            .fontWeight(FontWeight.Medium)
-            .fontColor('#FFFFFF')
-            .height(44)
-            .padding({ left: 32, right: 32 })
-            .backgroundColor('#3390EC')
-            .borderRadius(22)
-            .textAlign(TextAlign.Center)
-            .onClick(() => {
-              this.getUIContext().getRouter().pushUrl({ url: 'pages/Index' });
-            })
+          if (!this.hasSession) {
+            Text('去登录')
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#FFFFFF')
+              .height(44)
+              .padding({ left: 32, right: 32 })
+              .backgroundColor('#3390EC')
+              .borderRadius(22)
+              .textAlign(TextAlign.Center)
+              .onClick(() => {
+                this.getUIContext().getRouter().pushUrl({
+                  url: 'pages/Home',
+                  params: { 'openSession': '1' }
+                });
+              })
+          }
         }
         .width('100%')
         .layoutWeight(1)
@@ -323,6 +293,16 @@ struct ScorePage {
     .width('100%')
     .height('100%')
     .backgroundColor('#F6F7FA')
+  }
+
+  static campusText(c: EasCampus): string {
+    if (c === EasCampus.SHENZHEN) {
+      return '深圳校区';
+    }
+    if (c === EasCampus.BENBU) {
+      return '本部';
+    }
+    return '威海校区';
   }
 
   static num(v: number): string {

@@ -1,75 +1,77 @@
 /**
- * ExamPage.ets — 考试查询（HITA_X ui/eas/exam 语义 → ArkUI）。
+ * ExamPage.ets — 考试查询。
  *
- * 数据面：EasDataProvider.getExamItems（已预留；端点/解析为 M0/M2 抓包项）。
- * 离线预览：内置样例 EasExamItem 列表，字段对齐 HITA_X ExamItem 直迁模型。
+ * 数据面：聚合本地全部课表中类型为考试（EXAM）的事件，按时间升序展示；
+ * 右上角「添加考试」可将考试事件录入当前课表。
  */
-import { router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { EasExamItem } from '../feature/eas/model/EasModels';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTimetable } from '../common/model/timetable/TimetableModels';
-import { TimetableLocalDemo } from '../feature/timetable/data/TimetableLocalDemo';
+import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
+import { EventEditorForm } from './AddEventPage';
 
 @Entry
 @Component
 struct ExamPage {
   @State exams: EasExamItem[] = [];
-  @State note: string = '（未加载）';
+  /** 添加考试弹层只看这一个开关；内容在 onDisappear 里复位。 */
+  @State sheetVisible: boolean = false;
+  private targetTimetableId: string = '';
 
   async onPageShow(): Promise<void> {
-    // 优先：本地 RDB 里的 EXAM 事件 → 渲染为本学期考试卡（离线演示与“真”本地一致）
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     const rdb: RdbHelper = RdbHelper.getInstance();
     await rdb.init(ctx);
-    const tt: EasTimetable | undefined = await rdb.getTimetableByEasCode(TimetableLocalDemo.DEMO_CODE);
-    if (tt !== undefined) {
-      const all: EasEventItem[] = await rdb.getEventsOfTimetable(tt.id);
-      const list: EasExamItem[] = [];
+    const timetables: EasTimetable[] = await rdb.getTimetables();
+    const events: EasEventItem[] = [];
+    for (let t = 0; t < timetables.length; t++) {
+      const all: EasEventItem[] = await rdb.getEventsOfTimetable(timetables[t].id);
       for (let i = 0; i < all.length; i++) {
         if (all[i].type === EasEventType.EXAM) {
-          const it: EasExamItem = new EasExamItem();
-          it.courseName = all[i].name;
-          it.examLocation = all[i].place;
-          it.campusName = '演示校区';
-          const d: Date = new Date(all[i].from);
-          it.examDate = ExamPage.pad(d.getFullYear()) + '-' + ExamPage.pad(d.getMonth() + 1) + '-' +
-            ExamPage.pad(d.getDate());
-          it.examTime = ExamPage.pad(d.getHours()) + ':' + ExamPage.pad(d.getMinutes()) +
-            ' ~ ' + ExamPage.timeOf(all[i].to);
-          it.termName = '2023-2024-1（演示）';
-          it.examType = '期中/考前';
-          list.push(it);
+          events.push(all[i]);
         }
       }
-      if (list.length > 0) {
-        this.exams = list;
-        this.note = '来自本地事件中的考试（' + list.length.toString() + ' 条）';
-        return;
-      }
     }
-    // 无本地考试 → 内置样例
-    this.loadSample();
+    events.sort((a: EasEventItem, b: EasEventItem): number => a.from - b.from);
+    const list: EasExamItem[] = [];
+    for (let i = 0; i < events.length; i++) {
+      const it: EasExamItem = new EasExamItem();
+      it.courseName = events[i].name;
+      it.examLocation = events[i].place;
+      const d: Date = new Date(events[i].from);
+      it.examDate = ExamPage.pad(d.getFullYear()) + '-' + ExamPage.pad(d.getMonth() + 1) + '-' +
+        ExamPage.pad(d.getDate());
+      it.examTime = ExamPage.pad(d.getHours()) + ':' + ExamPage.pad(d.getMinutes()) +
+        ' ~ ' + ExamPage.timeOf(events[i].to);
+      it.examType = '考试';
+      it.termName = '';
+      it.campusName = '';
+      list.push(it);
+    }
+    this.exams = list;
   }
 
-  loadSample(): void {
-    const list: EasExamItem[] = [];
-    const mk = (course: string, date: string, time: string, loc: string, type: string): void => {
-      const it: EasExamItem = new EasExamItem();
-      it.courseName = course;
-      it.examDate = date;
-      it.examTime = time;
-      it.examType = type;
-      it.examLocation = loc;
-      it.termName = '2023-2024-1';
-      it.campusName = '深圳校区';
-      list.push(it);
-    };
-    mk('数据结构', '2026-01-08', '09:00 ~ 11:00', 'H-201', '期末考试');
-    mk('高等数学A', '2026-01-12', '14:00 ~ 16:00', 'A-305', '期末考试');
-    mk('大学英语', '2026-01-16', '09:00 ~ 10:40', 'T-102', '期末考试');
-    this.exams = list;
-    this.note = '内置样例（真实查询依赖 M0/M2 端点）';
+  /** 考试事件挂到当前选中的课表；没有可用课表时引导先建课表。 */
+  private async openAddExam(): Promise<void> {
+    const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
+    await TimetableSelectionStore.getInstance().init(ctx);
+    const rdb: RdbHelper = RdbHelper.getInstance();
+    await rdb.init(ctx);
+    let target: string = await TimetableSelectionStore.getInstance().load();
+    if (target.length === 0 || await rdb.getTimetableById(target) === undefined) {
+      target = '';
+      const timetables: EasTimetable[] = await rdb.getTimetables();
+      if (timetables.length > 0) {
+        target = timetables[0].id;
+      }
+    }
+    if (target.length === 0) {
+      this.getUIContext().getPromptAction().showToast({ message: '请先在课表管理中新建课表' });
+      return;
+    }
+    this.targetTimetableId = target;
+    this.sheetVisible = true;
   }
 
   static pad(n: number): string {
@@ -102,17 +104,17 @@ struct ExamPage {
           .layoutWeight(1)
           .margin({ left: 4 })
 
-        Text('载入样例')
+        Text('+ 添加考试')
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
-          .fontColor('#667085')
+          .fontColor('#FFFFFF')
           .height(32)
           .padding({ left: 12, right: 12 })
           .borderRadius(16)
-          .backgroundColor('#F2F4F7')
+          .backgroundColor('#3390EC')
           .textAlign(TextAlign.Center)
           .onClick(() => {
-            this.loadSample();
+            this.openAddExam();
           })
       }
       .width('100%')
@@ -121,67 +123,113 @@ struct ExamPage {
       .border({ width: { bottom: 1 }, color: '#EAECF0' })
       .alignItems(VerticalAlign.Center)
 
-      Text(this.note)
-        .fontSize(12)
-        .fontColor('#666666')
-        .width('100%')
-        .padding({ left: 16, bottom: 8 })
-
       if (this.exams.length === 0) {
-        Text('暂无考试')
-          .fontSize(14)
-          .fontColor('#888888')
-          .margin({ top: 60 })
+        Column() {
+          Text('暂无考试安排')
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#1A1A1A')
+          Text('点击右上角“添加考试”录入考试安排')
+            .fontSize(13)
+            .fontColor('#888888')
+            .margin({ top: 8 })
+        }
+        .width('100%')
+        .margin({ top: 60 })
       } else {
         List({ space: 8 }) {
           ForEach(this.exams, (it: EasExamItem) => {
             ListItem() {
-              Column() {
-                Row() {
-                  Text(it.courseName)
-                    .fontSize(15)
-                    .fontWeight(FontWeight.Medium)
-                    .layoutWeight(1)
+              Row() {
+                Row()
+                  .width(18)
+                  .height(54)
+                  .borderRadius(9)
+                  .backgroundColor('#D93025')
+                Column() {
+                  Row() {
+                    Text(it.courseName)
+                      .fontSize(16)
+                      .fontWeight(FontWeight.Medium)
+                      .fontColor('#242A36')
+                      .layoutWeight(1)
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text(it.examType.length > 0 ? it.examType : '考试')
+                      .fontSize(11)
+                      .fontColor('#D93025')
+                      .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                      .backgroundColor('#FDECEC')
+                      .borderRadius(10)
+                  }
+                  .width('100%')
+                  .alignItems(VerticalAlign.Center)
+
+                  Text(it.examDate + ' · ' + it.examTime)
+                    .fontSize(12)
+                    .fontColor('#7B8498')
+                    .width('100%')
+                    .margin({ top: 7 })
                     .maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Text(it.examType.length > 0 ? it.examType : '—')
-                    .fontSize(11)
-                    .fontColor('#FFFFFF')
-                    .padding({ left: 6, right: 6, top: 1, bottom: 1 })
-                    .borderRadius(8)
-                    .backgroundColor('#D93025')
+
+                  Text(it.examLocation.length > 0 ? '地点：' + it.examLocation : '地点：待定')
+                    .fontSize(12)
+                    .fontColor('#9AA2B1')
+                    .width('100%')
+                    .margin({ top: 4 })
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
                 }
-                .width('100%')
-
-                Text(it.examDate + '  ' + it.examTime)
-                  .fontSize(13)
-                  .fontColor('#333333')
-                  .width('100%')
-                  .margin({ top: 8 })
-
-                Text((it.examLocation.length > 0 ? '地点：' + it.examLocation : '地点：待定') +
-                  '   ' + (it.campusName.length > 0 ? it.campusName : it.termName))
-                  .fontSize(12)
-                  .fontColor('#8A8F99')
-                  .width('100%')
-                  .margin({ top: 6 })
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+                .margin({ left: 12 })
               }
               .width('100%')
-              .padding(12)
+              .padding({ left: 14, right: 14, top: 12, bottom: 12 })
               .backgroundColor('#FFFFFF')
-              .borderRadius(10)
-              .shadow({ radius: 8, color: '#14000000', offsetY: 2 })
+              .borderRadius(16)
             }
           }, (it: EasExamItem) => it.courseName + it.examDate + it.examTime)
         }
         .width('100%')
         .layoutWeight(1)
-        .padding({ left: 12, right: 12 })
+        .padding({ left: 16, right: 16, top: 4 })
       }
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F5F6F8')
+    .backgroundColor('#F6F7FA')
+    .bindSheet(this.sheetVisible, this.examEditorContent(), {
+      height: SheetSize.FIT_CONTENT,
+      dragBar: true,
+      showClose: false,
+      preferType: SheetType.BOTTOM,
+      backgroundColor: '#F6F8FC',
+      maskColor: 'rgba(20,33,61,0.24)',
+      onDisappear: () => {
+        this.sheetVisible = false;
+      }
+    })
+  }
+
+  @Builder
+  private examEditorContent() {
+    EventEditorForm({
+      eventId: '',
+      targetTimetableId: this.targetTimetableId,
+      initialType: 'EXAM',
+      sheetMode: true,
+      onCancel: () => {
+        this.sheetVisible = false;
+      },
+      onSaved: () => {
+        this.sheetVisible = false;
+        this.onPageShow();
+      }
+    })
+      .width('100%')
+      .height('100%');
   }
 
   navigateBack(): void {

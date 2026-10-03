@@ -2,7 +2,7 @@
  * AddEventPage.ets — 新建/编辑事件（HITA_X ui/event/add 语义 → ArkUI 表单）。
  *
  * P1 本地功能：类型(课程/日程/考试/备忘)、名称、地点、日期偏移(今天起 ±370 天)、
- * 开始时刻(整点/半点调节+预设)、时长(30/60/120/180min) → RDB events → 返回时间线自动刷新。
+ * 起止时间（系统滚轮选择器）→ RDB events → 返回时间线自动刷新。
  */
 import { promptAction, router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
@@ -40,14 +40,13 @@ export struct EventEditorForm {
   @State dayOffset: number = 0;
   @State hour: number = 14;
   @State minute: number = 0;
-  @State durationIdx: number = 1; // [30,60,120,180]
+  @State endHour: number = 15;
+  @State endMinute: number = 0;
   @State hint: string = '';
   @State saved: boolean = false;
   private editId: string = '';
   private timetableId: string = '';
   private subjectId: string = '';
-
-  private durations: number[] = [30, 60, 120, 180];
 
   async aboutToAppear(): Promise<void> {
     const params: Object | undefined = this.getUIContext().getRouter().getParams();
@@ -68,9 +67,9 @@ export struct EventEditorForm {
       }
       offsetRaw = record['offset'] === undefined ? '' : record['offset'] as string;
     }
-    if (id.length === 0 && (this.timetableId.length > 0 || routeType === 'CLASS')) {
-      // 课表详情页的“+课程”默认创建课程，而不是普通日程。
-      this.typeIdx = 1;
+    if (id.length === 0 && routeType.length > 0) {
+      // 新建时按调用方指定类型初始化（CLASS=课程 / EXAM=考试；缺省为日程）。
+      this.typeIdx = EventEditorForm.idxOf(EventEditorForm.typeFromName(routeType));
     }
     if (id.length === 0) {
       // 新建：若从时间线某天进入，沿用该天（offset 参数）
@@ -104,7 +103,10 @@ export struct EventEditorForm {
     this.typeIdx = EventEditorForm.idxOf(ev.type);
     const d: Date = new Date(ev.from);
     this.hour = d.getHours();
-    this.minute = Math.min(55, d.getMinutes());
+    this.minute = d.getMinutes();
+    const end: Date = new Date(ev.to);
+    this.endHour = end.getHours();
+    this.endMinute = end.getMinutes();
     const todayMidnight: number = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
     const fromMidnight: number = new Date(new Date(ev.from).setHours(0, 0, 0, 0)).getTime();
     let off: number = Math.round((fromMidnight - todayMidnight) / DAY_MS);
@@ -115,14 +117,6 @@ export struct EventEditorForm {
       off = MAX_DAY_OFFSET;
     }
     this.dayOffset = off;
-    const durMin: number = Math.round((ev.to - ev.from) / 60000);
-    let best: number = 1;
-    for (let i = 0; i < this.durations.length; i++) {
-      if (Math.abs(this.durations[i] - durMin) < Math.abs(this.durations[best] - durMin)) {
-        best = i;
-      }
-    }
-    this.durationIdx = best;
   }
 
   private static pad2(n: number): string {
@@ -135,48 +129,66 @@ export struct EventEditorForm {
       EventEditorForm.pad2(d.getDate());
   }
 
+  /** 与导入课表页一致：点击弹出系统日期选择器。 */
+  private chooseDate(): void {
+    this.getUIContext().showDatePickerDialog({
+      selected: new Date(Date.now() + this.dayOffset * DAY_MS),
+      onDateAccept: (date: Date) => {
+        const selected: Date = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+        const todayMidnight: number = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+        let off: number = Math.round((selected.getTime() - todayMidnight) / DAY_MS);
+        if (off < -MAX_DAY_OFFSET) {
+          off = -MAX_DAY_OFFSET;
+        }
+        if (off > MAX_DAY_OFFSET) {
+          off = MAX_DAY_OFFSET;
+        }
+        this.dayOffset = off;
+      }
+    });
+  }
+
   private startLabel(): string {
     return EventEditorForm.pad2(this.hour) + ':' + EventEditorForm.pad2(this.minute);
   }
 
   private endLabel(): string {
-    const total: number = this.hour * 60 + this.minute + this.durations[this.durationIdx];
-    const h: number = Math.floor(total / 60) % 24;
-    const m: number = total % 60;
-    return EventEditorForm.pad2(h) + ':' + EventEditorForm.pad2(m);
+    return EventEditorForm.pad2(this.endHour) + ':' + EventEditorForm.pad2(this.endMinute);
   }
 
-  private shiftDay(delta: number): void {
-    let d: number = this.dayOffset + delta;
-    if (d < -MAX_DAY_OFFSET) {
-      d = -MAX_DAY_OFFSET;
-    }
-    if (d > MAX_DAY_OFFSET) {
-      d = MAX_DAY_OFFSET;
-    }
-    this.dayOffset = d;
+  /** 与导入课表页一致：点击弹出系统时间选择器。 */
+  private pickStartTime(): void {
+    this.getUIContext().showTimePickerDialog({
+      selected: new Date(2000, 0, 1, this.hour, this.minute, 0, 0),
+      useMilitaryTime: true,
+      onAccept: (value: TimePickerResult) => {
+        const selectedMinutes: number = value.hour * 60 + value.minute;
+        const endMinutes: number = this.endHour * 60 + this.endMinute;
+        if (selectedMinutes >= endMinutes) {
+          this.getUIContext().getPromptAction().showToast({ message: '开始时间必须早于结束时间' });
+          return;
+        }
+        this.hour = value.hour;
+        this.minute = value.minute;
+      }
+    });
   }
 
-  private shiftHour(delta: number): void {
-    let h: number = this.hour + delta;
-    if (h < 0) {
-      h = 0;
-    }
-    if (h > 23) {
-      h = 23;
-    }
-    this.hour = h;
-  }
-
-  private shiftMinute(delta: number): void {
-    let m: number = this.minute + delta;
-    if (m < 0) {
-      m = 0;
-    }
-    if (m > 55) {
-      m = 55;
-    }
-    this.minute = m;
+  private pickEndTime(): void {
+    this.getUIContext().showTimePickerDialog({
+      selected: new Date(2000, 0, 1, this.endHour, this.endMinute, 0, 0),
+      useMilitaryTime: true,
+      onAccept: (value: TimePickerResult) => {
+        const selectedMinutes: number = value.hour * 60 + value.minute;
+        const startMinutes: number = this.hour * 60 + this.minute;
+        if (selectedMinutes <= startMinutes) {
+          this.getUIContext().getPromptAction().showToast({ message: '结束时间必须晚于开始时间' });
+          return;
+        }
+        this.endHour = value.hour;
+        this.endMinute = value.minute;
+      }
+    });
   }
 
   private async save(): Promise<void> {
@@ -235,7 +247,13 @@ export struct EventEditorForm {
       }
     }
     ev.from = base + this.hour * 60 * 60 * 1000 + this.minute * 60 * 1000;
-    ev.to = ev.from + this.durations[this.durationIdx] * 60 * 1000;
+    const endMinutes: number = this.endHour * 60 + this.endMinute;
+    const startMinutes: number = this.hour * 60 + this.minute;
+    if (endMinutes <= startMinutes) {
+      this.hint = '结束时间必须晚于开始时间';
+      return;
+    }
+    ev.to = base + this.endHour * 60 * 60 * 1000 + this.endMinute * 60 * 1000;
     ev.color = EventEditorForm.typeColor(ev.type);
     ev.createdAt = Date.now();
     await RdbHelper.getInstance().saveEvent(ev);
@@ -264,6 +282,19 @@ export struct EventEditorForm {
     return 0;
   }
 
+  static typeFromName(name: string): EasEventType {
+    if (name === 'CLASS') {
+      return EasEventType.CLASS;
+    }
+    if (name === 'EXAM') {
+      return EasEventType.EXAM;
+    }
+    if (name === 'TAG') {
+      return EasEventType.TAG;
+    }
+    return EasEventType.OTHER;
+  }
+
   static typeOf(idx: number): EasEventType {
     if (idx === 1) {
       return EasEventType.CLASS;
@@ -290,32 +321,45 @@ export struct EventEditorForm {
     return 0xFF3390EC;
   }
 
+  private sheetTitle(): string {
+    if (this.editId.length > 0) {
+      return this.typeIdx === 2 ? '编辑考试' : '编辑课程';
+    }
+    return this.typeIdx === 2 ? '添加考试' : '添加课程';
+  }
+
+  private sheetSubtitle(): string {
+    if (this.editId.length > 0) {
+      return '修改信息';
+    }
+    return this.typeIdx === 2 ? '考试将添加到当前课表' : '将课程添加到当前课表';
+  }
+
   build() {
     Column() {
       if (this.sheetMode) {
         Row() {
           Column() {
-            Text(this.editId.length > 0 ? '编辑课程' : '添加课程')
+            Text(this.sheetTitle())
               .fontSize(20)
               .fontWeight(FontWeight.Bold)
               .fontColor('#1D2B45')
-            Text(this.editId.length > 0 ? '修改课程信息' : '将课程添加到当前课表')
+            Text(this.sheetSubtitle())
               .fontSize(12)
               .fontColor('#72809A')
               .margin({ top: 3 })
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
-          Stack() {
+          Button() {
             Text('×')
               .fontSize(25)
               .fontColor('#4C566A')
           }
-          .width(40)
-          .height(40)
-          .borderRadius(20)
+          .width(44)
+          .height(44)
+          .borderRadius(22)
           .backgroundColor('#E9EEF5')
-          .alignContent(Alignment.Center)
           .onClick(() => {
             this.onCancel();
           })
@@ -352,8 +396,10 @@ export struct EventEditorForm {
       }
 
       List({ space: 10 }) {
-        ListItem() {
-          this.typeRow()
+        if (!this.sheetMode) {
+          ListItem() {
+            this.typeRow()
+          }
         }
         ListItem() {
           Column() {
@@ -433,9 +479,6 @@ export struct EventEditorForm {
         ListItem() {
           this.timeRow()
         }
-        ListItem() {
-          this.durationRow()
-        }
         if (this.hint.length > 0) {
           ListItem() {
             Text(this.hint)
@@ -491,154 +534,92 @@ export struct EventEditorForm {
 
   @Builder
   dateRow() {
-    Column() {
-      Text('日期')
-        .fontSize(14)
-        .fontWeight(FontWeight.Medium)
-        .fontColor('#202B45')
-      Row() {
-        Button('今天')
-          .fontSize(13)
-          .height(32)
-          .backgroundColor(this.dayOffset === 0 ? '#3390EC' : '#EDF1F7')
-          .fontColor(this.dayOffset === 0 ? '#FFFFFF' : '#333333')
-          .onClick(() => {
-            this.dayOffset = 0;
-          })
-        Button('明天')
-          .fontSize(13)
-          .height(32)
-          .backgroundColor(this.dayOffset === 1 ? '#3390EC' : '#EDF1F7')
-          .fontColor(this.dayOffset === 1 ? '#FFFFFF' : '#333333')
-          .onClick(() => {
-            this.dayOffset = 1;
-          })
-        Blank()
-        Row() {
-          Button('‹')
-            .width(34)
-            .height(32)
-            .fontSize(16)
-            .fontColor('#33415C')
-            .backgroundColor('#EDF1F7')
-            .onClick(() => {
-              this.shiftDay(-1);
-            })
-          Text(this.dateText())
-            .fontSize(15)
-            .fontWeight(FontWeight.Medium)
-            .width(110)
-            .textAlign(TextAlign.Center)
-          Button('›')
-            .width(34)
-            .height(32)
-            .fontSize(16)
-            .fontColor('#33415C')
-            .backgroundColor('#EDF1F7')
-            .onClick(() => {
-              this.shiftDay(1);
-            })
-        }
+    Row() {
+      Column() {
+        Text('日期')
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#202B45')
+        Text(this.dateText())
+          .fontSize(18)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#1D2B45')
+          .margin({ top: 6 })
       }
-      .width('100%')
-      .margin({ top: 4 })
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      SymbolGlyph($r('sys.symbol.calendar'))
+        .fontSize(24)
+        .fontColor(['#3390EC'])
     }
     .width('100%')
-    .alignItems(HorizontalAlign.Start)
+    .alignItems(VerticalAlign.Center)
     .padding(14)
     .backgroundColor('#FFFFFF')
     .borderRadius(16)
+    .onClick(() => {
+      this.chooseDate();
+    })
   }
 
   @Builder
   timeRow() {
     Column() {
-      Text('开始时间')
+      Text('时间')
         .fontSize(14)
         .fontWeight(FontWeight.Medium)
         .fontColor('#202B45')
-      Row() {
-        Button('-')
-          .width(40)
-          .height(32)
-          .onClick(() => {
-            this.shiftHour(-1);
-          })
-        Text(this.startLabel())
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .width(90)
-          .textAlign(TextAlign.Center)
-        Button('+')
-          .width(40)
-          .height(32)
-          .onClick(() => {
-            this.shiftHour(1);
-          })
-        Blank()
-        Button('-5分')
-          .fontSize(12)
-          .height(32)
-          .backgroundColor('#EDF1F7')
-          .fontColor('#33415C')
-          .onClick(() => {
-            this.shiftMinute(-5);
-          })
-        Text(EventEditorForm.pad2(this.minute) + '分')
-          .fontSize(14)
-          .width(46)
-          .textAlign(TextAlign.Center)
-        Button('+5分')
-          .fontSize(12)
-          .height(32)
-          .backgroundColor('#EDF1F7')
-          .fontColor('#33415C')
-          .onClick(() => {
-            this.shiftMinute(5);
-          })
-      }
-      .width('100%')
-      .margin({ top: 4 })
-      Row({ space: 6 }) {
-        Text('预设：')
-          .fontSize(12)
-          .fontColor('#999999')
-        Button('09:00')
-          .fontSize(12)
-          .height(30)
-          .backgroundColor('#EDF1F7')
-          .fontColor('#33415C')
-          .onClick(() => {
-            this.hour = 9;
-            this.minute = 0;
-          })
-        Button('12:30')
-          .fontSize(12)
-          .height(30)
-          .backgroundColor('#EDF1F7')
-          .fontColor('#33415C')
-          .onClick(() => {
-            this.hour = 12;
-            this.minute = 30;
-          })
-        Button('14:00')
-          .fontSize(12)
-          .height(30)
-          .backgroundColor('#EDF1F7')
-          .fontColor('#33415C')
-          .onClick(() => {
-            this.hour = 14;
-            this.minute = 0;
-          })
-        Button('19:00')
-          .fontSize(12)
-          .height(30)
-          .backgroundColor('#EDF1F7')
-          .fontColor('#33415C')
-          .onClick(() => {
-            this.hour = 19;
-            this.minute = 0;
-          })
+      Row({ space: 10 }) {
+        Row() {
+          Column() {
+            Text('开始时间')
+              .fontSize(12)
+              .fontColor('#72809A')
+            Text(this.startLabel())
+              .fontSize(18)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#1D2B45')
+              .margin({ top: 6 })
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          SymbolGlyph($r('sys.symbol.clock'))
+            .fontSize(20)
+            .fontColor(['#3390EC'])
+        }
+        .layoutWeight(1)
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+        .backgroundColor('#F6F8FC')
+        .borderRadius(12)
+        .onClick(() => {
+          this.pickStartTime();
+        })
+        Row() {
+          Column() {
+            Text('结束时间')
+              .fontSize(12)
+              .fontColor('#72809A')
+            Text(this.endLabel())
+              .fontSize(18)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#1D2B45')
+              .margin({ top: 6 })
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          SymbolGlyph($r('sys.symbol.clock'))
+            .fontSize(20)
+            .fontColor(['#3390EC'])
+        }
+        .layoutWeight(1)
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+        .backgroundColor('#F6F8FC')
+        .borderRadius(12)
+        .onClick(() => {
+          this.pickEndTime();
+        })
       }
       .width('100%')
       .margin({ top: 8 })
@@ -650,34 +631,6 @@ export struct EventEditorForm {
     .borderRadius(16)
   }
 
-  @Builder
-  durationRow() {
-    Column() {
-      Text('时长（至 ' + this.endLabel() + '）')
-        .fontSize(14)
-        .fontWeight(FontWeight.Medium)
-        .fontColor('#202B45')
-      Row({ space: 6 }) {
-        ForEach(this.durations, (min: number, index: number) => {
-          Button(min.toString() + ' 分钟')
-            .fontSize(13)
-            .height(32)
-            .backgroundColor(this.durationIdx === index ? '#3390EC' : '#EDF1F7')
-            .fontColor(this.durationIdx === index ? '#FFFFFF' : '#333333')
-            .onClick(() => {
-              this.durationIdx = index;
-            })
-        }, (min: number) => min.toString())
-      }
-      .width('100%')
-      .margin({ top: 4 })
-    }
-    .width('100%')
-    .alignItems(HorizontalAlign.Start)
-    .padding(14)
-    .backgroundColor('#FFFFFF')
-    .borderRadius(16)
-  }
 }
 
 /** Route wrapper kept for the standalone timeline editor. */

@@ -13,9 +13,10 @@ import {
 } from '../../common/model/timetable/TimetableModels';
 import { EasCampus, EasSession } from './EasSession';
 import { EasSessionStore } from './EasSessionStore';
-import { EasDataProvider } from './EasDataProvider';
+import { EasDataProvider, LegacyCatalogFetch } from './EasDataProvider';
 import { EasCourseItem, EasTermItem } from './model/EasModels';
 import { EasApiClient } from './EasApiClient';
+import { EasLegacyCourseCatalogParser, LegacyCourseAttributes } from './data/EasLegacyCourseCatalogParser';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'HitaEasImport';
@@ -106,6 +107,12 @@ export class EasTimetableImporter {
         result.message = '课表为空，未导入';
         return result;
       }
+      let catalogDiag: string = '';
+      if (session.campus !== EasCampus.SHENZHEN) {
+        const fetched: LegacyCatalogFetch = await provider.getLegacyCourseAttributes(session, term);
+        const matched: number = EasTimetableImporter.applyLegacyAttributes(courses, fetched.rows, term);
+        catalogDiag = fetched.diag + '/匹配' + matched.toString() + '/' + courses.length.toString();
+      }
       let schedule: EasTimePeriodInDay[] = scheduleOverride !== undefined && scheduleOverride.length > 0 ?
         scheduleOverride : EasTimetableImporter.scheduleStructure(session.campus);
       if ((scheduleOverride === undefined || scheduleOverride.length === 0) && session.campus === EasCampus.SHENZHEN) {
@@ -130,7 +137,9 @@ export class EasTimetableImporter {
         return result;
       }
       result.success = true;
-      result.message = '已导入 ' + readback.length.toString() + ' 个课次';
+      result.message = catalogDiag.length > 0 ?
+        '已导入 ' + readback.length.toString() + ' 个课次（课程属性 ' + catalogDiag + '）' :
+        '已导入 ' + readback.length.toString() + ' 个课次';
       return result;
     } catch (e) {
       const text: string = e instanceof Error ? e.message : String(e);
@@ -191,6 +200,7 @@ export class EasTimetableImporter {
         subject.name = course.name;
         subject.code = course.code;
         subject.type = EasTimetableImporter.subjectTypeForCourse(course);
+        subject.credit = course.credit > 0 ? course.credit : 0;
         subjects.push(subject);
         await rdb.saveSubject(subject);
       } else if (EasTimetableImporter.hasSubjectTypeHint(course)) {
@@ -198,8 +208,10 @@ export class EasTimetableImporter {
         // 重新导入时，仅在教务返回了明确分类时修正已有科目，避免用不完整
         // 的课表数据覆盖用户手动调整过的类型。
         const inferredType: EasSubjectType = EasTimetableImporter.subjectTypeForCourse(course);
-        if (subject.type !== inferredType) {
+        const nextCredit: number = course.credit > 0 ? course.credit : subject.credit;
+        if (subject.type !== inferredType || subject.credit !== nextCredit) {
           subject.type = inferredType;
+          subject.credit = nextCredit;
           await rdb.saveSubject(subject);
         }
       }
@@ -284,6 +296,126 @@ export class EasTimetableImporter {
       return EasSubjectType.COM_A;
     }
     return EasSubjectType.COM_A;
+  }
+
+  /**
+   * 用执行计划/期末成绩表按课程名补全课表课程的性质、考核方式与学分。
+   * 本学期的行优先；同一优先级内“是否考试课”互相矛盾时不采用（多专业同名课）。
+   */
+  private static applyLegacyAttributes(courses: EasCourseItem[], attributes: LegacyCourseAttributes[],
+    term: EasTermItem): number {
+    if (attributes.length === 0) {
+      return 0;
+    }
+    const byName: Map<string, LegacyCourseAttributes> = new Map<string, LegacyCourseAttributes>();
+    const conflicted: Set<string> = new Set<string>();
+    const termMatchedNames: Set<string> = new Set<string>();
+    for (let pass: number = 0; pass < 2; pass++) {
+      const wantTermMatch: boolean = pass === 0;
+      for (let i: number = 0; i < attributes.length; i++) {
+        const row: LegacyCourseAttributes = attributes[i];
+        if (EasLegacyCourseCatalogParser.matchesTerm(row.termText, term) !== wantTermMatch) {
+          continue;
+        }
+        const key: string = EasLegacyCourseCatalogParser.nameKey(row.name);
+        if (!wantTermMatch && termMatchedNames.has(key)) {
+          continue;
+        }
+        if (wantTermMatch) {
+          termMatchedNames.add(key);
+        }
+        const existing: LegacyCourseAttributes | undefined = byName.get(key);
+        if (existing === undefined) {
+          byName.set(key, row);
+          continue;
+        }
+        const a: string = EasTimetableImporter.normalizeTypeText(existing.assessMethod);
+        const b: string = EasTimetableImporter.normalizeTypeText(row.assessMethod);
+        if (a.length === 0 && b.length > 0) {
+          byName.set(key, row);
+        } else if (a.length > 0 && b.length > 0 && a !== b) {
+          conflicted.add(key);
+        }
+      }
+    }
+    let matched: number = 0;
+    const unmatched: EasCourseItem[] = [];
+    for (let i: number = 0; i < courses.length; i++) {
+      const course: EasCourseItem = courses[i];
+      const row: LegacyCourseAttributes | undefined =
+        byName.get(EasLegacyCourseCatalogParser.nameKey(course.name));
+      if (row === undefined) {
+        unmatched.push(course);
+        continue;
+      }
+      matched++;
+      EasTimetableImporter.fillCourseFromRow(course, row, conflicted.has(
+        EasLegacyCourseCatalogParser.nameKey(course.name)));
+    }
+    // 前缀兜底：教务表里的课名常带后缀（“体育Ⅲ（三）”vs“体育Ⅲ”“管理会计（双语）”vs
+    // “管理会计”）。仅当这门课与某一行在两个方向上都唯一对应时才采用，避免“体育”吸走多门课。
+    if (unmatched.length > 0) {
+      const fallback = (course: EasCourseItem): LegacyCourseAttributes | undefined => {
+        const courseKey: string = EasLegacyCourseCatalogParser.nameKey(course.name);
+        if (courseKey.length < 2) {
+          return undefined;
+        }
+        const candidates: LegacyCourseAttributes[] = [];
+        const seenKeys: Set<string> = new Set<string>();
+        for (let i: number = 0; i < attributes.length; i++) {
+          const rowKey: string = EasLegacyCourseCatalogParser.nameKey(attributes[i].name);
+          if (seenKeys.has(rowKey) || rowKey.length < 2) {
+            continue;
+          }
+          const related: boolean = rowKey.length < courseKey.length && courseKey.startsWith(rowKey) ||
+            rowKey.length > courseKey.length && rowKey.startsWith(courseKey);
+          if (related) {
+            candidates.push(attributes[i]);
+            seenKeys.add(rowKey);
+          }
+        }
+        if (candidates.length === 0) {
+          return undefined;
+        }
+        // 多个变体（管理会计/管理会计（双语）/管理会计学…）时，只有本学期开课的那条
+        // 才是当前上的课；过滤后仍不唯一则放弃，交给手动修正。
+        const termRows: LegacyCourseAttributes[] = candidates.filter((row: LegacyCourseAttributes): boolean =>
+          EasLegacyCourseCatalogParser.matchesTerm(row.termText, term));
+        if (termRows.length === 1) {
+          return termRows[0];
+        }
+        return candidates.length === 1 ? candidates[0] : undefined;
+      };
+      for (let i: number = 0; i < unmatched.length; i++) {
+        const row: LegacyCourseAttributes | undefined = fallback(unmatched[i]);
+        if (row === undefined) {
+          continue;
+        }
+        matched++;
+        EasTimetableImporter.fillCourseFromRow(unmatched[i], row, false);
+      }
+    }
+    hilog.info(DOMAIN, TAG, 'legacy attributes matched=%{public}d/%{public}d conflicts=%{public}d',
+      matched, courses.length, conflicted.size);
+    return matched;
+  }
+
+  private static fillCourseFromRow(course: EasCourseItem, row: LegacyCourseAttributes, conflicted: boolean): void {
+    if (course.courseProperty.trim().length === 0) {
+      course.courseProperty = row.property;
+    }
+    if (course.courseCategory.trim().length === 0) {
+      course.courseCategory = row.category;
+    }
+    if (course.assessMethod.trim().length === 0 && !conflicted) {
+      course.assessMethod = row.assessMethod;
+    }
+    if (course.credit <= 0 && row.credit > 0) {
+      course.credit = row.credit;
+    }
+    if (course.code.trim().length === 0) {
+      course.code = row.code;
+    }
   }
 
   private static hasSubjectTypeHint(course: EasCourseItem): boolean {

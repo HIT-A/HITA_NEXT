@@ -19,7 +19,7 @@
 - [ ] 字符串/数字/布尔 `enum`（EasCampus/EasEventType…）：`xxx.toString()`/`valueOf` 语义，确保与落库文本（RDB type 列）一致。
 - [ ] `Set`/`Map` 使用（probe、会话、HTTP 头）API 齐备；`Map.forEach((v,k))` 参数序确认（值在前）。
 - [ ] 类 `get` 访问器（EasTermItem.name）与 `static` 成员：若报“不支持”则改为普通方法。
-- [ ] @Builder 方法调用用 `this.xxx(...)`（Index/AddEventPage）；ForEach 第二参 key generator 必须唯一。
+- [ ] @Builder 方法调用用 `this.xxx(...)`（AddEventPage）；ForEach 第二参 key generator 必须唯一。
 - [ ] @State 数组/对象引用替换触发渲染；未用装饰器传参仅初始化一次（TimetablePreview 静态场景 OK）。
 - [ ] `async` 生命周期（aboutToAppear/onPageShow 返回 Promise）按编译器允许与否调整（可改内部 sync + 尾随 .then）。
 - [ ] `setTimeout/setInterval/clearInterval` 返回 `number` 声明已在控制器/预览页/编辑页使用，类型按环境微调。
@@ -60,6 +60,6 @@
 1. Sync + 编译通过（销 B–E）。
 2. 首页：生成本地演示数据 → 时间线(含今日) → ＋新建事件 → 返回自动出现；长按删除。
 3. 课表周视图预览：上/下周切换、今日列遮罩、事件块定位。
-4. 成绩页：载入样例渲染；无会话提示；真实查询给 EAS 端点提示。
+4. 成绩页：无会话提示；「查询」拉取成绩。
 5. 我的：会话展示（登录后）、退出/清除本地。
 6. 网页登录（真机）：深圳登录→会话落库→课表/成绩真实请求回归；本部/威海端点仍需补齐。

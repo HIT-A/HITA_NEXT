@@ -9,7 +9,7 @@
 
 ## 0. 抓取步骤（深圳，本科）
 1. 打开 HitaNEXT → 首页「网页登录」→ 校区=深圳 → 走完统一认证直到进入系统。
-2. 打开成绩页点「真实查询」或手动操作教务成绩页，记录下列请求。
+2. 打开成绩页点「查询」或手动操作教务成绩页，记录下列请求。
 3. 另记录「学期列表」请求（首次打开成绩/查询时会请求可用学期）。
 
 ## 1. 公共信息
@@ -48,7 +48,7 @@ EasShenzhenEndpoints.termsPath = '从上面复制';   // 例 '/…terms…'
 EasShenzhenEndpoints.scoresPath = '…';
 // 若请求体/Header 与默认不同，改 EasDataProvider.getPersonalScores / getAllTerms 内 opts
 ```
-然后重新 `assembleHap`，真机验证：登录 → 成绩页「真实查询」列出真实成绩。
+然后重新 `assembleHap`，真机验证：登录 → 成绩页「查询」列出真实成绩。
 
 ## 6. 反编译已知佐证（抓不到时参考）
 - 深圳成绩解析字段顺序与兜底（xscj/zzcj/zpcj）见 `ShenzhenWebScoreParser.java`；

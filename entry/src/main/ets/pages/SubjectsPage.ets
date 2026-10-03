@@ -55,8 +55,8 @@ struct SubjectsPage {
       out.push(row);
     }
     this.rows = out;
-    this.summary = tt.name + ' · ' + out.length.toString() + ' 个科目 · 学分合计 ' +
-      SubjectsPage.num(creditSum) + ' · 课程实例 ' + classSum.toString() + ' 次';
+    this.summary = tt.name + ' · ' + out.length.toString() + ' 门课程 · 学分合计 ' +
+      SubjectsPage.num(creditSum) + ' · 共 ' + classSum.toString() + ' 次课';
     this.ready = true;
   }
 

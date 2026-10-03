@@ -32,7 +32,7 @@ hdc shell aa start -a EntryAbility -b com.stupidtree.hitanext
 
 ## 5. M0 抓包（深链路必需）
 1. 启动抓包代理（Charles/mitmproxy），设备或模拟器设代理并装根证书；
-2. 登录成功后进入 **成绩页 → 真实查询**（或教务系统内点成绩）；
+2. 登录成功后进入 **成绩页 → 查询**（或教务系统内点成绩）；
 3. 先验证深圳学期、已选课程、课表 JSON、节次结构和成绩查询请求是否均返回 2xx；如字段变化，再按 `docs/eas-api-capture.md` 记录 URL/Method/Body/返回 JSON；
 4. 若接口字段变化，回填 `EasShenzhenEndpoints` 或对应解析器 → 重新编译装机验证「登录→课表/成绩」真链路。
 

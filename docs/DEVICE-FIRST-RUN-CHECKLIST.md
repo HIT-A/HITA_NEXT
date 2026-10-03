@@ -18,7 +18,7 @@ A. **我的页截图或文本**：会话摘要全部文字（含 webBaseUrl、co
 B. **抓包两请求**（Charles/mitm，见 eas-api-capture.md）：
    1) 学期列表：`URL`、`Method`、`Request Body`、`Response JSON（脱敏前几行）`
    2) 成绩查询：同上（尤其确认 termCode 参数名与 JSON 里成绩字段）
-C. 若“真实查询”报错：把 ScorePage 红字完整文案发我（如 `EAS_SCORES_ENDPOINT_NOT_CAPTURED…`）。
+C. 若“查询”报错：把 ScorePage 红字完整文案发我（如 `EAS_SCORES_ENDPOINT_NOT_CAPTURED…`）。
 
 ## 4. 常见预期
 | 页面 | 预期 |
