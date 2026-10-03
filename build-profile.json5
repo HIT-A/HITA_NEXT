@@ -1,0 +1,56 @@
+{
+  "app": {
+    "signingConfigs": [
+      {
+        "name": "now",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\lzy\\.ohos\\config\\now_HITA_NEXT-main_fXqIqrPhIoyairQ1vBW44nLH1DMfhyaci7X7jtlEd4c=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001BE562BCACB487D4EF586FE00A8F98A50DA755E334F6632DDBE6A7A686E46B077D745C3E575295E0",
+          "profile": "C:\\Users\\lzy\\.ohos\\config\\now_HITA_NEXT-main_fXqIqrPhIoyairQ1vBW44nLH1DMfhyaci7X7jtlEd4c=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\lzy\\.ohos\\config\\now_HITA_NEXT-main_fXqIqrPhIoyairQ1vBW44nLH1DMfhyaci7X7jtlEd4c=.p12",
+          "storePassword": "0000001B84F01A945CB7DC064B99E6D76764FE2B26EDB996DA9F7316B695F5696973B86F1C05CF6D52CF7A"
+        }
+      }
+    ],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "now",
+        "compatibleSdkVersion": "5.0.0(12)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        },
+        "targetSdkVersion": "5.0.0(12)"
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,190 @@
+/**
+ * TimetableIcsImporter.ets — 从 .ics 日历文件导入为一张新的本地课表。
+ *
+ * 系统文件选择器选取文件 → IcsParser 展开事件 → 新建课表并按课程名建科目；
+ * 名称含“考试”的条目写为考试事件。导入后设为当前课表。
+ */
+import { common } from '@kit.AbilityKit';
+import { buffer } from '@kit.ArkTS';
+import { fileIo, picker } from '@kit.CoreFileKit';
+import { RdbHelper } from '../../../common/db/RdbHelper';
+import {
+  EasEventItem,
+  EasEventType,
+  EasSubjectType,
+  EasTermSubject,
+  EasTimePeriodInDay,
+  EasTimetable,
+  WEEK_MILLIS
+} from '../../../common/model/timetable/TimetableModels';
+import { IcsCalendarData, IcsEventInstance, IcsParser } from '../../../common/util/ICSImport';
+import { EasCampus } from '../../eas/EasSession';
+import { EasTimetableImporter } from '../../eas/EasTimetableImporter';
+import { TimetableSelectionStore } from './TimetableSelectionStore';
+
+export class IcsImportResult {
+  success: boolean = false;
+  message: string = '';
+  timetableId: string = '';
+  eventCount: number = 0;
+}
+
+export class TimetableIcsImporter {
+  /** 选择并导入；用户取消选择时返回 undefined。 */
+  static async pickAndImport(context: common.UIAbilityContext): Promise<IcsImportResult | undefined> {
+    const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+    options.maxSelectNumber = 1;
+    options.fileSuffixFilters = ['日历文件(.ics)|.ics'];
+    const uris: string[] = await new picker.DocumentViewPicker(context).select(options);
+    if (uris === undefined || uris.length === 0) {
+      return undefined;
+    }
+    const result: IcsImportResult = new IcsImportResult();
+    let text: string = '';
+    try {
+      text = TimetableIcsImporter.readText(uris[0]);
+    } catch (e) {
+      result.message = '无法读取所选文件';
+      return result;
+    }
+    return await TimetableIcsImporter.importText(context, text, TimetableIcsImporter.fileTitle(uris[0]));
+  }
+
+  static async importText(context: common.Context, text: string, fallbackName: string): Promise<IcsImportResult> {
+    const result: IcsImportResult = new IcsImportResult();
+    if (text.indexOf('BEGIN:VCALENDAR') < 0) {
+      result.message = '所选文件不是有效的 ICS 日历文件';
+      return result;
+    }
+    const calendar: IcsCalendarData = IcsParser.parse(text);
+    const events: IcsEventInstance[] = calendar.events.filter((ev: IcsEventInstance): boolean =>
+      ev.summary.length > 0 && ev.to > ev.from);
+    if (events.length === 0) {
+      result.message = calendar.skippedAllDay > 0 ? '文件中只有全天事件，没有可导入的课程' : '文件中没有可导入的课程';
+      return result;
+    }
+
+    const timetable: EasTimetable = new EasTimetable();
+    timetable.name = calendar.name.length > 0 ? calendar.name :
+      (fallbackName.length > 0 ? fallbackName : 'ICS 导入课表');
+    timetable.code = 'ICS:' + timetable.id;
+    timetable.startTime = EasTimetable.mondayMsOf(events[0].from);
+    timetable.endTime = EasTimetable.mondayMsOf(events[events.length - 1].from) + WEEK_MILLIS - 1;
+    timetable.createdAt = Date.now();
+    timetable.scheduleStructure = TimetableIcsImporter.bestSchedule(events);
+
+    const rdb: RdbHelper = RdbHelper.getInstance();
+    await rdb.init(context);
+    await rdb.saveTimetable(timetable);
+    const subjects: Map<string, EasTermSubject> = new Map<string, EasTermSubject>();
+    for (let i: number = 0; i < events.length; i++) {
+      const ics: IcsEventInstance = events[i];
+      const event: EasEventItem = new EasEventItem();
+      event.type = /考试/.test(ics.summary) ? EasEventType.EXAM : EasEventType.CLASS;
+      event.name = ics.summary;
+      event.place = ics.location;
+      event.teacher = TimetableIcsImporter.teacherOf(ics.description);
+      event.timetableId = timetable.id;
+      event.from = ics.from;
+      event.to = ics.to;
+      const numbers: number[] = TimetableIcsImporter.periodNumbers(timetable.scheduleStructure, ics);
+      event.fromNumber = numbers[0];
+      event.lastNumber = numbers[1];
+      if (event.type === EasEventType.CLASS) {
+        let subject: EasTermSubject | undefined = subjects.get(ics.summary);
+        if (subject === undefined) {
+          subject = new EasTermSubject();
+          subject.timetableId = timetable.id;
+          subject.name = ics.summary;
+          // ICS 不携带课程性质与考核方式，标记为“其他”，可在课表详情中修改。
+          subject.type = EasSubjectType.TAG;
+          subject.field = 'ics';
+          subjects.set(ics.summary, subject);
+          await rdb.saveSubject(subject);
+        }
+        event.subjectId = subject.id;
+      }
+      await rdb.saveEvent(event);
+    }
+
+    await TimetableSelectionStore.getInstance().init(context);
+    await TimetableSelectionStore.getInstance().save(timetable.id);
+    result.success = true;
+    result.timetableId = timetable.id;
+    result.eventCount = events.length;
+    result.message = '已导入 ' + subjects.size.toString() + ' 门课程，共 ' + events.length.toString() + ' 个课次';
+    return result;
+  }
+
+  private static readText(uri: string): string {
+    const file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+    try {
+      const size: number = fileIo.statSync(file.fd).size;
+      const data: ArrayBuffer = new ArrayBuffer(size);
+      const read: number = fileIo.readSync(file.fd, data);
+      return buffer.from(data, 0, read).toString('utf-8');
+    } finally {
+      fileIo.closeSync(file);
+    }
+  }
+
+  private static fileTitle(uri: string): string {
+    const slash: number = uri.lastIndexOf('/');
+    let name: string = slash >= 0 ? uri.substring(slash + 1) : uri;
+    try {
+      name = decodeURIComponent(name);
+    } catch (e) {
+    }
+    return name.replace(/\.ics$/i, '').trim();
+  }
+
+  /** 与导出端“教师：xxx”对称，同时兼容常见的“老师/授课教师/Teacher”写法。 */
+  private static teacherOf(description: string): string {
+    const m: RegExpExecArray | null = /(?:授课教师|教师|老师|Teacher)\s*[：:]\s*([^\n]+)/i.exec(description);
+    return m === null ? '' : m[1].trim();
+  }
+
+  /** 选与文件中上下课时间吻合最多的作息结构，便于回填节次。 */
+  private static bestSchedule(events: IcsEventInstance[]): EasTimePeriodInDay[] {
+    const candidates: EasTimePeriodInDay[][] = [
+      EasTimetable.getDefaultTimeStructure(),
+      EasTimetable.getWeihaiTimeStructure(),
+      EasTimetableImporter.scheduleStructure(EasCampus.BENBU)
+    ];
+    let best: EasTimePeriodInDay[] = candidates[0];
+    let bestScore: number = -1;
+    for (let c: number = 0; c < candidates.length; c++) {
+      let score: number = 0;
+      for (let i: number = 0; i < events.length; i++) {
+        const numbers: number[] = TimetableIcsImporter.periodNumbers(candidates[c], events[i]);
+        if (numbers[0] > 0) {
+          score++;
+        }
+      }
+      if (score > bestScore) {
+        best = candidates[c];
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  /** 上课时刻等于某节开始、下课时刻等于某节结束时返回 [起始节, 结束节]，否则 [0, 0]。 */
+  private static periodNumbers(schedule: EasTimePeriodInDay[], ev: IcsEventInstance): number[] {
+    const from: Date = new Date(ev.from);
+    const to: Date = new Date(ev.to);
+    const fromMinutes: number = from.getHours() * 60 + from.getMinutes();
+    const toMinutes: number = to.getHours() * 60 + to.getMinutes();
+    let first: number = 0;
+    let last: number = 0;
+    for (let i: number = 0; i < schedule.length; i++) {
+      if (schedule[i].from.hour * 60 + schedule[i].from.minute === fromMinutes && first === 0) {
+        first = i + 1;
+      }
+      if (schedule[i].to.hour * 60 + schedule[i].to.minute === toMinutes) {
+        last = i + 1;
+      }
+    }
+    return first > 0 && last >= first ? [first, last] : [0, 0];
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "src": [
+    "pages/Home",
+    "pages/NoticesPage",
+    "pages/ScorePage",
+    "pages/AddEventPage",
+    "pages/ExamPage",
+    "pages/SearchPage",
+    "pages/TimetableManagerPage",
+    "pages/TimetableDetailPage",
+    "pages/ImportTimetablePage",
+    "pages/WebBrowserPage"
+  ]
+}
