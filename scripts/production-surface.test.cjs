@@ -71,13 +71,31 @@ test('production modules contain no generators or executable parser fixtures', (
   }
 });
 
-test('both home empty states lead to real timetable workflows', () => {
+test('today empty state has no login or timetable management actions', () => {
   const home = fs.readFileSync(path.join(etsRoot, 'pages/Home.ets'), 'utf8');
-  assert.equal((home.match(/this\.emptyTimetableActions\(\)/g) || []).length, 2);
+  const start = home.indexOf('  emptyToday()');
+  const end = home.indexOf('  eventRow(', start);
+  assert.ok(start >= 0 && end > start);
+  const today = home.slice(start, end);
+  assert.match(today, /this\.hasTimetable \? '今日暂无日程' : '还没有可展示的课表'/);
+  assert.doesNotMatch(today, /emptyTimetableActions|Button\(|openSessionSheet|pushUrl/);
+});
+
+test('timetable empty state and more page retain timetable workflows', () => {
+  const home = fs.readFileSync(path.join(etsRoot, 'pages/Home.ets'), 'utf8');
+  assert.equal((home.match(/this\.emptyTimetableActions\(\)/g) || []).length, 1);
+  const timetableStart = home.indexOf('  tabTimetable()');
+  const moreStart = home.indexOf('  tabMine()');
+  assert.ok(timetableStart >= 0 && moreStart > timetableStart);
+  const timetable = home.slice(timetableStart, moreStart);
+  assert.match(timetable, /this\.emptyTimetableActions\(\)/);
   const actions = home.slice(home.indexOf('  emptyTimetableActions()'), home.indexOf('  tabTimetable()'));
   assert.match(actions, /pages\/ImportTimetablePage/);
   assert.match(actions, /pages\/TimetableManagerPage/);
   assert.match(actions, /if \(this\.sessionInfo === undefined\) \{\s*this\.openSessionSheet\(\);/);
+  const more = home.slice(moreStart);
+  assert.match(more, /'课表管理'/);
+  assert.match(more, /this\.openSessionSheet\(\)/);
   assert.match(home, /selected !== undefined \? selected/);
 });
 

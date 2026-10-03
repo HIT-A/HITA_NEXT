@@ -1110,9 +1110,6 @@ struct Home {
         .fontSize(13)
         .fontColor(COLOR_TEXT_HINT)
         .margin({ top: 8, bottom: 20 })
-      if (!this.hasTimetable) {
-        this.emptyTimetableActions();
-      }
       Blank()
     }
     .width('100%')
