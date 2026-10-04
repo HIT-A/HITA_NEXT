@@ -51,7 +51,7 @@ HITA NEXT 是基于开源项目 [HITA Android](https://github.com/HIT-A/HITA_And
 - 本地课表：RelationalStore 关系型数据库。
 - 会话与轻量配置：Preferences。
 - 目标平台：HarmonyOS NEXT，模块声明支持 phone、tablet 和 2in1 设备。
-- 当前兼容 SDK：HarmonyOS 5.0.0（API 12）。
+- 当前兼容 SDK：26.0.0。
 
 教务数据流：
 
