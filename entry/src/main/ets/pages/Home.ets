@@ -1924,12 +1924,12 @@ struct Home {
           .backgroundColor(COLOR_CARD)
           .borderRadius(16);
 
-          Blank().height(24);
+          Blank().height(this.dockPageInset() + 20);
         }
         .width('100%')
         // Single source of truth for the tab's horizontal inset: every card,
         // title and shortcut row below spans this padded content area.
-        .padding({ left: 16, right: 16, bottom: 16 });
+        .padding({ left: 16, right: 16 });
       }
       .width('100%')
       .height('100%')
