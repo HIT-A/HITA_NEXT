@@ -19,7 +19,7 @@ const PAGE_BG: string = '#F4F7FC';
 const PAGE_BG_RGB: string = '244,247,252';
 const CARD_BG: string = '#FFFFFF';
 const TEXT_PRIMARY: string = '#14213D';
-const TEXT_SECONDARY: string = '#6B7A90';
+const TEXT_SECONDARY: string = '#4E5C72';
 
 @Entry
 @Component

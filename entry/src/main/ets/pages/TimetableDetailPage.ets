@@ -17,6 +17,8 @@ import {
 import { HitaColors } from '../common/theme/HitaColors';
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
 import { EventEditorForm } from './AddEventPage';
+import { ClassReminderStore } from '../feature/timetable/data/ClassReminderStore';
+import { ClassReminderScheduler } from '../feature/timetable/data/ClassReminderScheduler';
 
 const HEADER_HEIGHT: number = 64;
 const PAGE_BG: string = '#F6F7FA';
@@ -120,11 +122,130 @@ struct TimetableDetailPage {
     this.sheetVisible = true;
   }
 
+  private chooseStartDate(): void {
+    if (this.timetable === undefined) {
+      return;
+    }
+    this.getUIContext().showDatePickerDialog({
+      selected: new Date(this.timetable.startTime),
+      onDateAccept: (date: Date) => {
+        void this.applyStartDate(date);
+      }
+    });
+  }
+
+  private async applyStartDate(date: Date): Promise<void> {
+    const timetable: EasTimetable | undefined = this.timetable;
+    if (timetable === undefined) {
+      return;
+    }
+    const picked: number = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0).getTime();
+    const nextStart: number = EasTimetable.mondayMsOf(picked);
+    const delta: number = nextStart - EasTimetable.mondayMsOf(timetable.startTime);
+    if (delta === 0) {
+      return;
+    }
+    const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
+    const rdb: RdbHelper = RdbHelper.getInstance();
+    await rdb.init(ctx);
+    const events: EasEventItem[] = await rdb.getEventsOfTimetable(timetable.id);
+    for (let i: number = 0; i < events.length; i++) {
+      events[i].from += delta;
+      events[i].to += delta;
+      await rdb.saveEvent(events[i]);
+    }
+    const span: number = Math.max(DAY_MS, timetable.endTime - timetable.startTime);
+    timetable.startTime = nextStart;
+    timetable.endTime = nextStart + span;
+    await rdb.saveTimetable(timetable);
+    this.timetable = timetable;
+    await this.load();
+    this.getUIContext().getPromptAction().showToast({ message: '开学日期已更新，课程已同步平移' });
+  }
+
   private openEditEvent(event: EasEventItem): void {
     this.sheetEventId = event.id;
     this.selectedEvent = event;
     this.eventSheetMode = 2;
     this.sheetVisible = true;
+  }
+
+  /** 保存后只改对应课程/课时，不重新 load 整页，避免滚动和展开状态被清掉。 */
+  private applySavedEvent(event: EasEventItem): void {
+    const nextEvents: EasEventItem[] = [];
+    let foundEvent: boolean = false;
+    for (let i: number = 0; i < this.eventRows.length; i++) {
+      if (this.eventRows[i].id === event.id) {
+        nextEvents.push(event);
+        foundEvent = true;
+      } else {
+        nextEvents.push(this.eventRows[i]);
+      }
+    }
+    if (!foundEvent) {
+      nextEvents.push(event);
+    }
+    this.eventRows = nextEvents;
+
+    const nextRows: TimetableSubjectRow[] = [];
+    let foundSubject: boolean = false;
+    for (let i: number = 0; i < this.subjectRows.length; i++) {
+      const prev: TimetableSubjectRow = this.subjectRows[i];
+      if (prev.subject.id !== event.subjectId) {
+        nextRows.push(prev);
+        continue;
+      }
+      foundSubject = true;
+      const next: TimetableSubjectRow = new TimetableSubjectRow();
+      next.subject = prev.subject;
+      if (event.name.length > 0 && event.name !== 'NULL' && event.name !== prev.subject.name) {
+        next.subject.name = event.name;
+        void RdbHelper.getInstance().saveSubject(next.subject);
+      }
+      const sessions: EasEventItem[] = [];
+      let foundSession: boolean = false;
+      for (let j: number = 0; j < prev.sessions.length; j++) {
+        if (prev.sessions[j].id === event.id) {
+          sessions.push(event);
+          foundSession = true;
+        } else {
+          sessions.push(prev.sessions[j]);
+        }
+      }
+      if (!foundSession && event.type === EasEventType.CLASS) {
+        sessions.push(event);
+      }
+      sessions.sort((a: EasEventItem, b: EasEventItem): number => a.from - b.from);
+      next.sessions = sessions;
+      next.classCount = sessions.length;
+      nextRows.push(next);
+    }
+    if (!foundSubject && event.subjectId.length > 0) {
+      const row: TimetableSubjectRow = new TimetableSubjectRow();
+      const subject: EasTermSubject = new EasTermSubject();
+      subject.id = event.subjectId;
+      subject.timetableId = event.timetableId;
+      subject.name = event.name;
+      subject.color = event.color;
+      row.subject = subject;
+      row.sessions = event.type === EasEventType.CLASS ? [event] : [];
+      row.classCount = row.sessions.length;
+      nextRows.push(row);
+    }
+    this.subjectRows = nextRows;
+    if (this.selectedEvent !== undefined && this.selectedEvent.id === event.id) {
+      this.selectedEvent = event;
+    }
+    void this.resyncReminders();
+  }
+
+  private async resyncReminders(): Promise<void> {
+    const enabled: boolean = await ClassReminderStore.getInstance().loadEnabled();
+    if (!enabled) {
+      return;
+    }
+    const host: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    await ClassReminderScheduler.sync(host, this.eventRows, true);
   }
 
   private openEventDetail(event: EasEventItem): void {
@@ -297,21 +418,16 @@ struct TimetableDetailPage {
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
           .fontColor('#303746')
+        Text('›')
+          .fontSize(20)
+          .fontColor('#7B8498')
+          .margin({ left: 4 })
       }
       .width('100%')
       .margin({ top: 18 })
-      Row() {
-        Text('结束日期')
-          .fontSize(13)
-          .fontColor('#7B8498')
-        Blank()
-        Text(TimetableDetailPage.dateText(timetable.endTime))
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#303746')
-      }
-      .width('100%')
-      .margin({ top: 12 })
+      .onClick(() => {
+        this.chooseStartDate();
+      })
     }
     .width('100%')
     .padding(18)
@@ -522,9 +638,9 @@ struct TimetableDetailPage {
         onCancel: () => {
           this.closeSheet();
         },
-        onSaved: () => {
+        onSaved: (event: EasEventItem) => {
+          this.applySavedEvent(event);
           this.closeSheet();
-          this.load();
         }
       })
         .width('100%')

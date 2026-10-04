@@ -1,7 +1,10 @@
 /**
  * AssistantTab.ets — 主页「助手」栏：课表问答 + 可选云端大模型。
+ * 顶部抬头与功能中心相同：Scroll 占位 + 渐隐遮罩 + 覆盖标题。
  */
 import { common } from '@kit.AbilityKit';
+import { HeaderFadeMask } from '../../common/components/HeaderFadeMask';
+import { HeaderFade } from '../../common/theme/HeaderFade';
 import { AssistantMessage, AssistantRole, AssistantService } from './AssistantService';
 import { AssistantProvider, AssistantSettings, AssistantSettingsStore } from './AssistantSettingsStore';
 import { KEYBOARD_INSET_FALLBACK, NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../../common/theme/StatusBarInset';
@@ -9,13 +12,13 @@ import { KEYBOARD_INSET_FALLBACK, NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLB
 const COLOR_PRIMARY: string = '#2E86E8';
 const COLOR_CARD: string = '#FFFFFF';
 const COLOR_TEXT_PRIMARY: string = '#14213D';
-const COLOR_TEXT_SECONDARY: string = '#6B7A90';
-const COLOR_TEXT_HINT: string = '#8A96A8';
+const COLOR_TEXT_SECONDARY: string = '#4E5C72';
+const COLOR_TEXT_HINT: string = '#5A6880';
 const COLOR_NAV_ACTIVE: string = '#E3EEFC';
-/** 与 Home dock 高度 52 + 底部间距 12 对齐，再叠加导航条 inset。 */
+const SURFACE_RGB: string = '244,247,252';
 const DOCK_CLEARANCE: number = 64;
+const HEADER_BODY: number = 56;
 
-/** Home 切换底栏时会重建本组件，对话记录放在模块级以便切回时保留。 */
 class AssistantChatHistory {
   static messages: AssistantMessage[] = [AssistantService.welcome()];
 }
@@ -26,6 +29,8 @@ export struct AssistantTab {
   @State input: string = '';
   @State sending: boolean = false;
   @State settingsOpen: boolean = false;
+  @State headerFadeOpacity: number = 0;
+  @State composerFadeOpacity: number = 1;
   @State provider: AssistantProvider = AssistantProvider.DEEPSEEK;
   @State apiKeyDraft: string = '';
   @State cloudReady: boolean = false;
@@ -42,9 +47,11 @@ export struct AssistantTab {
     const store: AssistantSettingsStore = AssistantSettingsStore.getInstance();
     await store.init(ctx);
     this.applySettings(await store.load());
-    setTimeout(() => {
-      this.scroller.scrollEdge(Edge.Bottom);
-    }, 50);
+    if (this.messages.length > 1) {
+      setTimeout(() => {
+        this.scroller.scrollEdge(Edge.Bottom);
+      }, 50);
+    }
   }
 
   private applySettings(settings: AssistantSettings): void {
@@ -88,6 +95,18 @@ export struct AssistantTab {
     return DOCK_CLEARANCE + this.navBarInset;
   }
 
+  private headerChromeHeight(): number {
+    return HEADER_BODY + this.statusBarInset;
+  }
+
+  private inputChromeHeight(): number {
+    return 58;
+  }
+
+  private updateFades(): void {
+    this.headerFadeOpacity = HeaderFade.opacity(this.scroller.currentOffset().yOffset);
+  }
+
   private dismissKeyboard(): void {
     this.composerController.stopEditing();
     this.settingsKeyController.stopEditing();
@@ -116,85 +135,94 @@ export struct AssistantTab {
 
   build() {
     Column() {
-      this.header();
-      if (this.settingsOpen) {
-        this.settingsPanel();
-      }
-
-      List({ space: 12, scroller: this.scroller }) {
-        ForEach(this.messages, (message: AssistantMessage) => {
-          ListItem() {
-            this.bubble(message);
-          }
-        }, (message: AssistantMessage) => message.id);
-        if (this.sending) {
-          ListItem() {
-            Row({ space: 8 }) {
-              LoadingProgress()
-                .width(18)
-                .height(18)
-                .color(COLOR_PRIMARY);
-              Text('思考中…')
-                .fontSize(13)
-                .fontColor(COLOR_TEXT_SECONDARY);
+      Stack({ alignContent: Alignment.Top }) {
+        Scroll(this.scroller) {
+          Column({ space: 12 }) {
+            Blank().height(this.headerChromeHeight());
+            if (this.settingsOpen) {
+              this.settingsPanel();
             }
-            .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-            .backgroundColor(COLOR_CARD)
-            .borderRadius(16);
+            ForEach(this.messages, (message: AssistantMessage) => {
+              this.bubble(message);
+            }, (message: AssistantMessage) => message.id);
+            if (this.sending) {
+              Row({ space: 8 }) {
+                LoadingProgress()
+                  .width(18)
+                  .height(18)
+                  .color(COLOR_PRIMARY);
+                Text('思考中…')
+                  .fontSize(13)
+                  .fontColor(COLOR_TEXT_SECONDARY);
+              }
+              .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+              .backgroundColor(COLOR_CARD)
+              .borderRadius(16);
+            }
+            if (this.messages.length <= 1 && !this.sending) {
+              this.suggestions();
+            }
+            Blank().height(this.inputChromeHeight());
           }
+          .width('100%')
+          .padding({ left: 16, right: 16, bottom: 16 });
         }
-        if (this.messages.length <= 1 && !this.sending) {
-          ListItem() {
-            this.suggestions();
-          }
+        .width('100%')
+        .height('100%')
+        .scrollBar(BarState.Off)
+        .onDidScroll(() => {
+          this.updateFades();
+        })
+        .onClick(() => {
+          this.dismissKeyboard();
+        });
+
+        HeaderFadeMask({
+          maskOpacity: this.headerFadeOpacity,
+          rgb: SURFACE_RGB,
+          headerHeight: this.headerChromeHeight()
+        });
+
+        HeaderFadeMask({
+          maskOpacity: this.composerFadeOpacity,
+          rgb: SURFACE_RGB,
+          headerHeight: this.inputChromeHeight(),
+          fromBottom: true
+        })
+          .width('100%')
+          .align(Alignment.Bottom);
+
+        Row() {
+          Text('助手')
+            .fontSize(24)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(COLOR_TEXT_PRIMARY)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1);
+          this.headerButton($r('sys.symbol.trash'), '清空对话', () => {
+            this.clearChat();
+          });
+          this.headerButton($r('sys.symbol.gearshape'), '助手设置', () => {
+            this.settingsOpen = !this.settingsOpen;
+            if (this.settingsOpen) {
+              this.provider = this.settings.provider;
+              this.apiKeyDraft = this.settings.apiKey;
+            }
+          });
         }
+        .width('100%')
+        .height(this.headerChromeHeight())
+        .padding({ left: 16, right: 16, top: this.statusBarInset })
+        .alignItems(VerticalAlign.Center);
       }
       .width('100%')
-      .layoutWeight(1)
-      .padding({ left: 16, right: 16, top: 4, bottom: 8 })
-      .scrollBar(BarState.Off)
-      .onClick(() => {
-        this.dismissKeyboard();
-      });
+      .layoutWeight(1);
 
       this.inputBar();
     }
     .width('100%')
     .height('100%');
-  }
-
-  @Builder
-  header() {
-    Row() {
-      Column() {
-        Text('助手')
-          .fontSize(24)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(COLOR_TEXT_PRIMARY);
-        Text(this.cloudReady ? '课表问答 · ' + AssistantSettings.providerName(this.provider) : '课表问答 · 本地模式')
-          .fontSize(12)
-          .fontColor(COLOR_TEXT_SECONDARY)
-          .margin({ top: 2 });
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-      .onClick(() => {
-        this.dismissKeyboard();
-      });
-      this.headerButton($r('sys.symbol.trash'), '清空对话', () => {
-        this.clearChat();
-      });
-      this.headerButton($r('sys.symbol.gearshape'), '助手设置', () => {
-        this.settingsOpen = !this.settingsOpen;
-        if (this.settingsOpen) {
-          this.provider = this.settings.provider;
-          this.apiKeyDraft = this.settings.apiKey;
-        }
-      });
-    }
-    .width('100%')
-    .padding({ left: 20, right: 16, top: 14 + this.statusBarInset, bottom: 8 })
-    .alignItems(VerticalAlign.Center);
   }
 
   @Builder
@@ -267,8 +295,7 @@ export struct AssistantTab {
     .alignItems(HorizontalAlign.Start)
     .padding(16)
     .backgroundColor(COLOR_CARD)
-    .borderRadius(16)
-    .margin({ left: 16, right: 16, bottom: 8 });
+    .borderRadius(16);
   }
 
   @Builder

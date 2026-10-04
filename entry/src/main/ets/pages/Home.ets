@@ -6,18 +6,13 @@
  * timetable/session data layer already used by the app.
  */
 import { common } from '@kit.AbilityKit';
-import { FrameCallback, KeyboardAvoidMode } from '@kit.ArkUI';
+import { FrameCallback, KeyboardAvoidMode, SymbolGlyphModifier } from '@kit.ArkUI';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
-import { DockGlass } from '../common/theme/DockGlass';
 import { HeaderFade } from '../common/theme/HeaderFade';
 import { TimetableTheme } from '../common/theme/TimetableTheme';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
-import {
-  DockLightSourceModifier,
-  DockRimLightModifier,
-  ImmersiveDockModifier
-} from '../common/theme/ImmersiveDockModifier';
+import { DockBarMaterial } from '../common/theme/ImmersiveDockModifier';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTermSubject, EasTimetable } from '../common/model/timetable/TimetableModels';
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
@@ -30,6 +25,8 @@ import { NewsTab } from '../feature/news/NewsTab';
 import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
 import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
 import { TimetableBackgroundStore } from '../feature/timetable/data/TimetableBackgroundStore';
+import { ClassReminderStore } from '../feature/timetable/data/ClassReminderStore';
+import { ClassReminderScheduler, ClassReminderSyncResult } from '../feature/timetable/data/ClassReminderScheduler';
 import { IcsImportResult, TimetableIcsImporter } from '../feature/timetable/data/TimetableIcsImporter';
 import {
   AXIS_END_HOUR,
@@ -50,17 +47,14 @@ const COLOR_PRIMARY: string = '#2E86E8';
 const COLOR_SURFACE: string = '#F4F7FC';
 const COLOR_CARD: string = '#FFFFFF';
 const COLOR_TEXT_PRIMARY: string = '#14213D';
-const COLOR_TEXT_SECONDARY: string = '#6B7A90';
-const COLOR_TEXT_HINT: string = '#8A96A8';
+const COLOR_TEXT_SECONDARY: string = '#4E5C72';
+const COLOR_TEXT_HINT: string = '#5A6880';
 const COLOR_NAV_ACTIVE: string = '#E3EEFC';
-const COLOR_NAV_IDLE: string = '#070B14';
-const COLOR_NAV_ACTIVE_TEXT: string = '#08367A';
 const COLOR_CLASS: string = '#2E86E8';
 const COLOR_EXAM: string = '#8A2E42';
 const COLOR_OTHER: string = '#1B4F9C';
 const COLOR_TAG: string = '#0F6E56';
 const TIMETABLE_BOTTOM_SAFE_EXTENSION: number = 56;
-const NAV_ITEM_WIDTH: number = 64;
 const TAB_TODAY: number = 0;
 const TAB_TIMETABLE: number = 1;
 const TAB_ASSISTANT: number = 2;
@@ -70,29 +64,11 @@ const NAV_TAB_COUNT: number = 5;
 const MORE_HEADER_HEIGHT: number = 56;
 const TIMETABLE_CHROME_FALLBACK: number = 200;
 const COLOR_SURFACE_RGB: string = '244,247,252';
-const DOCK_WIDTH: number = NAV_ITEM_WIDTH * NAV_TAB_COUNT + 8;
-const DOCK_HEIGHT: number = 52;
-const DOCK_RADIUS: number = 26;
-const DOCK_CAUSTIC_WIDTH: number = 220;
-const DOCK_CAUSTIC_HEIGHT: number = 18;
-const NAV_DROPLET_RADIUS: number = 22;
 // 周切换：位移超过页宽的该比例即翻周；位移较短时抬手速度够快（vp/s）同样翻周。
 const TIMETABLE_SWIPE_RATIO: number = 0.08;
 const TIMETABLE_FLING_VELOCITY: number = 400;
 const TIMETABLE_FLING_MIN_OFFSET: number = 12;
 const TAB_SWIPE_MS: number = 280;
-const NAV_DROPLET_LIFT_SHADOW: ShadowOptions = {
-  radius: 14,
-  color: 'rgba(20,33,61,0.18)',
-  offsetX: 0,
-  offsetY: 4
-};
-const NAV_DROPLET_REST_SHADOW: ShadowOptions = {
-  radius: 0,
-  color: Color.Transparent,
-  offsetX: 0,
-  offsetY: 0
-};
 
 @Extend(Column)
 function tabPage(bottomInset: number, background: ResourceColor) {
@@ -142,6 +118,8 @@ struct Home {
   @State loginCampusCode: string = 'WEIHAI';
   @State courseSheetOpen: boolean = false;
   @State selectedCourse: EasEventItem | undefined = undefined;
+  @State classReminderEnabled: boolean = false;
+  private reminderBusy: boolean = false;
   @State timetableEvents: EasEventItem[] = [];
   @State timetableWeek: number = 1;
   // Week paging follows the Android timetable: drag the page with the finger,
@@ -168,25 +146,17 @@ struct Home {
   @State private timetableCanvasHeight: number = 0;
   @State timetableFadeOpacity: number = 0;
   @State moreHeaderMaskOpacity: number = 0;
-  // 选中水滴的位置（以页签为单位，可为小数）：横滑页面时跟手，松手后弹簧归位。
-  @State navPos: number = TAB_TODAY;
-  @State navLifted: boolean = false;
-  @State tabSwipeOffset: number = 0;
   // 助手/资讯首次接近时才创建，避免冷启动就发起资讯网络请求。
   @State assistantMounted: boolean = false;
   @State newsMounted: boolean = false;
-  @State tabPageOpacity: number = 1;
+  @State selectedNav: number = TAB_TODAY;
   @State timetableBgUri: string = '';
   @State timetableTextColor: string = COLOR_TEXT_PRIMARY;
   @State timetablePaletteOpen: boolean = false;
   @State timetableChromeH: number = TIMETABLE_CHROME_FALLBACK;
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
   @StorageProp('hita_nav_bar_vp') navBarInset: number = NAV_BAR_INSET_FALLBACK;
-  private tabFading: boolean = false;
-  private dockModifier: ImmersiveDockModifier = new ImmersiveDockModifier();
-  private dockLightSource: DockLightSourceModifier = new DockLightSourceModifier();
-  private dockRimLight: DockRimLightModifier = new DockRimLightModifier();
-  private tabSwiper: SwiperController = new SwiperController();
+  private tabsController: TabsController = new TabsController();
   private tabPageWidth: number = 0;
   private moreScroller: Scroller = new Scroller();
   private timetableScroller: Scroller = new Scroller();
@@ -197,6 +167,8 @@ struct Home {
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     await EasSessionStore.getInstance().init(ctx);
     await TimetableSelectionStore.getInstance().init(ctx);
+    await ClassReminderStore.getInstance().init(ctx);
+    this.classReminderEnabled = await ClassReminderStore.getInstance().loadEnabled();
     const bgPath: string = TimetableBackgroundStore.loadPath(ctx);
     this.timetableBgUri = bgPath.length > 0 ? TimetableBackgroundStore.toDisplayUri(bgPath) : '';
     this.timetableTextColor = await TimetableSelectionStore.getInstance()
@@ -251,7 +223,11 @@ struct Home {
           this.dayKey = nextDayKey;
           this.refreshSummaries();
         }
-      }, 60000);
+        if (this.classReminderEnabled) {
+          const host: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+          void ClassReminderScheduler.dispatchDue(host, this.timetableEvents);
+        }
+      }, 15000);
     }
   }
 
@@ -366,6 +342,57 @@ struct Home {
     this.updateTodayHighlights();
     this.timelineText = today.length === 0 ? (display === undefined ? '暂无课表' : '今日暂无安排') :
       '今日 ' + today.length.toString() + ' 项安排';
+    if (this.classReminderEnabled) {
+      const host: common.UIAbilityContext = ctx as common.UIAbilityContext;
+      await ClassReminderScheduler.sync(host, allEvents);
+    }
+  }
+
+  private classReminderSubtitle(): string {
+    if (!this.classReminderEnabled) {
+      return '关闭后不再提醒上课';
+    }
+    return '应用在前台或后台时，上课前15分钟通知';
+  }
+
+  private async setClassReminderEnabled(on: boolean): Promise<void> {
+    if (this.reminderBusy) {
+      return;
+    }
+    this.reminderBusy = true;
+    const ctx: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    try {
+      if (!on) {
+        this.classReminderEnabled = false;
+        await ClassReminderStore.getInstance().saveEnabled(false);
+        await ClassReminderScheduler.cancelAll(ctx);
+        this.getUIContext().getPromptAction().showToast({ message: '已关闭课程提醒' });
+        return;
+      }
+      const allowed: boolean = await ClassReminderScheduler.requestNotification(ctx);
+      if (!allowed) {
+        this.classReminderEnabled = false;
+        await ClassReminderStore.getInstance().saveEnabled(false);
+        this.getUIContext().getPromptAction().showToast({ message: '未授予通知权限，无法开启课程提醒' });
+        return;
+      }
+      this.classReminderEnabled = true;
+      await ClassReminderStore.getInstance().saveEnabled(true);
+      const result: ClassReminderSyncResult = await ClassReminderScheduler.sync(ctx, this.timetableEvents, true);
+      if (result.pendingClasses === 0) {
+        this.getUIContext().getPromptAction().showToast({
+          message: '已开启课程提醒（当前没有未开始的课程，有课之后会自动提醒）'
+        });
+      } else {
+        const whenText: string = result.nextFire.length > 0 ? '，下一次约 ' + result.nextFire : '';
+        this.getUIContext().getPromptAction().showToast({
+          message: '已开启课程提醒' + whenText +
+            '。应用在前台或后台时会通知，划掉应用后不会提醒'
+        });
+      }
+    } finally {
+      this.reminderBusy = false;
+    }
   }
 
   private updateTodayHighlights(): void {
@@ -610,20 +637,7 @@ struct Home {
     }
   }
 
-  private handleChromeTabPanUpdate(event: GestureEvent): void {
-    if (this.tabFading) {
-      return;
-    }
-    const offset: number = this.clampedChromeOffset(event.offsetX);
-    this.tabSwipeOffset = offset;
-    this.followTabSwipe(this.currentTab, offset);
-  }
-
   private handleChromeTabPanEnd(event: GestureEvent): void {
-    if (this.tabFading) {
-      this.pinNav(this.currentTab);
-      return;
-    }
     const width: number = Math.max(1, this.tabPageWidth);
     const offset: number = this.clampedChromeOffset(event.offsetX);
     const fling: boolean = Math.abs(offset) >= TIMETABLE_FLING_MIN_OFFSET &&
@@ -635,24 +649,10 @@ struct Home {
     } else if (committed && offset > 0 && this.currentTab > 0) {
       target = this.currentTab - 1;
     }
-    const dest: number = target === this.currentTab ? 0 :
-      (target > this.currentTab ? -width : width);
-    this.mountTabsNear(target);
-    this.getUIContext().animateTo({
-      duration: TAB_SWIPE_MS,
-      curve: Curve.EaseOut,
-      onFinish: () => {
-        if (target !== this.currentTab) {
-          this.tabSwiper.changeIndex(target, false);
-          this.selectTab(target);
-        }
-        this.pinNav(target);
-      }
-    }, () => {
-      this.tabSwipeOffset = dest;
-      this.navPos = target;
-      this.navLifted = false;
-    });
+    if (target !== this.currentTab) {
+      this.mountTabsNear(target);
+      this.tabsController.changeIndex(target);
+    }
   }
 
   private gotoCurrentTimetableWeek(): void {
@@ -675,7 +675,7 @@ struct Home {
     this.timetableMarqueeElapsedMs = 0;
     this.currentTab = index;
     if (index === TAB_TIMETABLE) {
-      // 页面常驻于 Swiper 中不会重建，回到时间表时需主动重绘并恢复地点跑马灯。
+      // 页面常驻于 Tabs 中不会重建，回到时间表时需主动重绘并恢复地点跑马灯。
       this.drawTimetableNow();
     }
   }
@@ -687,42 +687,6 @@ struct Home {
     if (Math.abs(index - TAB_NEWS) <= 1) {
       this.newsMounted = true;
     }
-  }
-
-  private onNavTap(index: number): void {
-    if (index === this.currentTab || this.tabFading) {
-      return;
-    }
-    this.tabFading = true;
-    this.mountTabsNear(index);
-    this.navLifted = true;
-    this.tabSwiper.changeIndex(index, true);
-    this.selectTab(index);
-    this.getUIContext().animateTo({
-      duration: TAB_SWIPE_MS,
-      curve: Curve.EaseOut,
-      onFinish: () => {
-        this.pinNav(index);
-        this.tabFading = false;
-      }
-    }, () => {
-      this.navPos = index;
-      this.navLifted = false;
-    });
-  }
-
-  private followTabSwipe(index: number, pageOffsetX: number): void {
-    if (this.tabPageWidth <= 0) {
-      return;
-    }
-    this.navLifted = true;
-    this.navPos = Math.max(0, Math.min(NAV_TAB_COUNT - 1, index - pageOffsetX / this.tabPageWidth));
-  }
-
-  private pinNav(index: number): void {
-    this.navLifted = false;
-    this.navPos = index;
-    this.tabSwipeOffset = 0;
   }
 
   private clampedChromeOffset(offset: number): number {
@@ -741,8 +705,28 @@ struct Home {
     return this.currentTab === TAB_TIMETABLE && this.currentTimetable !== undefined;
   }
 
-  private navHighlight(): number {
-    return Math.max(0, Math.min(NAV_TAB_COUNT - 1, Math.round(this.navPos)));
+  private dockPageInset(): number {
+    return 64 + this.navBarInset;
+  }
+
+  private dockTab(icon: Resource, label: string): BottomTabBarStyle {
+    const normal: SymbolGlyphModifier = new SymbolGlyphModifier(icon);
+    normal.fontSize(20);
+    normal.fontColor([$r('sys.color.ohos_id_color_text_secondary')]);
+    const selected: SymbolGlyphModifier = new SymbolGlyphModifier(icon);
+    selected.fontSize(20);
+    selected.fontColor([$r('sys.color.ohos_id_color_text_primary')]);
+    const symbol: TabBarSymbol = {
+      normal: normal,
+      selected: selected
+    };
+    return BottomTabBarStyle.of(symbol, label)
+      .layoutMode(LayoutMode.VERTICAL)
+      .labelStyle({
+        font: { size: 11, weight: FontWeight.Medium },
+        selectedColor: $r('sys.color.ohos_id_color_text_primary'),
+        unselectedColor: $r('sys.color.ohos_id_color_text_secondary')
+      });
   }
 
   private timetableHeaderMonth(): string {
@@ -822,6 +806,7 @@ struct Home {
         return;
       }
       this.timetableBgUri = TimetableBackgroundStore.toDisplayUri(path);
+      this.timetableFadeOpacity = 0;
       this.drawTimetableNow();
     } catch (e) {
       this.getUIContext().getPromptAction().showToast({ message: '选择图片失败' });
@@ -1057,79 +1042,87 @@ struct Home {
   }
 
   build() {
-    Stack({ alignContent: Alignment.Bottom }) {
-      // 左右滑动在相邻页签间切换。时间表页有课表时横滑留给周切换，此时禁用 Swiper 手势。
-      // 时间表/资讯/更多页：内容延伸进底部安全区，导航胶囊悬浮在内容之上。
-      Swiper(this.tabSwiper) {
+    Tabs({ barPosition: BarPosition.End, controller: this.tabsController }) {
+      TabContent() {
         Column() {
           this.tabToday();
         }
-        .tabPage(64, COLOR_SURFACE)
+        .tabPage(this.dockPageInset(), COLOR_SURFACE)
+      }
+      .clip(false)
+      .tabBar(this.dockTab($r('sys.symbol.calendar'), '今日'))
 
+      TabContent() {
         Column() {
           this.tabTimetable();
         }
         .tabPage(0, Color.Transparent)
+      }
+      .clip(false)
+      .tabBar(this.dockTab($r('sys.symbol.doc_plaintext'), '时间表'))
 
+      TabContent() {
         Column() {
           if (this.assistantMounted) {
             AssistantTab();
           }
         }
         .tabPage(0, COLOR_SURFACE)
+      }
+      .clip(false)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.BOTTOM])
+      .tabBar(this.dockTab($r('sys.symbol.wand_and_stars'), '助手'))
 
+      TabContent() {
         Column() {
           if (this.newsMounted) {
             NewsTab();
           }
         }
         .tabPage(0, COLOR_SURFACE)
+      }
+      .clip(false)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.BOTTOM])
+      .tabBar(this.dockTab($r('sys.symbol.doc_text'), '资讯'))
 
+      TabContent() {
         Column() {
           this.tabMine();
         }
         .tabPage(0, COLOR_SURFACE)
       }
-      .width('100%')
-      .height('100%')
-      .opacity(this.tabPageOpacity)
-      .translate({ x: this.tabSwipeOffset })
-      .loop(false)
-      .indicator(false)
-      .effectMode(EdgeEffect.None)
-      .duration(TAB_SWIPE_MS)
-      .disableSwipe(this.tabSwipeLocked())
-      .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.KEYBOARD], [SafeAreaEdge.BOTTOM])
-      .onAreaChange((oldValue: Area, newValue: Area) => {
-        this.tabPageWidth = newValue.width as number;
-      })
-      .onGestureSwipe((index: number, extraInfo: SwiperAnimationEvent) => {
-        this.followTabSwipe(index, extraInfo.currentOffset);
-      })
-      .onAnimationStart((index: number, targetIndex: number, extraInfo: SwiperAnimationEvent) => {
-        this.mountTabsNear(targetIndex);
-        this.followTabSwipe(index, extraInfo.currentOffset);
-        this.getUIContext().animateTo({ duration: TAB_SWIPE_MS, curve: Curve.EaseOut }, () => {
-          this.navPos = targetIndex;
-          this.navLifted = false;
-        });
-      })
-      .onAnimationEnd((index: number) => {
-        this.selectTab(index);
-        this.pinNav(index);
-      })
-      .onChange((index: number) => {
-        this.selectTab(index);
-        this.pinNav(index);
-      })
-
-      this.pillNavigation();
-
+      .clip(false)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+      .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.BOTTOM])
+      .tabBar(this.dockTab($r('sys.symbol.more'), '更多'))
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.currentTab === 1 ? 'transparent' : COLOR_SURFACE)
+    .vertical(false)
+    .barOverlap(true)
+    .barMode(BarMode.Fixed)
+    .barHeight(56)
+    .barBackgroundColor(Color.Transparent)
+    .divider(null)
+    .scrollable(!this.tabSwipeLocked())
+    .animationDuration(TAB_SWIPE_MS)
+    .barFloatingStyle(DockBarMaterial.floatingStyle(12 + this.navBarInset,
+      this.selectedNav === TAB_TIMETABLE && this.hasTimetableBackground()))
+    .backgroundColor(this.currentTab === 1 ? Color.Transparent : COLOR_SURFACE)
     .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.KEYBOARD], [SafeAreaEdge.BOTTOM])
+    .onAreaChange((oldValue: Area, newValue: Area) => {
+      this.tabPageWidth = newValue.width as number;
+    })
+    .onAnimationStart((index: number, targetIndex: number, extraInfo: TabsAnimationEvent) => {
+      this.mountTabsNear(targetIndex);
+      this.selectedNav = targetIndex;
+    })
+    .onChange((index: number) => {
+      this.selectTab(index);
+      this.selectedNav = index;
+    })
     .bindSheet(this.activeSheetVisible, this.activeSheet(), {
       height: this.loginSheetOpen ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
       dragBar: true,
@@ -1172,167 +1165,6 @@ struct Home {
     } else {
       this.sessionSheet();
     }
-  }
-
-  @Builder
-  pillNavigation() {
-    Stack() {
-      Column()
-        .width('100%')
-        .height('100%')
-        .borderRadius(DOCK_RADIUS)
-        .clip(true)
-        .backgroundColor(DockGlass.FROST)
-        .hitTestBehavior(HitTestMode.None);
-      // 光线穿过玻璃后在底缘汇聚成一道辉光。径向渐变只能画圆，先画底边居中的半圆，再横向拉伸成半椭圆。
-      Column()
-        .width(DOCK_CAUSTIC_HEIGHT * 2)
-        .height(DOCK_CAUSTIC_HEIGHT)
-        .radialGradient({
-          center: [DOCK_CAUSTIC_HEIGHT, DOCK_CAUSTIC_HEIGHT],
-          radius: DOCK_CAUSTIC_HEIGHT,
-          colors: [[DockGlass.caustic(0.24), 0], [DockGlass.caustic(0.08), 0.55], [DockGlass.caustic(0), 1]]
-        })
-        .scale({ x: DOCK_CAUSTIC_WIDTH / (DOCK_CAUSTIC_HEIGHT * 2), centerX: '50%', centerY: '100%' })
-        .position({ x: (DOCK_WIDTH - DOCK_CAUSTIC_HEIGHT * 2) / 2, y: DOCK_HEIGHT - DOCK_CAUSTIC_HEIGHT })
-        .hitTestBehavior(HitTestMode.None);
-      // 左上角受光点只照亮一角；整片铺白会让玻璃发乳白、不通透。
-      Column()
-        .width('100%')
-        .height('100%')
-        .borderRadius(DOCK_RADIUS)
-        .clip(true)
-        .radialGradient({
-          center: [30, 0],
-          radius: 64,
-          colors: [[DockGlass.glow(0.45), 0], [DockGlass.glow(0), 1]]
-        })
-        .hitTestBehavior(HitTestMode.None);
-
-      // 玻璃边缘：一层高光描边，与栏体同尺寸同圆角，不再叠 outline。
-      Column()
-        .width('100%')
-        .height('100%')
-        .borderRadius(DOCK_RADIUS)
-        .clip(true)
-        .border({
-          width: DockGlass.RIM_WIDTH,
-          color: {
-            top: DockGlass.glow(0.95),
-            left: DockGlass.glow(0.8),
-            right: DockGlass.glow(0.55),
-            bottom: DockGlass.glow(0.4)
-          }
-        })
-        .attributeModifier(this.dockRimLight)
-        .hitTestBehavior(HitTestMode.None);
-
-      // 镜面反光：顶缘内侧一道细长高光，右下底缘一道较弱的回光。
-      Column()
-        .width('46%')
-        .height(1)
-        .borderRadius(0.5)
-        .linearGradient({
-          direction: GradientDirection.Right,
-          colors: [[DockGlass.glow(0), 0], [DockGlass.glow(0.62), 0.3],
-            [DockGlass.glow(0.62), 0.65], [DockGlass.glow(0), 1]]
-        })
-        .position({ x: '12%', y: DockGlass.RIM_WIDTH + 0.6 })
-        .hitTestBehavior(HitTestMode.None);
-      Column()
-        .width('26%')
-        .height(1)
-        .borderRadius(0.5)
-        .linearGradient({
-          direction: GradientDirection.Right,
-          colors: [[DockGlass.glow(0), 0], [DockGlass.glow(0.45), 0.5], [DockGlass.glow(0), 1]]
-        })
-        .position({ x: '62%', y: DOCK_HEIGHT - DockGlass.RIM_WIDTH - 1.6 })
-        .hitTestBehavior(HitTestMode.None);
-
-      // 页签放在装饰层之上，避免高光描边挡住点击。
-      Stack() {
-        this.navDroplet();
-
-        Row() {
-          this.navItem($r('sys.symbol.calendar'), '今日', TAB_TODAY);
-          this.navItem($r('sys.symbol.doc_plaintext'), '时间表', TAB_TIMETABLE);
-          this.navItem($r('sys.symbol.wand_and_stars'), '助手', TAB_ASSISTANT);
-          this.navItem($r('sys.symbol.doc_text'), '资讯', TAB_NEWS);
-          this.navItem($r('sys.symbol.more'), '更多', TAB_MORE);
-        }
-        .width(NAV_ITEM_WIDTH * NAV_TAB_COUNT)
-        .height(44);
-      }
-      .width(NAV_ITEM_WIDTH * NAV_TAB_COUNT)
-      .height(44)
-      .alignContent(Alignment.Start);
-    }
-    .width(DOCK_WIDTH)
-    .height(DOCK_HEIGHT)
-    .borderRadius(DOCK_RADIUS)
-    .clip(true)
-    .attributeModifier(this.dockModifier)
-    .hitTestBehavior(HitTestMode.Transparent)
-    .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.KEYBOARD], [SafeAreaEdge.BOTTOM])
-    .margin({ bottom: 12 + this.navBarInset });
-  }
-
-  // 选中水滴：自带高光描边的浅色玻璃胶囊；横滑页面时“浮起”放大并跟手移动。
-  @Builder
-  navDroplet() {
-    Stack() {
-      Column()
-        .width('100%')
-        .height('100%')
-        .borderRadius(NAV_DROPLET_RADIUS)
-        .linearGradient({
-          direction: GradientDirection.Bottom,
-          colors: [[DockGlass.glow(0.55), 0], [DockGlass.glow(0), 0.6]]
-        })
-    }
-    .width(NAV_ITEM_WIDTH)
-    .height(44)
-    .borderRadius(NAV_DROPLET_RADIUS)
-    .backgroundColor(this.navLifted ? 'rgba(255,255,255,0.4)' : 'rgba(46,134,232,0.15)')
-    .border({
-      width: 1,
-      color: {
-        top: DockGlass.glow(0.92),
-        left: DockGlass.glow(0.6),
-        right: DockGlass.glow(0.6),
-        bottom: DockGlass.glow(0.28)
-      }
-    })
-    .shadow(this.navLifted ? NAV_DROPLET_LIFT_SHADOW : NAV_DROPLET_REST_SHADOW)
-    .scale({ x: this.navLifted ? 1.16 : 1, y: this.navLifted ? 1.12 : 1 })
-    .translate({ x: NAV_ITEM_WIDTH * this.navPos })
-    .hitTestBehavior(HitTestMode.None)
-  }
-
-  @Builder
-  navItem(symbol: Resource, label: string, index: number) {
-    Column() {
-      SymbolGlyph(symbol)
-        .fontSize(20)
-        .fontWeight(FontWeight.Medium)
-        .fontColor([index === this.navHighlight() ? COLOR_NAV_ACTIVE_TEXT : COLOR_NAV_IDLE])
-      Text(label)
-        .fontSize(11)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(index === this.navHighlight() ? COLOR_NAV_ACTIVE_TEXT : COLOR_NAV_IDLE)
-        .margin({ top: 2 })
-    }
-    .width(NAV_ITEM_WIDTH)
-    .height(44)
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Center)
-    .backgroundColor('transparent')
-    .borderRadius(NAV_DROPLET_RADIUS)
-    .attributeModifier(this.dockLightSource)
-    .onClick(() => {
-      this.onNavTap(index);
-    })
   }
 
   @Builder
@@ -1845,14 +1677,20 @@ struct Home {
           .scrollBar(BarState.Off)
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
           .onDidScroll(() => {
+            if (this.hasTimetableBackground()) {
+              this.timetableFadeOpacity = 0;
+              return;
+            }
             this.timetableFadeOpacity = HeaderFade.opacity(this.timetableScroller.currentOffset().yOffset);
           })
 
-          HeaderFadeMask({
-            maskOpacity: this.timetableFadeOpacity,
-            rgb: COLOR_SURFACE_RGB,
-            headerHeight: this.timetableChromeH
-          });
+          if (!this.hasTimetableBackground()) {
+            HeaderFadeMask({
+              maskOpacity: this.timetableFadeOpacity,
+              rgb: COLOR_SURFACE_RGB,
+              headerHeight: this.timetableChromeH
+            });
+          }
         }
         .width('100%')
         .height('100%')
@@ -1969,9 +1807,6 @@ struct Home {
       .backgroundColor(Color.Transparent)
       .gesture(
         PanGesture({ direction: PanDirection.Horizontal, distance: 16 })
-          .onActionUpdate((event: GestureEvent) => {
-            this.handleChromeTabPanUpdate(event);
-          })
           .onActionEnd((event: GestureEvent) => {
             this.handleChromeTabPanEnd(event);
           })
@@ -2092,6 +1927,7 @@ struct Home {
 
           this.moreSectionTitle('设置');
           Column() {
+            this.moreToggleRow($r('sys.symbol.bell'), '课程提醒', this.classReminderSubtitle());
             this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '公告',
               '版本更新 · 服务与故障通知', () => {
                 this.getUIContext().getRouter().pushUrl({ url: 'pages/NoticesPage' });
@@ -2102,7 +1938,7 @@ struct Home {
           .backgroundColor(COLOR_CARD)
           .borderRadius(16);
 
-          Blank().height(110);
+          Blank().height(24);
         }
         .width('100%')
         // Single source of truth for the tab's horizontal inset: every card,
@@ -2554,6 +2390,49 @@ struct Home {
       .fontColor(COLOR_TEXT_PRIMARY)
       .margin({ top: 16, bottom: 4 })
       .alignSelf(ItemAlign.Start);
+  }
+
+  @Builder
+  moreToggleRow(symbol: Resource, title: string, subtitle: string) {
+    Row() {
+      Stack() {
+        SymbolGlyph(symbol)
+          .fontSize(22)
+          .fontColor([COLOR_PRIMARY]);
+      }
+      .width(40)
+      .height(40)
+      .borderRadius(20)
+      .alignContent(Alignment.Center)
+      .backgroundColor(COLOR_NAV_ACTIVE);
+      Column() {
+        Text(title)
+          .fontSize(14)
+          .fontColor(COLOR_TEXT_PRIMARY)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis });
+        if (subtitle.length > 0) {
+          Text(subtitle)
+            .fontSize(12)
+            .fontColor(COLOR_TEXT_SECONDARY)
+            .margin({ top: 2 })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis });
+        }
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      .margin({ left: 12 });
+      Toggle({ type: ToggleType.Switch, isOn: this.classReminderEnabled })
+        .selectedColor(COLOR_PRIMARY)
+        .onChange((isOn: boolean) => {
+          void this.setClassReminderEnabled(isOn);
+        });
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 16, right: 16 })
+    .alignItems(VerticalAlign.Center);
   }
 
   @Builder

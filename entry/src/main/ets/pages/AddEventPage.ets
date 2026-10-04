@@ -35,7 +35,7 @@ export struct EventEditorForm {
   @Prop initialType: string = '';
   @Prop sheetMode: boolean = false;
   onCancel: () => void = () => {};
-  onSaved: () => void = () => {};
+  onSaved: (event: EasEventItem) => void = (_event: EasEventItem) => {};
 
   @State typeIdx: number = 0;
   @State name: string = '';
@@ -318,7 +318,7 @@ export struct EventEditorForm {
     this.hint = this.editId.length > 0 ? '已更新' : '已保存';
     this.getUIContext().getPromptAction().showToast({ message: this.editId.length > 0 ? '事件已更新' : '事件已保存' });
     if (this.sheetMode) {
-      this.onSaved();
+      this.onSaved(ev);
     } else {
       this.getUIContext().getRouter().back();
     }

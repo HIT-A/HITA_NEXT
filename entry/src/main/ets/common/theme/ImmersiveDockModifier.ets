@@ -1,66 +1,56 @@
 /**
- * ImmersiveDockModifier.ets — 底部 dock 的单层背景模糊与半透明白底。
+ * ImmersiveDockModifier.ets — 底部 dock 沉浸光感（组件适配）。
  *
- * 只使用 backdropBlur，不再叠系统 BlurStyle / ImmersiveMaterial，避免两层模糊。
- * HDS 点光源（6.0.0(20) 起）仍给按压页签照亮描边；旧系统探测失败时静默关掉光效。
+ * HarmonyOS 7 / targetSdk 26 起，普通组件上的 systemMaterial 只在底部 TabBar 生效。
+ * 因此材质挂在 Tabs.barFloatingStyle.systemMaterial，而不是自定义 Stack。
+ *
+ * @see https://developer.huawei.com/consumer/cn/doc/doccenter-capabilities/arkts-immersive-light-sense-component-adaptation
  */
-import { hdsEffect } from '@kit.UIDesignKit';
+import { uiMaterial } from '@kit.ArkUI';
 
-export class ImmersiveDockModifier implements AttributeModifier<StackAttribute> {
-  applyNormalAttribute(instance: StackAttribute): void {
-    // 磨砂指数 30：仅一层模糊半径 14 + 栏底色 0.30。
-    instance.backdropBlur(14);
-    instance.backgroundColor('rgba(255,255,255,0.30)');
-    instance.clip(true);
-    instance.shadow({ radius: 24, color: 'rgba(20,33,61,0.16)', offsetX: 0, offsetY: 8 });
-  }
-}
+const DOCK_BAR_WIDTH: number = 328;
 
-/**
- * 页签按下时成为强光点光源照亮 dock 描边，松手熄灭。点光源一旦设置就常亮，
- * 常亮会在页签图标和文字上泛光，所以只在按压态点亮。
- */
-export class DockLightSourceModifier implements AttributeModifier<ColumnAttribute> {
-  applyNormalAttribute(instance: ColumnAttribute): void {
-    DockPointLight.apply(instance, DockPointLight.build(true, false));
-  }
-
-  applyPressedAttribute(instance: ColumnAttribute): void {
-    DockPointLight.apply(instance, DockPointLight.build(true, true));
-  }
-}
-
-/** dock 高光描边作为被照亮的边框（羽化描边）。 */
-export class DockRimLightModifier implements AttributeModifier<ColumnAttribute> {
-  applyNormalAttribute(instance: ColumnAttribute): void {
-    DockPointLight.apply(instance, DockPointLight.build(false));
-  }
-}
-
-class DockPointLight {
-  private static available: boolean = true;
-
-  static apply(instance: ColumnAttribute, effect: VisualEffect | undefined): void {
-    if (effect !== undefined) {
-      instance.visualEffect(effect);
-    }
-  }
-
-  static build(asSource: boolean, lit: boolean = false): VisualEffect | undefined {
-    if (!DockPointLight.available) {
-      return undefined;
-    }
+export class DockBarMaterial {
+  static floatingStyle(bottomMargin: number, hideMask: boolean = false): FloatingTabBarStyle {
+    const style: FloatingTabBarStyle = {
+      barWidth: {
+        smallBarWidth: DOCK_BAR_WIDTH,
+        mediumBarWidth: DOCK_BAR_WIDTH,
+        largeBarWidth: DOCK_BAR_WIDTH
+      },
+      barBottomMargin: bottomMargin,
+      maskColor: hideMask ? Color.Transparent : '#66F1F3F5',
+      maskHeight: hideMask ? 0 : 92
+    };
     try {
-      const light: hdsEffect.PointLightEffect = {};
-      if (asSource) {
-        light.sourceType = lit ? hdsEffect.PointLightSourceType.BRIGHT : hdsEffect.PointLightSourceType.NONE;
-      } else {
-        light.illuminatedType = hdsEffect.PointLightIlluminatedType.DEFAULT_FEATHERING_BORDER;
+      if (uiMaterial.isImmersiveMaterialSupported()) {
+        style.systemMaterial = new uiMaterial.ImmersiveMaterial({
+          style: DockBarMaterial.styleForDevice(),
+          applyShadow: true,
+          // 按背景亮度反色，避免深色课表上图标发灰；具体色值走系统文本色，避免纯黑超对比度上限。
+          colorInvert: true,
+          interactive: false,
+          lightEffect: { color: Color.White }
+        });
       }
-      return new hdsEffect.HdsEffectBuilder().pointLight(light).buildEffect();
     } catch (e) {
-      DockPointLight.available = false;
-      return undefined;
+      // 设备或 API 不支持时，悬浮栏仍保留圆角与蒙层。
     }
+    return style;
+  }
+
+  private static styleForDevice(): uiMaterial.ImmersiveStyle {
+    try {
+      const level: uiMaterial.MaterialLevel = uiMaterial.getGlobalMaterialLevel();
+      if (level === uiMaterial.MaterialLevel.EXQUISITE) {
+        return uiMaterial.ImmersiveStyle.ULTRA_THIN;
+      }
+      if (level === uiMaterial.MaterialLevel.GENTLE) {
+        return uiMaterial.ImmersiveStyle.THIN;
+      }
+    } catch (e) {
+      // 回落到薄材质。
+    }
+    return uiMaterial.ImmersiveStyle.THIN;
   }
 }

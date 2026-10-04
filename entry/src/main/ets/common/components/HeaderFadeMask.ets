@@ -3,6 +3,7 @@
  *
  * headerHeight > 0 时为透明抬头模式（同功能中心）：遮罩覆盖整个抬头并向下延伸渐隐；
  * 否则只在不透明抬头下方画一条渐隐条。
+ * fromBottom 时方向反过来，用于输入栏等底部抬头。
  */
 import { HeaderFade } from '../theme/HeaderFade';
 
@@ -12,12 +13,16 @@ export struct HeaderFadeMask {
   /** 与遮罩下方页面底色一致的 RGB 分量。 */
   @Prop rgb: string = '244,247,252';
   @Prop headerHeight: number = 0;
+  @Prop fromBottom: boolean = false;
 
   build() {
     Column()
       .width('100%')
       .height(this.headerHeight + HeaderFade.HEIGHT)
-      .linearGradient({ direction: GradientDirection.Bottom, colors: this.stops() })
+      .linearGradient({
+        direction: GradientDirection.Bottom,
+        colors: this.stops()
+      })
       .opacity(this.maskOpacity)
       .hitTestBehavior(HitTestMode.None)
   }
@@ -26,8 +31,14 @@ export struct HeaderFadeMask {
     const offsets: number[] = this.headerHeight > 0 ? HeaderFade.HEADER_OFFSETS : HeaderFade.OFFSETS;
     const alphas: number[] = this.headerHeight > 0 ? HeaderFade.HEADER_ALPHAS : HeaderFade.ALPHAS;
     const stops: Array<[ResourceColor, number]> = [];
-    for (let i = 0; i < offsets.length; i++) {
-      stops.push([HeaderFade.rgba(this.rgb, alphas[i]), offsets[i]]);
+    if (this.fromBottom) {
+      for (let i: number = offsets.length - 1; i >= 0; i--) {
+        stops.push([HeaderFade.rgba(this.rgb, alphas[i]), 1 - offsets[i]]);
+      }
+    } else {
+      for (let i: number = 0; i < offsets.length; i++) {
+        stops.push([HeaderFade.rgba(this.rgb, alphas[i]), offsets[i]]);
+      }
     }
     return stops;
   }

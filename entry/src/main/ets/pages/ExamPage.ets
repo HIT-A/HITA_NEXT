@@ -622,7 +622,7 @@ struct ExamPage {
         onCancel: () => {
           this.closeSheet();
         },
-        onSaved: () => {
+        onSaved: (_event: EasEventItem) => {
           this.closeSheet();
           this.loadExams();
         }

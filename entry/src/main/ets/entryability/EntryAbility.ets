@@ -1,4 +1,4 @@
-import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, common, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { display, window } from '@kit.ArkUI';
 import {
@@ -9,6 +9,8 @@ import {
   STATUS_BAR_INSET_FALLBACK,
   STATUS_BAR_INSET_KEY
 } from '../common/theme/StatusBarInset';
+import { ClassReminderScheduler } from '../feature/timetable/data/ClassReminderScheduler';
+import { ClassReminderStore } from '../feature/timetable/data/ClassReminderStore';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'HitaNEXT';
@@ -19,6 +21,7 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate(STATUS_BAR_INSET_KEY, STATUS_BAR_INSET_FALLBACK);
     AppStorage.setOrCreate(NAV_BAR_INSET_KEY, NAV_BAR_INSET_FALLBACK);
     AppStorage.setOrCreate(KEYBOARD_INSET_KEY, KEYBOARD_INSET_FALLBACK);
+    void this.restoreClassReminders();
   }
 
   onDestroy(): void {
@@ -46,7 +49,7 @@ export default class EntryAbility extends UIAbility {
         statusBarColor: '#00FFFFFF',
         statusBarContentColor: '#14213D',
         navigationBarColor: '#00FFFFFF',
-        navigationBarContentColor: '#6B7A90'
+        navigationBarContentColor: '#4E5C72'
       });
       this.captureSystemInsets(mainWindow);
       this.captureKeyboardInset(mainWindow);
@@ -113,9 +116,19 @@ export default class EntryAbility extends UIAbility {
 
   onForeground(): void {
     hilog.info(DOMAIN, TAG, 'Ability onForeground');
+    void this.restoreClassReminders();
   }
 
   onBackground(): void {
     hilog.info(DOMAIN, TAG, 'Ability onBackground');
+  }
+
+  private async restoreClassReminders(): Promise<void> {
+    try {
+      await ClassReminderStore.getInstance().init(this.context);
+      await ClassReminderScheduler.restore(this.context as common.UIAbilityContext);
+    } catch (e) {
+      hilog.error(DOMAIN, TAG, 'restoreClassReminders %{public}s', String(e));
+    }
   }
 }

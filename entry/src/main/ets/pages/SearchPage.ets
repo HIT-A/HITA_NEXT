@@ -140,7 +140,7 @@ struct SearchPage {
             Column() {
               Text(this.rows.length === 0 && this.searched ? '无匹配结果' : this.note)
                 .fontSize(14)
-                .fontColor('#888888')
+                .fontColor('#5A6880')
                 .margin({ bottom: 12 })
             }
             .width('100%')

@@ -54,7 +54,7 @@ struct NoticesPage {
       } else if (this.notices.length === 0) {
         Text('暂无公告')
           .fontSize(14)
-          .fontColor('#888888')
+          .fontColor('#5A6880')
           .margin({ top: HEADER_HEIGHT + 60 })
       } else {
         this.noticeList()

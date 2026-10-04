@@ -10,8 +10,8 @@ const COLOR_PRIMARY: string = '#2E86E8';
 const SURFACE_RGB: string = '244,247,252';
 const COLOR_CARD: string = '#FFFFFF';
 const COLOR_TEXT_PRIMARY: string = '#14213D';
-const COLOR_TEXT_SECONDARY: string = '#6B7A90';
-const COLOR_TEXT_HINT: string = '#8A96A8';
+const COLOR_TEXT_SECONDARY: string = '#4E5C72';
+const COLOR_TEXT_HINT: string = '#5A6880';
 const COLOR_NAV_ACTIVE: string = '#E3EEFC';
 const PORTAL_TAB: number = NewsService.CATEGORIES.length;
 
