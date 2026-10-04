@@ -8,6 +8,7 @@ import { EasApiClient } from '../feature/eas/EasApiClient';
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
 import { EasDataProvider } from '../feature/eas/EasDataProvider';
+import { EasUserMessages } from '../feature/eas/EasUserMessages';
 import { EasImportResult, EasTimetableImporter } from '../feature/eas/EasTimetableImporter';
 import { EasTermItem } from '../feature/eas/model/EasModels';
 import { EasTimeInDay, EasTimePeriodInDay, EasTimetable } from '../common/model/timetable/TimetableModels';
@@ -83,7 +84,8 @@ struct ImportTimetablePage {
         }
       }
     } catch (e) {
-      this.error = e instanceof Error ? e.message : String(e);
+      this.error = EasUserMessages.fromError(e instanceof Error ? e.message : String(e),
+        '无法加载课表信息，请稍后重试');
     } finally {
       this.loading = false;
     }
@@ -216,7 +218,8 @@ struct ImportTimetablePage {
         this.error = result.message.length > 0 ? result.message : '导入课表失败';
       }
     } catch (e) {
-      this.error = e instanceof Error ? e.message : String(e);
+      this.error = EasUserMessages.fromError(e instanceof Error ? e.message : String(e),
+        '导入课表失败，请稍后重试');
     } finally {
       this.importing = false;
     }

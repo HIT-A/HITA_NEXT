@@ -17,6 +17,7 @@ import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSele
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
 import { EasDataProvider } from '../feature/eas/EasDataProvider';
+import { EasUserMessages } from '../feature/eas/EasUserMessages';
 import { EasApiClient } from '../feature/eas/EasApiClient';
 import { EasExamItem, EasTermItem } from '../feature/eas/model/EasModels';
 import { ExamSchedule } from '../feature/eas/ExamSchedule';
@@ -193,7 +194,8 @@ struct ExamPage {
         '教务返回 ' + this.remoteExams.length.toString() + ' 条待导入考试' :
         (items.length > 0 ? '教务考试已全部在本地课表中' : '本学期暂无教务考试安排');
     } catch (e) {
-      this.queryMsg = '查询失败：' + (e as Error).message;
+      this.queryMsg = EasUserMessages.fromError(e instanceof Error ? e.message : String(e),
+        '考试查询失败，请稍后重试');
     } finally {
       this.querying = false;
     }

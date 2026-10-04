@@ -233,7 +233,7 @@ struct TimetableManagerPage {
     } catch (e) {
       const text: string = e instanceof Error ? e.message : String(e);
       hilog.error(DOMAIN, TAG, 'delete timetables failed %{public}s', text);
-      this.getUIContext().getPromptAction().showToast({ message: '删除失败：' + text });
+      this.getUIContext().getPromptAction().showToast({ message: '删除失败，请重试' });
       // 出错时退出选择模式并刷新，避免界面停留在无效的多选状态。
       this.selectedIds = [];
       this.selectionMode = false;

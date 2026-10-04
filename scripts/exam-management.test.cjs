@@ -409,6 +409,27 @@ test('query without a session asks the user to log in', async () => {
   assert.equal(page.remoteExams.length, 0);
 });
 
+test('failed exam queries show actionable messages without internal error details', async () => {
+  const failures = [
+    ['教务会话已失效，请重新登录', '教务登录已过期，请重新登录后重试'],
+    ['当前校区暂不支持考试查询，请手动添加考试', '当前校区暂不支持考试查询，请手动添加考试'],
+    ['HTTP 500: <html>internal server error</html>', '考试查询失败，请稍后重试']
+  ];
+  for (const [detail, message] of failures) {
+    class FakeProvider {
+      async getAllTerms() { throw new Error(detail); }
+    }
+    const { page, calls } = setup([exam('a')], { EasDataProvider: FakeProvider });
+    page.session = { campus: 'SHENZHEN' };
+    await page.queryEasExams();
+    assert.equal(page.queryMsg, message);
+    assert.equal(page.querying, false);
+    assert.equal(page.remoteExams.length, 0);
+    assert.deepEqual(calls.inserts, []);
+    assert.deepEqual(calls.updates, []);
+  }
+});
+
 test('eas query keeps unmatched remotes and import writes an EXAM event', async () => {
   const { EasExamItem } = load('feature/eas/model/EasModels.ets');
   const remote = Object.assign(new EasExamItem(), {

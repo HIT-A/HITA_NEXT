@@ -77,14 +77,14 @@ export class NewsService {
         usingCache: false
       });
       if (resp.responseCode < 200 || resp.responseCode >= 300) {
-        result.message = '今日哈工大返回 HTTP ' + resp.responseCode.toString();
+        result.message = '暂时无法获取资讯，请稍后重试';
         return result;
       }
       const body: string = resp.result === undefined || resp.result === null ? '' : String(resp.result);
       result.items = NewsService.parseList(body);
       result.ok = true;
       if (result.items.length === 0) {
-        result.message = '没有解析到资讯，可能是页面改版';
+        result.message = '暂无可显示的资讯';
       }
     } catch (e) {
       result.message = '网络异常，请检查网络后重试';

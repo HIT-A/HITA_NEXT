@@ -64,7 +64,7 @@ export class EasLegacyCatalogEndpoints {
   static finalScoresPath: string = '/cjcx/queryQmcj';
 }
 
-/** 一次属性表读取的行数与简短诊断（会拼进导入提示，便于在真机上直接看到结果）。 */
+/** 课程属性和仅供后台日志使用的读取诊断。 */
 export class LegacyCatalogFetch {
   rows: LegacyCourseAttributes[] = [];
   diag: string = '';
@@ -560,12 +560,9 @@ export class EasDataProvider {
     if (session.campus === EasCampus.SHENZHEN) {
       return await this.getShenzhenScores(session, term);
     }
-    const campus = session.campus.toString();
     const path: string = EasDataProvider.scoresPathOf(session);
     if (path.length === 0) {
-      throw new Error('EAS_SCORES_ENDPOINT_NOT_CAPTURED：请按 docs/eas-api-capture.md 抓包回填 ' +
-        (campus === 'WEIHAI' ? 'EasWeihaiEndpoints' :
-          campus === 'BENBU' ? 'EasBenbuEndpoints' : 'EasShenzhenEndpoints') + '.scoresPath');
+      throw new Error('当前校区暂不支持成绩查询');
     }
     const opts: EasApiClientOptions = new EasApiClientOptions();
     opts.method = EasHttpMethod.POST;
@@ -645,7 +642,7 @@ export class EasDataProvider {
     if (session.campus === EasCampus.SHENZHEN) {
       return await this.getShenzhenExams(session, term);
     }
-    throw new Error('本部/威海暂无公开考试安排接口，请手动添加考试');
+    throw new Error('当前校区暂不支持考试查询，请手动添加考试');
   }
 
   /** 深圳新版 Web 考试安排，请求形态对齐成绩查询。 */

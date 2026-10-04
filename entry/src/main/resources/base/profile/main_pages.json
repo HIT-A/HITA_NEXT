@@ -5,7 +5,6 @@
     "pages/ScorePage",
     "pages/AddEventPage",
     "pages/ExamPage",
-    "pages/SearchPage",
     "pages/TimetableManagerPage",
     "pages/TimetableDetailPage",
     "pages/ImportTimetablePage",

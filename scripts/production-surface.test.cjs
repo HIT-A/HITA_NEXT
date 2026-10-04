@@ -49,12 +49,12 @@ function database(timetables) {
 test('retired development routes and implementations are not shipped', () => {
   const routes = JSON.parse(fs.readFileSync(
     path.join(root, 'entry/src/main/resources/base/profile/main_pages.json'), 'utf8')).src;
-  for (const name of ['Index', 'AboutPage', 'TimetablePreview', 'TimeLinePage', 'SubjectsPage', 'ProfilePage']) {
+  for (const name of ['Index', 'AboutPage', 'TimetablePreview', 'TimeLinePage', 'SubjectsPage', 'ProfilePage', 'SearchPage']) {
     assert.ok(!routes.includes(`pages/${name}`), name);
     assert.ok(!fs.existsSync(path.join(etsRoot, `pages/${name}.ets`)), name);
   }
   assert.ok(!fs.existsSync(path.join(etsRoot, 'feature/timetable/data/TimetableLocalDemo.ets')));
-  for (const name of ['Home', 'SearchPage', 'ScorePage', 'ExamPage', 'AddEventPage',
+  for (const name of ['Home', 'ScorePage', 'ExamPage', 'AddEventPage',
     'TimetableManagerPage', 'TimetableDetailPage', 'ImportTimetablePage', 'NoticesPage']) {
     assert.ok(routes.includes(`pages/${name}`), name);
   }
@@ -71,9 +71,18 @@ test('production modules contain no generators or executable parser fixtures', (
   }
 });
 
-test('both home empty states lead to real timetable workflows', () => {
+test('today empty state has no login or timetable management actions', () => {
   const home = fs.readFileSync(path.join(etsRoot, 'pages/Home.ets'), 'utf8');
-  assert.equal((home.match(/this\.emptyTimetableActions\(\)/g) || []).length, 2);
+  const today = home.slice(home.indexOf('  emptyToday()'), home.indexOf('  eventRow('));
+  assert.match(today, /还没有可展示的课表/);
+  assert.doesNotMatch(today, /emptyTimetableActions|Button\(|openSessionSheet|pushUrl/);
+});
+
+test('timetable empty state and more page retain timetable workflows', () => {
+  const home = fs.readFileSync(path.join(etsRoot, 'pages/Home.ets'), 'utf8');
+  assert.equal((home.match(/this\.emptyTimetableActions\(\)/g) || []).length, 1);
+  const timetable = home.slice(home.indexOf('  tabTimetable()'), home.indexOf('  statusBanner('));
+  assert.match(timetable, /this\.emptyTimetableActions\(\)/);
   const actions = home.slice(home.indexOf('  emptyTimetableActions()'), home.indexOf('  tabTimetable()'));
   assert.match(actions, /pages\/ImportTimetablePage/);
   assert.match(actions, /pages\/TimetableManagerPage/);
@@ -81,10 +90,54 @@ test('both home empty states lead to real timetable workflows', () => {
   assert.match(home, /selected !== undefined \? selected/);
 });
 
+test('local search and its empty section are not reachable or shipped', () => {
+  for (const file of allEts()) {
+    assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /SearchPage|本地搜索|moreSectionTitle\('课程资源'\)/, file);
+  }
+  const home = fs.readFileSync(path.join(etsRoot, 'pages/Home.ets'), 'utf8');
+  const more = home.slice(home.indexOf('  tabMine()'), home.indexOf('  userCard()'));
+  for (const label of ['最近课表', '课表管理', '导入课表', '考试', '成绩管理', '空教室', '公告']) {
+    assert.ok(more.includes(label), label);
+  }
+});
+
 test('classroom lookup placeholder remains available as requested', () => {
   const home = fs.readFileSync(path.join(etsRoot, 'pages/Home.ets'), 'utf8');
   assert.match(home, /'空教室'/);
   assert.match(home, /showToast\(\{ message: '空教室查询将在教务会话完善后开放' \}\)/);
+});
+
+test('academic errors expose only known user messages, never internal diagnostics', () => {
+  const { EasUserMessages } = loadEts('feature/eas/EasUserMessages.ets');
+  const fallback = '导入课表失败，请稍后重试';
+  for (const detail of [
+    'SQLite: Generic error',
+    'HTTP 500: <html>server error</html>',
+    'EAS_SCORES_ENDPOINT_NOT_CAPTURED: docs/eas-api-capture.md',
+    'C:\\Users\\developer\\project\\internal.ets',
+    '',
+    'unexpected response'
+  ]) {
+    assert.equal(EasUserMessages.fromError(detail, fallback), fallback);
+  }
+  assert.equal(EasUserMessages.fromError(' 深圳教务会话已失效，请重新登录 ', fallback),
+    '教务登录已过期，请重新登录后重试');
+  assert.equal(EasUserMessages.fromError('当前校区暂不支持成绩查询', fallback),
+    '当前校区暂不支持成绩查询，请到学校教务网站查看');
+  assert.equal(EasUserMessages.fromError('课表请求网络失败', fallback),
+    '无法连接教务系统，请检查网络后重试');
+  assert.equal(EasUserMessages.fromError('本地课表数据库写入失败，请重试', fallback),
+    '课表保存失败，请重试');
+});
+
+test('import results omit course matching diagnostics and retain internal logs', () => {
+  const importer = fs.readFileSync(path.join(etsRoot, 'feature/eas/EasTimetableImporter.ets'), 'utf8');
+  assert.doesNotMatch(importer, /catalogDiag|课程属性 计划/);
+  assert.match(importer, /hilog\.info\([\s\S]*?fetched\.diag/);
+  assert.match(importer, /message = '已导入 ' \+ readback\.length\.toString\(\) \+ ' 个课次'/);
+  assert.match(importer, /EasUserMessages\.fromError/);
+  const provider = fs.readFileSync(path.join(etsRoot, 'feature/eas/EasDataProvider.ets'), 'utf8');
+  assert.doesNotMatch(provider, /EAS_SCORES_ENDPOINT_NOT_CAPTURED|请按 docs\/eas-api-capture/);
 });
 
 test('new courses use an explicit/current timetable, never a generated fallback', () => {

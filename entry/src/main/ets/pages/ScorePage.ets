@@ -11,6 +11,7 @@ import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
 import { EasDataProvider } from '../feature/eas/EasDataProvider';
+import { EasUserMessages } from '../feature/eas/EasUserMessages';
 import { EasCourseScoreItem, EasTermItem } from '../feature/eas/model/EasModels';
 import { EasApiClient } from '../feature/eas/EasApiClient';
 
@@ -73,10 +74,11 @@ struct ScorePage {
         this.modeText = ScorePage.campusText(this.session.campus) + ' · ' + term.name;
         this.msg = result.items.length > 0 ? '共 ' + result.items.length.toString() + ' 条成绩' : '本学期暂无成绩';
       } else {
-        this.msg = result.msg.length > 0 ? result.msg : '查询失败，请稍后重试';
+        this.msg = EasUserMessages.fromError(result.msg, '成绩查询失败，请稍后重试');
       }
     } catch (e) {
-      this.msg = '查询失败：' + (e as Error).message;
+      this.msg = EasUserMessages.fromError(e instanceof Error ? e.message : String(e),
+        '成绩查询失败，请稍后重试');
     } finally {
       this.loading = false;
     }

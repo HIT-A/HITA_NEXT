@@ -597,7 +597,7 @@ export class AssistantService {
       }
       if (resp.responseCode < 200 || resp.responseCode >= 300) {
         return AssistantMessage.of(AssistantRole.ASSISTANT,
-          source + ' 请求失败（HTTP ' + resp.responseCode.toString() + '），请稍后再试。', source);
+          source + ' 暂时无法回答，请稍后再试。', source);
       }
       const content: string = AssistantService.extractContent(body);
       return AssistantMessage.of(AssistantRole.ASSISTANT,

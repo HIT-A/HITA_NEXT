@@ -38,7 +38,6 @@ HITA NEXT 是基于开源项目 [HITA Android](https://github.com/HIT-A/HITA_And
 
 - 查看当前账号、校区和会话状态。
 - 按校区管理会话并退出登录。
-- 在本地数据中搜索事件名称、教师和地点。
 - 管理课表、手动添加课程，以及导入和导出 ICS 课表。
 - 查看版本更新、服务与故障公告。
 
@@ -62,7 +61,7 @@ ArkUI 页面 -> EasDataProvider -> EasApiClient -> 校区教务系统
 课表导入与本地展示数据流：
 
 ```text
-教务会话 -> EasTimetableImporter -> RdbHelper -> 今日 / 时间表 / 本地搜索
+教务会话 -> EasTimetableImporter -> RdbHelper -> 今日 / 时间表
 ```
 
 ## 关键结构

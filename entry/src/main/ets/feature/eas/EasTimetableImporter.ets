@@ -16,6 +16,7 @@ import { EasSessionStore } from './EasSessionStore';
 import { EasDataProvider, LegacyCatalogFetch } from './EasDataProvider';
 import { EasCourseItem, EasTermItem } from './model/EasModels';
 import { EasApiClient } from './EasApiClient';
+import { EasUserMessages } from './EasUserMessages';
 import { EasLegacyCourseCatalogParser, LegacyCourseAttributes } from './data/EasLegacyCourseCatalogParser';
 
 const DOMAIN: number = 0x0000;
@@ -74,7 +75,7 @@ export class EasTimetableImporter {
         session.setStudentType(studentType);
       }
       if (session.campus === EasCampus.BENBU && session.getStudentType() === '2') {
-        result.message = '本部研究生课表接口暂未接入';
+        result.message = '暂不支持导入本部研究生课表';
         return result;
       }
       const provider: EasDataProvider = new EasDataProvider(new EasApiClient());
@@ -107,11 +108,11 @@ export class EasTimetableImporter {
         result.message = '课表为空，未导入';
         return result;
       }
-      let catalogDiag: string = '';
       if (session.campus !== EasCampus.SHENZHEN) {
         const fetched: LegacyCatalogFetch = await provider.getLegacyCourseAttributes(session, term);
         const matched: number = EasTimetableImporter.applyLegacyAttributes(courses, fetched.rows, term);
-        catalogDiag = fetched.diag + '/匹配' + matched.toString() + '/' + courses.length.toString();
+        hilog.info(DOMAIN, TAG, 'course attributes %{public}s matched=%{public}d/%{public}d',
+          fetched.diag, matched, courses.length);
       }
       let schedule: EasTimePeriodInDay[] = scheduleOverride !== undefined && scheduleOverride.length > 0 ?
         scheduleOverride : EasTimetableImporter.scheduleStructure(session.campus);
@@ -133,18 +134,16 @@ export class EasTimetableImporter {
       hilog.info(DOMAIN, TAG, 'RDB readback timetable=%{public}s subjects/events=%{public}d',
         timetable.id, readback.length);
       if (readback.length === 0) {
-        result.message = '课表已请求，但本地写入失败';
+        result.message = '课表保存失败，请重试';
         return result;
       }
       result.success = true;
-      result.message = catalogDiag.length > 0 ?
-        '已导入 ' + readback.length.toString() + ' 个课次（课程属性 ' + catalogDiag + '）' :
-        '已导入 ' + readback.length.toString() + ' 个课次';
+      result.message = '已导入 ' + readback.length.toString() + ' 个课次';
       return result;
     } catch (e) {
       const text: string = e instanceof Error ? e.message : String(e);
       hilog.error(DOMAIN, TAG, 'import failed %{public}s', text);
-      result.message = text.length > 0 ? text : '导入课表失败';
+      result.message = EasUserMessages.fromError(text, '导入课表失败，请稍后重试');
       return result;
     }
   }

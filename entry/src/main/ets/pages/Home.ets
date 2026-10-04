@@ -19,6 +19,7 @@ import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
 import { EasImportResult, EasTimetableImporter } from '../feature/eas/EasTimetableImporter';
+import { EasUserMessages } from '../feature/eas/EasUserMessages';
 import { EasLoginPage } from '../feature/eas/webLogin/EasLoginPage';
 import { AssistantTab } from '../feature/assistant/AssistantTab';
 import { NewsTab } from '../feature/news/NewsTab';
@@ -876,7 +877,7 @@ struct Home {
     } catch (error) {
       const message: string = error instanceof Error ? error.message : String(error);
       this.importMessage = '';
-      this.importError = message.length > 0 ? message : '导入课表失败';
+      this.importError = EasUserMessages.fromError(message, '导入课表失败，请稍后重试');
       if (showToast) {
         this.getUIContext().getPromptAction().showToast({ message: this.importError });
       }
@@ -1373,9 +1374,6 @@ struct Home {
         .fontSize(13)
         .fontColor(COLOR_TEXT_HINT)
         .margin({ top: 8, bottom: 20 })
-      if (!this.hasTimetable) {
-        this.emptyTimetableActions();
-      }
       Blank()
     }
     .width('100%')
@@ -1906,18 +1904,6 @@ struct Home {
             this.moreNavigationRow($r('sys.symbol.magnifyingglass'), '空教室',
               '查询可用教室与空闲时段', () => {
                 this.getUIContext().getPromptAction().showToast({ message: '空教室查询将在教务会话完善后开放' });
-              });
-          }
-          .width('100%')
-          .padding({ top: 4, bottom: 4 })
-          .backgroundColor(COLOR_CARD)
-          .borderRadius(16);
-
-          this.moreSectionTitle('课程资源');
-          Column() {
-            this.moreNavigationRow($r('sys.symbol.magnifyingglass'), '本地搜索',
-              '搜索课程、教师与教室', () => {
-                this.getUIContext().getRouter().pushUrl({ url: 'pages/SearchPage' });
               });
           }
           .width('100%')

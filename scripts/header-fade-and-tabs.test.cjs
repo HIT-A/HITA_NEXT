@@ -136,7 +136,7 @@ test('notices and the function centre share the transparent header that content 
 });
 
 test('function-centre secondary pages use the same transparent header', () => {
-  const pages = ['NoticesPage', 'SearchPage', 'ScorePage', 'ExamPage',
+  const pages = ['NoticesPage', 'ScorePage', 'ExamPage',
     'ImportTimetablePage', 'TimetableManagerPage', 'TimetableDetailPage'];
   for (const page of pages) {
     const source = read(`pages/${page}.ets`);
