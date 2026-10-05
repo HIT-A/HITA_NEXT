@@ -253,15 +253,18 @@ test('the window fills the status bar instead of leaving a white top inset', () 
   assert.match(home, /SafeAreaType\.KEYBOARD/);
   assert.match(home, /padding\(\{ top: this\.statusBarInset \}\)/);
   assert.match(home, /\.tabPage\(0, Color\.Transparent\)/);
-  assert.match(home, /AssistantTab\(\);[\s\S]*?\.tabPage\(0, COLOR_SURFACE\)/);
+  assert.doesNotMatch(home, /AssistantTab|NewsTab/);
 });
 
-test('assistant composer sits above the dock and follows the keyboard without moving it', () => {
-  const assistant = fs.readFileSync(path.join(etsRoot, 'feature/assistant/AssistantTab.ets'), 'utf8');
-  assert.match(assistant, /const DOCK_CLEARANCE: number = 64/);
+test('standalone assistant composer follows the keyboard without reserving a removed dock', () => {
+  const assistant = fs.readFileSync(path.join(etsRoot, 'pages/AssistantPage.ets'), 'utf8');
+  assert.doesNotMatch(assistant, /DOCK_CLEARANCE/);
   assert.match(assistant, /hita_keyboard_vp/);
   assert.match(assistant, /private inputBarBottom\(\): number/);
-  assert.match(assistant, /return DOCK_CLEARANCE \+ this\.navBarInset/);
+  assert.match(assistant, /return this\.navBarInset/);
+  assert.match(assistant, /return this\.keyboardInset/);
+  assert.match(assistant, /setKeyboardAvoidMode\(KeyboardAvoidMode\.NONE\)/);
+  assert.match(assistant, /setKeyboardAvoidMode\(KeyboardAvoidMode\.OFFSET\)/);
   assert.match(assistant, /bottom: 8 \+ this\.inputBarBottom\(\)/);
   assert.match(assistant, /private dismissKeyboard\(\): void/);
   assert.match(assistant, /composerController\.stopEditing\(\)/);

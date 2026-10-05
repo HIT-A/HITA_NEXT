@@ -1,13 +1,16 @@
 /**
- * AssistantTab.ets — 主页「助手」栏：课表问答 + 可选云端大模型。
+ * AssistantPage.ets — 功能中心「助手」：课表问答 + 可选云端大模型。
  * 顶部抬头与功能中心相同：Scroll 占位 + 渐隐遮罩 + 覆盖标题。
  */
 import { common } from '@kit.AbilityKit';
-import { HeaderFadeMask } from '../../common/components/HeaderFadeMask';
-import { HeaderFade } from '../../common/theme/HeaderFade';
-import { AssistantMessage, AssistantRole, AssistantService } from './AssistantService';
-import { AssistantProvider, AssistantSettings, AssistantSettingsStore } from './AssistantSettingsStore';
-import { KEYBOARD_INSET_FALLBACK, NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../../common/theme/StatusBarInset';
+import { KeyboardAvoidMode } from '@kit.ArkUI';
+import { HeaderBackButton } from '../common/components/HeaderBackButton';
+import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
+import { HeaderFade } from '../common/theme/HeaderFade';
+import { AssistantConversation } from '../feature/assistant/AssistantConversation';
+import { AssistantMessage, AssistantRole, AssistantService } from '../feature/assistant/AssistantService';
+import { AssistantProvider, AssistantSettings, AssistantSettingsStore } from '../feature/assistant/AssistantSettingsStore';
+import { KEYBOARD_INSET_FALLBACK, NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 
 const COLOR_PRIMARY: string = '#2E86E8';
 const COLOR_CARD: string = '#FFFFFF';
@@ -16,18 +19,13 @@ const COLOR_TEXT_SECONDARY: string = '#4E5C72';
 const COLOR_TEXT_HINT: string = '#5A6880';
 const COLOR_NAV_ACTIVE: string = '#E3EEFC';
 const SURFACE_RGB: string = '244,247,252';
-const DOCK_CLEARANCE: number = 64;
 const HEADER_BODY: number = 56;
 
-class AssistantChatHistory {
-  static messages: AssistantMessage[] = [AssistantService.welcome()];
-}
-
+@Entry
 @Component
-export struct AssistantTab {
-  @State messages: AssistantMessage[] = AssistantChatHistory.messages;
+struct AssistantPage {
+  @State @Watch('scrollToLatest') chat: AssistantConversation = AssistantConversation.getInstance();
   @State input: string = '';
-  @State sending: boolean = false;
   @State settingsOpen: boolean = false;
   @State headerFadeOpacity: number = 0;
   @State composerFadeOpacity: number = 1;
@@ -41,17 +39,56 @@ export struct AssistantTab {
   private scroller: Scroller = new Scroller();
   private composerController: TextInputController = new TextInputController();
   private settingsKeyController: TextInputController = new TextInputController();
+  private pageVisible: boolean = true;
+  private scrollTimer: number = -1;
 
   async aboutToAppear(): Promise<void> {
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     const store: AssistantSettingsStore = AssistantSettingsStore.getInstance();
     await store.init(ctx);
-    this.applySettings(await store.load());
-    if (this.messages.length > 1) {
-      setTimeout(() => {
-        this.scroller.scrollEdge(Edge.Bottom);
-      }, 50);
+    const settings: AssistantSettings = await store.load();
+    if (this.pageVisible) {
+      this.applySettings(settings);
     }
+  }
+
+  onPageShow(): void {
+    this.pageVisible = true;
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
+    this.scrollToLatest();
+  }
+
+  onPageHide(): void {
+    this.stopScrolling();
+    this.dismissKeyboard();
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.OFFSET);
+  }
+
+  aboutToDisappear(): void {
+    this.stopScrolling();
+  }
+
+  private stopScrolling(): void {
+    this.pageVisible = false;
+    if (this.scrollTimer >= 0) {
+      clearTimeout(this.scrollTimer);
+      this.scrollTimer = -1;
+    }
+  }
+
+  private scrollToLatest(): void {
+    if (!this.pageVisible) {
+      return;
+    }
+    if (this.scrollTimer >= 0) {
+      clearTimeout(this.scrollTimer);
+    }
+    this.scrollTimer = setTimeout(() => {
+      this.scrollTimer = -1;
+      if (this.pageVisible) {
+        this.scroller.scrollEdge(Edge.Bottom);
+      }
+    }, 50);
   }
 
   private applySettings(settings: AssistantSettings): void {
@@ -73,26 +110,18 @@ export struct AssistantTab {
     });
   }
 
-  private setMessages(messages: AssistantMessage[]): void {
-    AssistantChatHistory.messages = messages;
-    this.messages = messages;
-    setTimeout(() => {
-      this.scroller.scrollEdge(Edge.Bottom);
-    }, 50);
-  }
-
   private clearChat(): void {
-    if (this.sending) {
+    if (this.chat.sending) {
       return;
     }
-    this.setMessages([AssistantService.welcome()]);
+    this.chat.messages = [AssistantService.welcome()];
   }
 
   private inputBarBottom(): number {
     if (this.keyboardInset > 8) {
       return this.keyboardInset;
     }
-    return DOCK_CLEARANCE + this.navBarInset;
+    return this.navBarInset;
   }
 
   private headerChromeHeight(): number {
@@ -115,13 +144,14 @@ export struct AssistantTab {
 
   private async send(raw: string): Promise<void> {
     const text: string = raw.trim();
-    if (text.length === 0 || this.sending) {
+    const chat: AssistantConversation = this.chat;
+    if (text.length === 0 || chat.sending) {
       return;
     }
-    const history: AssistantMessage[] = this.messages.slice();
+    const history: AssistantMessage[] = chat.messages.slice();
     this.input = '';
-    this.sending = true;
-    this.setMessages(history.concat([AssistantMessage.of(AssistantRole.USER, text)]));
+    chat.sending = true;
+    chat.messages = history.concat([AssistantMessage.of(AssistantRole.USER, text)]);
     let reply: AssistantMessage;
     try {
       const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
@@ -129,8 +159,8 @@ export struct AssistantTab {
     } catch (e) {
       reply = AssistantMessage.of(AssistantRole.ASSISTANT, '出了点问题，请稍后再试。');
     }
-    this.sending = false;
-    this.setMessages(this.messages.concat([reply]));
+    chat.messages = chat.messages.concat([reply]);
+    chat.sending = false;
   }
 
   build() {
@@ -142,10 +172,10 @@ export struct AssistantTab {
             if (this.settingsOpen) {
               this.settingsPanel();
             }
-            ForEach(this.messages, (message: AssistantMessage) => {
+            ForEach(this.chat.messages, (message: AssistantMessage) => {
               this.bubble(message);
             }, (message: AssistantMessage) => message.id);
-            if (this.sending) {
+            if (this.chat.sending) {
               Row({ space: 8 }) {
                 LoadingProgress()
                   .width(18)
@@ -159,7 +189,7 @@ export struct AssistantTab {
               .backgroundColor(COLOR_CARD)
               .borderRadius(16);
             }
-            if (this.messages.length <= 1 && !this.sending) {
+            if (this.chat.messages.length <= 1 && !this.chat.sending) {
               this.suggestions();
             }
             Blank().height(this.inputChromeHeight());
@@ -193,8 +223,15 @@ export struct AssistantTab {
           .align(Alignment.Bottom);
 
         Row() {
+          HeaderBackButton({
+            onBack: () => {
+              this.dismissKeyboard();
+              this.getUIContext().getRouter().back();
+            }
+          })
+            .margin({ right: 12 });
           Text('助手')
-            .fontSize(24)
+            .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .fontColor(COLOR_TEXT_PRIMARY)
             .maxLines(1)
@@ -222,7 +259,9 @@ export struct AssistantTab {
       this.inputBar();
     }
     .width('100%')
-    .height('100%');
+    .height('100%')
+    .backgroundColor('#F4F7FC')
+    .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.KEYBOARD], [SafeAreaEdge.BOTTOM]);
   }
 
   @Builder
@@ -395,8 +434,8 @@ export struct AssistantTab {
       }
       .width(44)
       .height(44)
-      .backgroundColor(this.input.trim().length > 0 && !this.sending ? COLOR_PRIMARY : '#AFC8E8')
-      .enabled(this.input.trim().length > 0 && !this.sending)
+      .backgroundColor(this.input.trim().length > 0 && !this.chat.sending ? COLOR_PRIMARY : '#AFC8E8')
+      .enabled(this.input.trim().length > 0 && !this.chat.sending)
       .accessibilityText('发送')
       .onClick(() => {
         this.send(this.input);

@@ -8,7 +8,7 @@
  */
 import { uiMaterial } from '@kit.ArkUI';
 
-const DOCK_BAR_WIDTH: number = 328;
+const DOCK_BAR_WIDTH: number = 212;
 
 export class DockBarMaterial {
   static floatingStyle(bottomMargin: number, hideMask: boolean = false): FloatingTabBarStyle {

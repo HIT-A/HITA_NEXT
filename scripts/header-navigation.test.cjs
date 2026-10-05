@@ -6,7 +6,8 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '../entry/src/main/ets');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const pages = ['NoticesPage', 'ScorePage', 'ExamPage',
-  'ImportTimetablePage', 'TimetableManagerPage', 'TimetableDetailPage', 'AddEventPage'];
+  'ImportTimetablePage', 'TimetableManagerPage', 'TimetableDetailPage', 'AddEventPage',
+  'AssistantPage', 'NewsPage', 'PortalsPage'];
 
 test('all more pages use the shared navigation button, not text glyphs', () => {
   for (const page of pages) {

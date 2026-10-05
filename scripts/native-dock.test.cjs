@@ -31,7 +31,7 @@ function material(overrides = {}) {
 
 test('native dock retains fixed dimensions, safe-area margin and default mask', () => {
   const style = material().floatingStyle(36);
-  assert.deepEqual(style.barWidth, { smallBarWidth: 328, mediumBarWidth: 328, largeBarWidth: 328 });
+  assert.deepEqual(style.barWidth, { smallBarWidth: 212, mediumBarWidth: 212, largeBarWidth: 212 });
   assert.equal(style.barBottomMargin, 36);
   assert.equal(style.maskColor, '#66F1F3F5');
   assert.equal(style.maskHeight, 92);
@@ -71,11 +71,15 @@ test('unsupported materials never prevent rendering the fallback dock', () => {
   }
 });
 
-test('one native tab bar owns all five tabs, without an unused custom glass layer', () => {
+test('one native tab bar owns only Today, Timetable and More', () => {
   const home = read('pages/Home.ets');
   const shell = home.slice(home.indexOf('  build() {'), home.indexOf('  activeSheet()'));
   assert.match(shell, /Tabs\(\{ barPosition: BarPosition\.End, controller: this\.tabsController \}\)/);
-  assert.equal((shell.match(/TabContent\(\)/g) || []).length, 5);
+  assert.equal((shell.match(/TabContent\(\)/g) || []).length, 3);
+  assert.deepEqual([...shell.matchAll(/\.tabBar\(this\.dockTab\(\$r\('[^']+'\), '([^']+)'\)\)/g)]
+    .map(match => match[1]), ['今日', '时间表', '更多']);
+  assert.match(home, /const NAV_TAB_COUNT: number = 3/);
+  assert.doesNotMatch(home, /AssistantTab|NewsTab|assistantMounted|newsMounted|mountTabsNear/);
   assert.match(shell, /\.barOverlap\(true\)/);
   assert.match(shell, /\.barHeight\(56\)/);
   assert.match(shell, /\.barBackgroundColor\(Color\.Transparent\)/);
@@ -85,11 +89,11 @@ test('one native tab bar owns all five tabs, without an unused custom glass laye
   assert.doesNotMatch(home, /DockGlass|pillNavigation|navDroplet|tabSwiper/);
 });
 
-test('news fills the screen under the dock instead of leaving a bottom inset', () => {
-  const home = read('pages/Home.ets');
-  assert.match(home, /NewsTab\(\);[\s\S]*?\.tabPage\(0, COLOR_SURFACE\)/);
-  const news = read('feature/news/NewsTab.ets');
+test('standalone news fills the screen and keeps the final rows above the system gesture bar', () => {
+  const news = read('pages/NewsPage.ets');
   const expansions = news.match(/expandSafeArea\(\[SafeAreaType\.SYSTEM\], \[SafeAreaEdge\.BOTTOM\]\)/g) || [];
   assert.ok(expansions.length >= 4);
+  assert.equal((news.match(/Column\(\)\.height\(12 \+ this\.navBarInset\)/g) || []).length, 1);
+  assert.match(read('pages/PortalsPage.ets'), /Column\(\)\.height\(12 \+ this\.navBarInset\)/);
   assert.doesNotMatch(news, /\.padding\(\{ left: 16, right: 16, bottom: 12 \}\)/);
 });

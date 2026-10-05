@@ -21,8 +21,6 @@ import { EasSessionStore } from '../feature/eas/EasSessionStore';
 import { EasImportResult, EasTimetableImporter } from '../feature/eas/EasTimetableImporter';
 import { EasUserMessages } from '../feature/eas/EasUserMessages';
 import { EasLoginPage } from '../feature/eas/webLogin/EasLoginPage';
-import { AssistantTab } from '../feature/assistant/AssistantTab';
-import { NewsTab } from '../feature/news/NewsTab';
 import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
 import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
 import { TimetableBackgroundStore } from '../feature/timetable/data/TimetableBackgroundStore';
@@ -58,9 +56,7 @@ const COLOR_TAG: string = '#0F6E56';
 const TIMETABLE_BOTTOM_SAFE_EXTENSION: number = 56;
 const TAB_TODAY: number = 0;
 const TAB_TIMETABLE: number = 1;
-const TAB_ASSISTANT: number = 2;
-const TAB_NEWS: number = 3;
-const NAV_TAB_COUNT: number = 5;
+const NAV_TAB_COUNT: number = 3;
 const MORE_HEADER_HEIGHT: number = 56;
 const TIMETABLE_CHROME_FALLBACK: number = 200;
 const COLOR_SURFACE_RGB: string = '244,247,252';
@@ -145,9 +141,6 @@ struct Home {
   @State private timetableCanvasHeight: number = 0;
   @State timetableFadeOpacity: number = 0;
   @State moreHeaderMaskOpacity: number = 0;
-  // 助手/资讯首次接近时才创建，避免冷启动就发起资讯网络请求。
-  @State assistantMounted: boolean = false;
-  @State newsMounted: boolean = false;
   @State selectedNav: number = TAB_TODAY;
   @State timetableBgUri: string = '';
   @State timetableTextColor: string = COLOR_TEXT_PRIMARY;
@@ -633,13 +626,11 @@ struct Home {
       target = this.currentTab - 1;
     }
     if (target !== this.currentTab) {
-      this.mountTabsNear(target);
       this.tabsController.changeIndex(target);
     }
   }
 
   private selectTab(index: number): void {
-    this.mountTabsNear(index);
     if (index === this.currentTab) {
       return;
     }
@@ -649,15 +640,6 @@ struct Home {
     if (index === TAB_TIMETABLE) {
       // 页面常驻于 Tabs 中不会重建，回到时间表时需主动重绘并恢复地点跑马灯。
       this.drawTimetableNow();
-    }
-  }
-
-  private mountTabsNear(index: number): void {
-    if (Math.abs(index - TAB_ASSISTANT) <= 1) {
-      this.assistantMounted = true;
-    }
-    if (Math.abs(index - TAB_NEWS) <= 1) {
-      this.newsMounted = true;
     }
   }
 
@@ -1031,32 +1013,6 @@ struct Home {
 
       TabContent() {
         Column() {
-          if (this.assistantMounted) {
-            AssistantTab();
-          }
-        }
-        .tabPage(0, COLOR_SURFACE)
-      }
-      .clip(false)
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.BOTTOM])
-      .tabBar(this.dockTab($r('sys.symbol.wand_and_stars'), '助手'))
-
-      TabContent() {
-        Column() {
-          if (this.newsMounted) {
-            NewsTab();
-          }
-        }
-        .tabPage(0, COLOR_SURFACE)
-      }
-      .clip(false)
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.BOTTOM])
-      .tabBar(this.dockTab($r('sys.symbol.doc_text'), '资讯'))
-
-      TabContent() {
-        Column() {
           this.tabMine();
         }
         .tabPage(0, COLOR_SURFACE)
@@ -1084,7 +1040,6 @@ struct Home {
       this.tabPageWidth = newValue.width as number;
     })
     .onAnimationStart((index: number, targetIndex: number, extraInfo: TabsAnimationEvent) => {
-      this.mountTabsNear(targetIndex);
       this.selectedNav = targetIndex;
     })
     .onChange((index: number) => {
@@ -1870,6 +1825,26 @@ struct Home {
             this.moreNavigationRow($r('sys.symbol.magnifyingglass'), '空教室',
               '查询可用教室与空闲时段', () => {
                 this.getUIContext().getPromptAction().showToast({ message: '空教室查询将在教务会话完善后开放' });
+              });
+          }
+          .width('100%')
+          .padding({ top: 4, bottom: 4 })
+          .backgroundColor(COLOR_CARD)
+          .borderRadius(16);
+
+          this.moreSectionTitle('更多');
+          Column() {
+            this.moreNavigationRow($r('sys.symbol.AI_message'), '助手',
+              '课表问答', () => {
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/AssistantPage' });
+              });
+            this.moreNavigationRow($r('sys.symbol.doc_text'), '资讯',
+              '博客与通知', () => {
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/NewsPage' });
+              });
+            this.moreNavigationRow($r('sys.symbol.link'), '常用入口',
+              '校园网站与课程攻略', () => {
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/PortalsPage' });
               });
           }
           .width('100%')

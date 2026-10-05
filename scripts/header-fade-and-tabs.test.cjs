@@ -60,7 +60,7 @@ test('tabs swipe between neighbours except over a timetable grid, whose swipes p
   assert.match(shell, /\.scrollable\(!this\.tabSwipeLocked\(\)\)/);
   // The empty timetable state has no week paging, so it keeps switching tabs.
   assert.match(home, /private tabSwipeLocked\(\): boolean \{\s*return this\.currentTab === TAB_TIMETABLE && this\.currentTimetable !== undefined;/);
-  assert.match(shell, /\.onAnimationStart\([\s\S]*?this\.mountTabsNear\(targetIndex\);\s*this\.selectedNav = targetIndex/);
+  assert.match(shell, /\.onAnimationStart\([\s\S]*?this\.selectedNav = targetIndex/);
   assert.match(shell, /\.onChange\(\(index: number\) => \{\s*this\.selectTab\(index\);\s*this\.selectedNav = index;/);
   assert.match(shell, /\.animationDuration\(TAB_SWIPE_MS\)/);
   assert.match(home, /PanGesture\(\{ direction: PanDirection\.Horizontal/);
@@ -78,7 +78,7 @@ test('week paging commits on a shorter drag or a quick flick', () => {
 });
 
 test('news, notices and the timetable fade content scrolling under their headers', () => {
-  for (const file of ['feature/news/NewsTab.ets', 'pages/NoticesPage.ets']) {
+  for (const file of ['pages/NewsPage.ets', 'pages/NoticesPage.ets', 'pages/PortalsPage.ets']) {
     const source = read(file);
     assert.match(source, /HeaderFadeMask\(\{ maskOpacity: this\.fadeOpacity/, file);
     assert.match(source, /\.onDidScroll\(\(\) => \{\s*this\.fadeOpacity = HeaderFade\.opacity\(/, file);
@@ -115,7 +115,7 @@ test('notices and the function centre share the transparent header that content 
 
 test('function-centre secondary pages use the same transparent header', () => {
   const pages = ['NoticesPage', 'ScorePage', 'ExamPage',
-    'ImportTimetablePage', 'TimetableManagerPage', 'TimetableDetailPage'];
+    'ImportTimetablePage', 'TimetableManagerPage', 'TimetableDetailPage', 'PortalsPage'];
   for (const page of pages) {
     const source = read(`pages/${page}.ets`);
     const build = source.slice(source.indexOf('  build()'));

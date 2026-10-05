@@ -1,10 +1,11 @@
 /**
- * NewsTab.ets — 主页「资讯」栏：今日哈工大公告/新闻 + 常用校园入口。
+ * NewsPage.ets — 功能中心「资讯」：博客与通知。
  */
-import { HeaderFadeMask } from '../../common/components/HeaderFadeMask';
-import { HeaderFade } from '../../common/theme/HeaderFade';
-import { STATUS_BAR_INSET_FALLBACK } from '../../common/theme/StatusBarInset';
-import { NewsCategory, NewsItem, NewsPage, NewsPortal, NewsService } from './NewsService';
+import { HeaderBackButton } from '../common/components/HeaderBackButton';
+import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
+import { HeaderFade } from '../common/theme/HeaderFade';
+import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
+import { NewsCategory, NewsItem, NewsPage as NewsPageResult, NewsService } from '../feature/news/NewsService';
 
 const COLOR_PRIMARY: string = '#2E86E8';
 const SURFACE_RGB: string = '244,247,252';
@@ -13,10 +14,10 @@ const COLOR_TEXT_PRIMARY: string = '#14213D';
 const COLOR_TEXT_SECONDARY: string = '#4E5C72';
 const COLOR_TEXT_HINT: string = '#5A6880';
 const COLOR_NAV_ACTIVE: string = '#E3EEFC';
-const PORTAL_TAB: number = NewsService.CATEGORIES.length;
 
+@Entry
 @Component
-export struct NewsTab {
+struct NewsPage {
   @State selected: number = 0;
   @State items: NewsItem[] = [];
   @State loading: boolean = false;
@@ -25,24 +26,27 @@ export struct NewsTab {
   @State message: string = '';
   @State fadeOpacity: number = 0;
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
+  @StorageProp('hita_nav_bar_vp') navBarInset: number = NAV_BAR_INSET_FALLBACK;
   private page: number = 0;
   private generation: number = 0;
   private newsScroller: Scroller = new Scroller();
-  private portalScroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     this.reload();
   }
 
+  aboutToDisappear(): void {
+    this.generation++;
+  }
+
   private selectTab(index: number): void {
-    if (this.selected === index) {
+    if (index < 0 || index >= NewsService.CATEGORIES.length || this.selected === index) {
       return;
     }
     this.selected = index;
     this.fadeOpacity = 0;
-    if (index < PORTAL_TAB) {
-      this.reload();
-    }
+    this.newsScroller.scrollEdge(Edge.Top);
+    this.reload();
   }
 
   private async reload(): Promise<void> {
@@ -52,18 +56,21 @@ export struct NewsTab {
     this.fadeOpacity = 0;
     this.hasMore = true;
     this.message = '';
+    const generation: number = this.generation;
     await this.loadPage();
-    this.refreshing = false;
+    if (generation === this.generation) {
+      this.refreshing = false;
+    }
   }
 
   private async loadPage(): Promise<void> {
-    if (this.selected >= PORTAL_TAB || (this.loading && this.page > 0)) {
+    if (this.loading && this.page > 0) {
       return;
     }
     const generation: number = this.generation;
     const category: NewsCategory = NewsService.CATEGORIES[this.selected];
     this.loading = true;
-    const result: NewsPage = await NewsService.fetchCategory(category.id, this.page);
+    const result: NewsPageResult = await NewsService.fetchCategory(category.id, this.page);
     if (generation !== this.generation) {
       return;
     }
@@ -76,7 +83,7 @@ export struct NewsTab {
     const known: Set<string> = new Set<string>(this.items.map((item: NewsItem): string => item.url));
     const fresh: NewsItem[] = result.items.filter((item: NewsItem): boolean => !known.has(item.url));
     this.items = this.items.concat(fresh);
-    this.hasMore = fresh.length > 0;
+    this.hasMore = result.hasMore && fresh.length > 0;
     this.page++;
     this.message = this.items.length === 0 ? (result.message.length > 0 ? result.message : '暂无资讯') : '';
   }
@@ -91,36 +98,38 @@ export struct NewsTab {
   build() {
     Column() {
       Row() {
+        HeaderBackButton({
+          onBack: () => this.getUIContext().getRouter().back()
+        })
+          .margin({ right: 12 });
         Column() {
           Text('资讯')
-            .fontSize(24)
+            .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .fontColor(COLOR_TEXT_PRIMARY);
-          Text('今日哈工大 · 校园公告与新闻')
+          Text('博客与通知')
             .fontSize(12)
             .fontColor(COLOR_TEXT_SECONDARY)
             .margin({ top: 2 });
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start);
-        if (this.selected < PORTAL_TAB) {
-          Button({ type: ButtonType.Circle }) {
-            SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-              .fontSize(18)
-              .fontColor([COLOR_PRIMARY]);
-          }
-          .width(40)
-          .height(40)
-          .backgroundColor(COLOR_NAV_ACTIVE)
-          .enabled(!this.loading)
-          .accessibilityText('刷新')
-          .onClick(() => {
-            this.reload();
-          });
+        Button({ type: ButtonType.Circle }) {
+          SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+            .fontSize(18)
+            .fontColor([COLOR_PRIMARY]);
         }
+        .width(40)
+        .height(40)
+        .backgroundColor(COLOR_NAV_ACTIVE)
+        .enabled(!this.loading)
+        .accessibilityText('刷新')
+        .onClick(() => {
+          this.reload();
+        });
       }
       .width('100%')
-      .padding({ left: 20, right: 16, top: 14 + this.statusBarInset, bottom: 8 })
+      .padding({ left: 16, right: 16, top: 8 + this.statusBarInset, bottom: 8 })
       .alignItems(VerticalAlign.Center);
 
       Column() {
@@ -128,7 +137,6 @@ export struct NewsTab {
           ForEach(NewsService.CATEGORIES, (category: NewsCategory, index: number) => {
             this.segment(category.name, index);
           }, (category: NewsCategory) => category.id);
-          this.segment('常用入口', PORTAL_TAB);
         }
         .width('100%')
         .padding(4)
@@ -138,14 +146,11 @@ export struct NewsTab {
       .width('100%')
       .padding({ left: 16, right: 16, bottom: 8 });
 
-      if (this.selected >= PORTAL_TAB) {
-        this.portalList();
-      } else {
-        this.newsList();
-      }
+      this.newsList();
     }
     .width('100%')
     .height('100%')
+    .backgroundColor('#F4F7FC')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM]);
   }
 
@@ -177,6 +182,9 @@ export struct NewsTab {
           }, (item: NewsItem) => item.url);
           ListItem() {
             this.listFooter();
+          }
+          ListItem() {
+            Column().height(12 + this.navBarInset);
           }
         }
         .width('100%')
@@ -285,69 +293,4 @@ export struct NewsTab {
     });
   }
 
-  @Builder
-  portalList() {
-    Stack({ alignContent: Alignment.Top }) {
-      this.portalItems();
-      HeaderFadeMask({ maskOpacity: this.fadeOpacity, rgb: SURFACE_RGB });
-    }
-    .width('100%')
-    .layoutWeight(1)
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM]);
-  }
-
-  @Builder
-  portalItems() {
-    List({ space: 10, scroller: this.portalScroller }) {
-      ForEach(NewsService.PORTALS, (portal: NewsPortal) => {
-        ListItem() {
-          Row() {
-            Stack() {
-              SymbolGlyph($r('sys.symbol.doc_text'))
-                .fontSize(20)
-                .fontColor([COLOR_PRIMARY]);
-            }
-            .width(40)
-            .height(40)
-            .borderRadius(20)
-            .backgroundColor(COLOR_NAV_ACTIVE)
-            .alignContent(Alignment.Center);
-            Column() {
-              Text(portal.title)
-                .fontSize(15)
-                .fontWeight(FontWeight.Medium)
-                .fontColor(COLOR_TEXT_PRIMARY);
-              Text(portal.subtitle)
-                .fontSize(12)
-                .fontColor(COLOR_TEXT_SECONDARY)
-                .margin({ top: 3 })
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis });
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-            .margin({ left: 12 });
-            Text('›')
-              .fontSize(23)
-              .fontColor(COLOR_TEXT_SECONDARY);
-          }
-          .width('100%')
-          .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-          .backgroundColor(COLOR_CARD)
-          .borderRadius(16)
-          .onClick(() => {
-            this.open(portal.url, portal.title);
-          });
-        }
-      }, (portal: NewsPortal) => portal.url);
-    }
-    .width('100%')
-    .height('100%')
-    .padding({ left: 16, right: 16 })
-    .scrollBar(BarState.Off)
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-    .onDidScroll(() => {
-      this.fadeOpacity = HeaderFade.opacity(this.portalScroller.currentOffset().yOffset);
-    });
-  }
 }

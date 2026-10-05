@@ -1,12 +1,11 @@
 /**
- * NewsService.ets — 今日哈工大（today.hit.edu.cn）资讯列表抓取与解析。
- *
- * 列表页每条为 <li>：右侧部门链接 + 相对日期，左侧 /article/yyyy/MM/dd/id 标题链接；
- * 每页 20 条，?page= 从 0 开始。
+ * HOA 博客订阅与今日哈工大通知列表。
  */
+import { util, xml } from '@kit.ArkTS';
 import { http } from '@kit.NetworkKit';
 
 const BASE_URL: string = 'https://today.hit.edu.cn';
+const BLOG_FEED_URL: string = 'https://hoa.moe/blog/rss.xml';
 const DESKTOP_UA: string =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36';
 
@@ -27,44 +26,36 @@ export class NewsItem {
   date: string = '';
 }
 
-export class NewsPortal {
-  title: string;
-  subtitle: string;
-  url: string;
-
-  constructor(title: string, subtitle: string, url: string) {
-    this.title = title;
-    this.subtitle = subtitle;
-    this.url = url;
-  }
-}
-
 export class NewsPage {
   items: NewsItem[] = [];
   ok: boolean = false;
+  hasMore: boolean = false;
   message: string = '';
 }
 
 export class NewsService {
   static readonly CATEGORIES: NewsCategory[] = [
-    new NewsCategory('10', '公告公示'),
-    new NewsCategory('11', '新闻快讯')
-  ];
-
-  static readonly PORTALS: NewsPortal[] = [
-    new NewsPortal('今日哈工大', 'today.hit.edu.cn · 校园新闻与公告', BASE_URL + '/'),
-    new NewsPortal('哈工大官网', 'www.hit.edu.cn', 'https://www.hit.edu.cn/'),
-    new NewsPortal('HOA 课程攻略', 'hoa.moe · 课程资料与经验分享', 'https://hoa.moe/'),
-    new NewsPortal('哈工大威海', 'www.hitwh.edu.cn', 'https://www.hitwh.edu.cn/'),
-    new NewsPortal('哈工大深圳', 'www.hitsz.edu.cn', 'https://www.hitsz.edu.cn/')
+    new NewsCategory('blog', '博客'),
+    new NewsCategory('10', '通知')
   ];
 
   static async fetchCategory(categoryId: string, page: number): Promise<NewsPage> {
     const result: NewsPage = new NewsPage();
-    const url: string = BASE_URL + '/category/' + categoryId + (page > 0 ? '?page=' + page.toString() : '');
+    const blog: boolean = categoryId === 'blog';
+    if ((!blog && categoryId !== '10') || page < 0 || !Number.isInteger(page)) {
+      result.message = '暂时无法获取资讯，请稍后重试';
+      return result;
+    }
+    // The blog feed contains the complete list; it has no next-page endpoint.
+    if (blog && page > 0) {
+      result.ok = true;
+      return result;
+    }
+    const url: string = blog ? BLOG_FEED_URL :
+      BASE_URL + '/category/10' + (page > 0 ? '?page=' + page.toString() : '');
     const header: Record<string, string> = {
       'User-Agent': DESKTOP_UA,
-      'Accept': 'text/html,application/xhtml+xml'
+      'Accept': blog ? 'application/rss+xml,application/xml,text/xml' : 'text/html,application/xhtml+xml'
     };
     const request: http.HttpRequest = http.createHttp();
     try {
@@ -81,8 +72,14 @@ export class NewsService {
         return result;
       }
       const body: string = resp.result === undefined || resp.result === null ? '' : String(resp.result);
-      result.items = NewsService.parseList(body);
+      try {
+        result.items = blog ? NewsService.parseBlogFeed(body) : NewsService.parseList(body);
+      } catch (e) {
+        result.message = '暂时无法解析资讯，请稍后重试';
+        return result;
+      }
       result.ok = true;
+      result.hasMore = !blog && result.items.length > 0;
       if (result.items.length === 0) {
         result.message = '暂无可显示的资讯';
       }
@@ -92,6 +89,82 @@ export class NewsService {
       request.destroy();
     }
     return result;
+  }
+
+  static parseBlogFeed(feed: string): NewsItem[] {
+    const data: Uint8Array = new util.TextEncoder().encodeInto(feed);
+    const parser: xml.XmlPullParser = new xml.XmlPullParser(data.buffer as ArrayBuffer, 'UTF-8');
+    const items: NewsItem[] = [];
+    const seen: Set<string> = new Set<string>();
+    const path: string[] = [];
+    let channelFound: boolean = false;
+    let current: NewsItem = new NewsItem();
+    let fieldText: string = '';
+    parser.parseXml({
+      supportDoctype: false,
+      ignoreNameSpace: true,
+      tokenValueCallbackFunction: (event: xml.EventType, info: xml.ParseInfo): boolean => {
+        if (event === xml.EventType.DOCDECL) {
+          throw new Error('Unsupported feed document type');
+        }
+        if (event === xml.EventType.START_TAG) {
+          path.push(info.getName());
+          if (path.length === 2 && path[0] === 'rss' && path[1] === 'channel') {
+            channelFound = true;
+          }
+          if (path.length === 3 && path[0] === 'rss' && path[1] === 'channel' && path[2] === 'item') {
+            current = new NewsItem();
+          }
+          if (path.length === 4) {
+            fieldText = '';
+          }
+        } else if (event === xml.EventType.TEXT || event === xml.EventType.CDSECT ||
+          event === xml.EventType.ENTITY_REFERENCE || event === xml.EventType.WHITESPACE) {
+          if (path.length === 4 && path[0] === 'rss' && path[1] === 'channel' && path[2] === 'item' &&
+            ['title', 'link', 'pubDate', 'author', 'creator', 'dc:creator'].includes(path[3])) {
+            fieldText += info.getText();
+          }
+        } else if (event === xml.EventType.END_TAG) {
+          if (path[0] === 'rss' && path[1] === 'channel' && path[2] === 'item') {
+            if (path.length === 4) {
+              const value: string = fieldText.replace(/\s+/g, ' ').trim();
+              switch (path[3]) {
+                case 'title':
+                  current.title = value;
+                  break;
+                case 'link':
+                  current.url = value.startsWith('/blog/') ? 'https://hoa.moe' + value : value;
+                  break;
+                case 'pubDate':
+                  const timestamp: number = Date.parse(value);
+                  current.date = Number.isFinite(timestamp) ? new Date(timestamp).toISOString().substring(0, 10) : '';
+                  break;
+                case 'author':
+                case 'creator':
+                case 'dc:creator':
+                  if (value.length > 0) {
+                    current.department += (current.department.length > 0 ? '、' : '') + value;
+                  }
+                  break;
+              }
+            } else if (path.length === 3 && current.title.length > 0 &&
+              /^https:\/\/hoa\.moe\/blog\/[^\s<>]+$/.test(current.url) && !seen.has(current.url)) {
+              seen.add(current.url);
+              if (current.department.length === 0) {
+                current.department = 'HOA';
+              }
+              items.push(current);
+            }
+          }
+          path.pop();
+        }
+        return true;
+      }
+    });
+    if (!channelFound || path.length > 0) {
+      throw new Error('Invalid blog feed');
+    }
+    return items;
   }
 
   static parseList(html: string): NewsItem[] {
