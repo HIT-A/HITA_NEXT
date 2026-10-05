@@ -60,7 +60,6 @@ const TAB_TODAY: number = 0;
 const TAB_TIMETABLE: number = 1;
 const TAB_ASSISTANT: number = 2;
 const TAB_NEWS: number = 3;
-const TAB_MORE: number = 4;
 const NAV_TAB_COUNT: number = 5;
 const MORE_HEADER_HEIGHT: number = 56;
 const TIMETABLE_CHROME_FALLBACK: number = 200;
@@ -98,7 +97,6 @@ class TimetableMarqueeCallback extends FrameCallback {
 struct Home {
   @State todayItems: EasEventItem[] = [];
   @State timelineText: string = '暂无今日日程';
-  @State sessionText: string = '未登录';
   @State currentTab: number = 0;
   @State hasTimetable: boolean = false;
   @State timetableCount: number = 0;
@@ -273,24 +271,8 @@ struct Home {
     const rdb: RdbHelper = RdbHelper.getInstance();
     await rdb.init(ctx);
 
-    const preferred: EasCampus | undefined = await EasSessionStore.getInstance().loadLastCampus();
-    const order: EasCampus[] = [EasCampus.BENBU, EasCampus.WEIHAI, EasCampus.SHENZHEN];
-    if (preferred !== undefined) {
-      const index: number = order.indexOf(preferred);
-      if (index > 0) {
-        order.splice(index, 1);
-        order.unshift(preferred);
-      }
-    }
-    let found: EasSession | undefined = undefined;
-    for (let i = 0; i < order.length && found === undefined; i++) {
-      const session: EasSession | undefined = await EasSessionStore.getInstance().load(order[i]);
-      if (session !== undefined && session.isLogin()) {
-        found = session;
-      }
-    }
+    const found: EasSession | undefined = await EasSessionStore.getInstance().loadPreferred();
     this.sessionInfo = found;
-    this.sessionText = found === undefined ? '未登录：从导航页登录统一认证' : '已登录';
 
     const allTimetables: EasTimetable[] = await rdb.getTimetables();
     this.timetableCount = allTimetables.length;
@@ -656,17 +638,6 @@ struct Home {
     }
   }
 
-  private gotoCurrentTimetableWeek(): void {
-    if (this.currentTimetable === undefined) {
-      return;
-    }
-    const current: number = this.currentTimetable.getWeekNumber(this.nowTick);
-    if (current > 0) {
-      this.timetableWeek = current;
-      this.drawTimetableNow();
-    }
-  }
-
   private selectTab(index: number): void {
     this.mountTabsNear(index);
     if (index === this.currentTab) {
@@ -995,10 +966,6 @@ struct Home {
       return '本部校区';
     }
     return '威海校区';
-  }
-
-  private static sessionText(session: EasSession | undefined): string {
-    return session === undefined ? '未登录' : Home.campusName(session.campus);
   }
 
   private static campusFromCode(code: string): EasCampus {

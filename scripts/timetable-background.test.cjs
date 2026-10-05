@@ -37,7 +37,7 @@ test('timetable photo picker copies a gallery image and covers the page without 
   assert.match(tab, /Text\(this\.timetableCampusTerm\(\)\)[\s\S]*?\.backgroundColor\(Color\.Transparent\)/);
 
   const draw = read('feature/timetable/views/TimetableWeekDraw.ets');
-  const header = draw.slice(draw.indexOf('function drawWeekHeader'), draw.indexOf('export function drawTimetableWeekHeader'));
+  const header = draw.slice(draw.indexOf('function drawWeekHeader'), draw.indexOf('export function drawTimetableWeek('));
   assert.match(header, /if \(fillPage\) \{[\s\S]*fillRect\(x, 4, colW, headerH - 2\)/);
   assert.match(draw, /labelColor: string = ''/);
 

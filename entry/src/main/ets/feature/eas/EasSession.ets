@@ -54,7 +54,7 @@ export class EasSession {
   picture: string = '';
   sfxsx: string = '';       // 学分数(深圳 GPA 相关展示字段，保留原名)
   id: string = '';
-  /** 培养层次枚举；与 studentType 字符串("1"/"2") 冗余，供快速判定 */
+  /** 培养层次；持久化时转换为 studentType 字符串("1"/"2")。 */
   stutype: EasStudentType = EasStudentType.UNDERGRAD;
 
   /** EASToken.getStudentType(): "1"=本科(UNDERGRAD)，"2"=研究生(GRAD)。 */
@@ -64,10 +64,6 @@ export class EasSession {
 
   setStudentType(raw: string): void {
     this.stutype = (raw !== null && raw !== undefined && raw.trim() === '2') ? EasStudentType.GRAD : EasStudentType.UNDERGRAD;
-    // 同步冗余串
-    if (this.stutype === EasStudentType.GRAD) {
-      // 无额外字段，运行时以枚举为准
-    }
   }
 
   /** 对应 EASToken.isLogin()：accessToken 非空或任一 cookie 集合非空即视为有会话。 */

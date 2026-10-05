@@ -22,8 +22,6 @@ import {
 } from './EasWebLoginConfig';
 import { EasMfaAction, EasMfaOverlayState, EasWebMfaBridge } from './EasWebMfaBridge';
 import {
-  classifyPage,
-  EasPageKind,
   hasRequiredCookiesFor,
   hasWeihaiVpnTicket,
   hostOf,
@@ -32,11 +30,9 @@ import {
   isJwtsPage,
   isMfaPage,
   isPortalHomePage,
-  isShenzhenAuthenticatedPage,
   isShenzhenProxyJwPage,
   isSuccessPageFor,
   isTrustPortalPage,
-  isWeihaiAuthenticatedPage,
   parseCookiesHeader,
   pathOf,
   reauthenticationUrl
@@ -98,7 +94,6 @@ export class EasWebLoginController {
 
   // —— MFA ——
   private mfaState: EasMfaOverlayState = new EasMfaOverlayState();
-  private mfaDetectionGeneration: number = 0;
   private lastMfaDetectAt: number = 0;
 
   // —— BENBU 本科 EELAB token 流程 ——
@@ -870,7 +865,6 @@ export class EasWebLoginController {
       return;
     }
     this.lastMfaDetectAt = now;
-    this.mfaDetectionGeneration++;
     EasWebMfaBridge.detect(wc).then((state: EasMfaOverlayState) => {
       if (this.finished) {
         return;

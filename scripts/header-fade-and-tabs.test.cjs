@@ -12,7 +12,11 @@ function load(file) {
   if (cache.has(absolute)) return cache.get(absolute).exports;
   const mod = { exports: {} };
   cache.set(absolute, mod);
-  const output = ts.transpileModule(fs.readFileSync(absolute, 'utf8'), {
+  const source = fs.readFileSync(absolute, 'utf8')
+    .replace(/^@Component\r?\n/gm, '')
+    .replace(/@Prop\s+/g, '')
+    .replace('export struct HeaderFadeMask', 'export class HeaderFadeMask');
+  const output = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
   }).outputText;
   const requireLocal = name => {
@@ -22,21 +26,8 @@ function load(file) {
   new Function('require', 'module', 'exports', output)(requireLocal, mod, mod.exports);
   return mod.exports;
 }
-const { drawTimetableFade } = load('feature/timetable/views/TimetableWeekDraw.ets');
 const { HeaderFade } = load('common/theme/HeaderFade.ets');
-const { EasTimetable } = load('common/model/timetable/TimetableModels.ets');
-
-function gradientCanvas() {
-  const ctx = { fills: [], fillStyle: undefined };
-  ctx.clearRect = () => {};
-  ctx.createLinearGradient = (x0, y0, x1, y1) => {
-    const gradient = { axis: [x0, y0, x1, y1], stops: [] };
-    gradient.addColorStop = (offset, color) => gradient.stops.push([offset, color]);
-    return gradient;
-  };
-  ctx.fillRect = (x, y, w, h) => ctx.fills.push({ rect: [x, y, w, h], style: ctx.fillStyle });
-  return ctx;
-}
+const { HeaderFadeMask } = load('common/components/HeaderFadeMask.ets');
 
 test('header fade opacity ramps in over the first 24vp of scrolling', () => {
   assert.equal(HeaderFade.opacity(-30), 0);
@@ -45,56 +36,43 @@ test('header fade opacity ramps in over the first 24vp of scrolling', () => {
   assert.equal(HeaderFade.opacity(240), 1);
 });
 
-test('timetable fade is opaque at the top, clear at the bottom, and keeps the today column tint', () => {
-  const w = 380;
-  const h = HeaderFade.HEIGHT;
-  const ctx = gradientCanvas();
-  drawTimetableFade(ctx, w, h, true);
-  assert.equal(ctx.fills.length, 2);
-
-  const [base, today] = ctx.fills;
-  assert.deepEqual(base.rect, [0, 0, w, h]);
-  assert.deepEqual(base.style.axis, [0, 0, 0, h]);
-  assert.deepEqual(base.style.stops[0], [0, 'rgba(251,252,254,1.000)']);
-  assert.deepEqual(base.style.stops.at(-1), [1, 'rgba(251,252,254,0.000)']);
-
-  const gridLeft = Math.max(48, w * 0.11);
-  const colW = (w - gridLeft) / 7;
-  const dow = EasTimetable.dowOfMs(Date.now());
-  assert.deepEqual(today.rect, [gridLeft + (dow - 1) * colW, 0, colW, h]);
-  assert.deepEqual(today.style.stops[0], [0, 'rgba(46,134,232,0.060)']);
-  assert.deepEqual(today.style.stops.at(-1), [1, 'rgba(46,134,232,0.000)']);
-
-  const other = gradientCanvas();
-  drawTimetableFade(other, w, h, false);
-  assert.equal(other.fills.length, 1);
+test('the shared header mask supplies the existing curve and reverses it for bottom bars', () => {
+  const mask = new HeaderFadeMask();
+  for (const height of [0, 56]) {
+    mask.headerHeight = height;
+    const offsets = height > 0 ? HeaderFade.HEADER_OFFSETS : HeaderFade.OFFSETS;
+    const alphas = height > 0 ? HeaderFade.HEADER_ALPHAS : HeaderFade.ALPHAS;
+    mask.fromBottom = false;
+    const expected = offsets.map((offset, i) => [HeaderFade.rgba(mask.rgb, alphas[i]), offset]);
+    assert.deepEqual(mask.stops(), expected);
+    assert.equal(expected[0][0], 'rgba(244,247,252,1.000)');
+    assert.equal(expected.at(-1)[0], 'rgba(244,247,252,0.000)');
+    mask.fromBottom = true;
+    assert.deepEqual(mask.stops(), expected.slice().reverse().map(([color, offset]) => [color, 1 - offset]));
+  }
+  assert.match(read('common/components/HeaderFadeMask.ets'), /hitTestBehavior\(HitTestMode\.None\)/);
 });
 
 test('tabs swipe between neighbours except over a timetable grid, whose swipes page weeks', () => {
   const home = read('pages/Home.ets');
   const shell = home.slice(home.indexOf('  build() {'), home.indexOf('  activeSheet()'));
-  assert.match(shell, /Swiper\(this\.tabSwiper\)/);
-  assert.match(shell, /\.loop\(false\)/);
-  assert.match(shell, /\.disableSwipe\(this\.tabSwipeLocked\(\)\)/);
+  assert.match(shell, /Tabs\(\{ barPosition: BarPosition\.End, controller: this\.tabsController \}\)/);
+  assert.match(shell, /\.scrollable\(!this\.tabSwipeLocked\(\)\)/);
   // The empty timetable state has no week paging, so it keeps switching tabs.
   assert.match(home, /private tabSwipeLocked\(\): boolean \{\s*return this\.currentTab === TAB_TIMETABLE && this\.currentTimetable !== undefined;/);
-  assert.match(shell, /\.onGestureSwipe\(/);
-  assert.match(shell, /\.onChange\(\(index: number\) => \{\s*this\.selectTab\(index\);\s*this\.pinNav\(index\);/);
-  assert.match(shell, /\.translate\(\{ x: this\.tabSwipeOffset \}\)/);
-  assert.match(shell, /\.duration\(TAB_SWIPE_MS\)/);
-  assert.match(home, /private navHighlight\(\): number \{\s*return Math\.max\(0, Math\.min\(NAV_TAB_COUNT - 1, Math\.round\(this\.navPos\)\)\);/);
-  assert.match(home, /this\.navPos = Math\.max\(0, Math\.min\(NAV_TAB_COUNT - 1, index - pageOffsetX \/ this\.tabPageWidth\)\);/);
-  assert.doesNotMatch(home.slice(home.indexOf('  private followTabSwipe'), home.indexOf('  private pinNav')), /animateTo/);
+  assert.match(shell, /\.onAnimationStart\([\s\S]*?this\.mountTabsNear\(targetIndex\);\s*this\.selectedNav = targetIndex/);
+  assert.match(shell, /\.onChange\(\(index: number\) => \{\s*this\.selectTab\(index\);\s*this\.selectedNav = index;/);
+  assert.match(shell, /\.animationDuration\(TAB_SWIPE_MS\)/);
   assert.match(home, /PanGesture\(\{ direction: PanDirection\.Horizontal/);
   assert.match(home, /handleChromeTabPanEnd/);
-  assert.match(home, /this\.tabSwiper\.changeIndex\(target, false\)/);
+  assert.match(home, /this\.tabsController\.changeIndex\(target\)/);
 });
 
 test('week paging commits on a shorter drag or a quick flick', () => {
   const home = read('pages/Home.ets');
   const ratio = Number(/const TIMETABLE_SWIPE_RATIO: number = ([\d.]+);/.exec(home)[1]);
   assert.ok(ratio > 0 && ratio < 0.15, String(ratio));
-  const panEnd = home.slice(home.indexOf('  private handleTimetablePanEnd'), home.indexOf('  private gotoCurrentTimetableWeek'));
+  const panEnd = home.slice(home.indexOf('  private handleTimetablePanEnd'), home.indexOf('  private handleChromeTabPanEnd'));
   assert.match(panEnd, /event\.velocityX/);
   assert.match(panEnd, /width \* TIMETABLE_SWIPE_RATIO/);
 });

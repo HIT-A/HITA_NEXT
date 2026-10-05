@@ -50,23 +50,7 @@ export class EasTimetableImporter {
       await EasSessionStore.getInstance().init(context);
       const rdb: RdbHelper = RdbHelper.getInstance();
       await rdb.init(context);
-      const preferred: EasCampus | undefined = await EasSessionStore.getInstance().loadLastCampus();
-      const order: EasCampus[] = [EasCampus.BENBU, EasCampus.WEIHAI, EasCampus.SHENZHEN];
-      if (preferred !== undefined) {
-        const index: number = order.indexOf(preferred);
-        if (index > 0) {
-          order.splice(index, 1);
-          order.unshift(preferred);
-        }
-      }
-      let session: EasSession | undefined = undefined;
-      for (let i: number = 0; i < order.length; i++) {
-        const loaded: EasSession | undefined = await EasSessionStore.getInstance().load(order[i]);
-        if (loaded !== undefined && loaded.isLogin()) {
-          session = loaded;
-          break;
-        }
-      }
+      const session: EasSession | undefined = await EasSessionStore.getInstance().loadPreferred();
       if (session === undefined) {
         result.message = '请先登录统一身份认证';
         return result;

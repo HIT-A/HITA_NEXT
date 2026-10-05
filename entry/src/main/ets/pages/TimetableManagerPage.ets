@@ -82,26 +82,6 @@ struct TimetableManagerPage {
     });
   }
 
-  private openAddMenu(): void {
-    this.getUIContext().getPromptAction().showActionMenu({
-      title: '添加课表',
-      buttons: [
-        { text: '新建空课表', color: HitaColors.primary },
-        { text: '从教务导入', color: HitaColors.primary },
-        { text: '导入 ICS 文件', color: HitaColors.primary }
-      ]
-    }).then((ret) => {
-      if (ret.index === 0) {
-        this.createEmptyTimetable();
-      } else if (ret.index === 1) {
-        this.openImportPage();
-      } else if (ret.index === 2) {
-        this.importIcs();
-      }
-    }).catch(() => {
-    });
-  }
-
   private async importIcs(): Promise<void> {
     const ctx: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
     try {

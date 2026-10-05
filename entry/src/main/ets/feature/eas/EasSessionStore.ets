@@ -15,7 +15,6 @@ const LAST_CAMPUS_KEY: string = 'eas_last_campus';
 export class EasSessionStore {
   private static instance: EasSessionStore | undefined = undefined;
   private store: preferences.Preferences | undefined = undefined;
-  private context: common.Context | undefined = undefined;
 
   static getInstance(): EasSessionStore {
     if (EasSessionStore.instance === undefined) {
@@ -26,7 +25,6 @@ export class EasSessionStore {
 
   /** 必须在 Ability/UIAbility 上下文可用后调用一次。 */
   async init(context: common.Context): Promise<void> {
-    this.context = context;
     try {
       this.store = await preferences.getPreferences(context, { name: STORE_NAME });
     } catch (e) {
@@ -53,6 +51,26 @@ export class EasSessionStore {
     } catch (e) {
       return undefined;
     }
+  }
+
+  /** 课表使用最近登录的校区；无可用会话时按本部、威海、深圳回退。 */
+  async loadPreferred(): Promise<EasSession | undefined> {
+    const preferred: EasCampus | undefined = await this.loadLastCampus();
+    const order: EasCampus[] = [EasCampus.BENBU, EasCampus.WEIHAI, EasCampus.SHENZHEN];
+    if (preferred !== undefined) {
+      const index: number = order.indexOf(preferred);
+      if (index > 0) {
+        order.splice(index, 1);
+        order.unshift(preferred);
+      }
+    }
+    for (let i: number = 0; i < order.length; i++) {
+      const session: EasSession | undefined = await this.load(order[i]);
+      if (session !== undefined && session.isLogin()) {
+        return session;
+      }
+    }
+    return undefined;
   }
 
   /** 保存某校区会话（sessionGeneration 自增由调用方控制，这里只落盘）。 */

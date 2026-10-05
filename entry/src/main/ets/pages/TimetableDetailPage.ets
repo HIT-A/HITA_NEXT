@@ -362,26 +362,6 @@ struct TimetableDetailPage {
     });
   }
 
-  private confirmDeleteSubject(row: TimetableSubjectRow): void {
-    this.getUIContext().getPromptAction().showDialog({
-      title: '删除科目',
-      message: '确定删除「' + row.subject.name + '」及其全部课程吗？',
-      buttons: [
-        { text: '取消', color: '#7B8190' },
-        { text: '删除', color: HitaColors.error }
-      ]
-    }).then(async (ret) => {
-      if (ret.index !== 1) {
-        return;
-      }
-      const rdb: RdbHelper = RdbHelper.getInstance();
-      await rdb.deleteEventsOfSubject(row.subject.id);
-      await rdb.deleteSubject(row.subject.id);
-      await this.load();
-    }).catch(() => {
-    });
-  }
-
   @Builder
   private infoCard(timetable: EasTimetable) {
     Column() {

@@ -4,7 +4,6 @@
  * P1 本地功能：类型(课程/日程/考试/备忘)、名称、地点、日期偏移(今天起 ±370 天)、
  * 起止时间（系统滚轮选择器）→ RDB events → 返回时间线自动刷新。
  */
-import { promptAction, router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';

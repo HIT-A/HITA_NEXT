@@ -17,7 +17,6 @@ import {
   EasEventItem,
   EasTimetable
 } from '../../../common/model/timetable/TimetableModels';
-import { HeaderFade } from '../../../common/theme/HeaderFade';
 import { PlaceMarqueeFrame, placeMarqueeFrame } from './PlaceMarquee';
 
 export const DOW_NAMES: string[] = ['一', '二', '三', '四', '五', '六', '日'];
@@ -37,16 +36,12 @@ function ink(custom: string, fallback: string): string {
 
 export class TimetableDrawStyle {
   static bg: string = '#FBFCFE';
-  /** bg 的 RGB 分量，供渐隐层拼 rgba。 */
-  static bgRgb: string = '251,252,254';
   static gridLine: string = '#D7DEE8';
   static textMain: string = '#111827';
   static textSub: string = '#566276';
   static todayHeadBg: string = '#2E86E8';
   /** 今日列整列遮罩（源 ~#10000000）。 */
   static todayMask: string = 'rgba(46,134,232,0.06)';
-  static todayMaskRgb: string = '46,134,232';
-  static todayMaskAlpha: number = 0.06;
   /** 顶栏最低/占比。 */
   static headerMin: number = TIMETABLE_HEADER_HEIGHT;
   static headerRatio: number = 0.12;
@@ -57,13 +52,6 @@ export class TimetableDrawStyle {
   static blockMargin: number = 3;
   /** 安卓端使用高对比度实色课程卡片，标题与地点均使用白色。 */
   static blockOpacity: number = 0.88;
-
-  static compact(value: string, maxChars: number): string {
-    if (value.length <= maxChars) {
-      return value;
-    }
-    return value.substring(0, Math.max(1, maxChars - 1)) + '…';
-  }
 
   static wrap(value: string, maxChars: number, maxLines: number): string[] {
     const clean: string = value.trim();
@@ -287,50 +275,6 @@ function drawWeekHeader(ctx: CanvasRenderingContext2D, w: number, headerH: numbe
   ctx.textAlign = 'center';
   ctx.fillText((firstDay.getMonth() + 1).toString() + '月', gridLeft / 2, headerH / 2 + 16);
   ctx.textAlign = 'start';
-}
-
-/** 绘制固定在纵向滚动区域顶部的周标题。 */
-export function drawTimetableWeekHeader(ctx: CanvasRenderingContext2D, w: number, h: number,
-  timetable: EasTimetable, weekNumber: number, isCurrentWeek: boolean,
-  fillPage: boolean = true, labelColor: string = ''): void {
-  if (w <= 0 || h <= 0) {
-    return;
-  }
-  ctx.clearRect(0, 0, w, h);
-  drawWeekHeader(ctx, w, Math.max(2, h - 2), timetable, weekNumber, isCurrentWeek, fillPage,
-    labelColor);
-}
-
-/**
- * 网格滚入日期栏下方时的渐隐层（叠在纵向滚动区域顶部，不随内容滚动）：
- * 由下至上不透明度渐高；今日列按同一曲线叠加列遮罩色，与下方整列高亮衔接。
- */
-export function drawTimetableFade(ctx: CanvasRenderingContext2D, w: number, h: number,
-  isCurrentWeek: boolean, fillPage: boolean = true): void {
-  if (w <= 0 || h <= 0) {
-    return;
-  }
-  ctx.clearRect(0, 0, w, h);
-  if (fillPage) {
-    ctx.fillStyle = fadeGradient(ctx, h, TimetableDrawStyle.bgRgb, 1);
-    ctx.fillRect(0, 0, w, h);
-  }
-  if (isCurrentWeek) {
-    const gridLeft: number = Math.max(TimetableDrawStyle.gutterMin, w * TimetableDrawStyle.gutterRatio);
-    const colW: number = (w - gridLeft) / 7;
-    const todayDow: number = EasTimetable.dowOfMs(Date.now());
-    ctx.fillStyle = fadeGradient(ctx, h, TimetableDrawStyle.todayMaskRgb, TimetableDrawStyle.todayMaskAlpha);
-    ctx.fillRect(gridLeft + (todayDow - 1) * colW, 0, colW, h);
-  }
-}
-
-function fadeGradient(ctx: CanvasRenderingContext2D, h: number, rgb: string,
-  alphaScale: number): CanvasGradient {
-  const gradient: CanvasGradient = ctx.createLinearGradient(0, 0, 0, h);
-  for (let i = 0; i < HeaderFade.OFFSETS.length; i++) {
-    gradient.addColorStop(HeaderFade.OFFSETS[i], HeaderFade.rgba(rgb, HeaderFade.ALPHAS[i] * alphaScale));
-  }
-  return gradient;
 }
 
 /**
