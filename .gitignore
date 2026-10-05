@@ -15,3 +15,12 @@
 /.cxx
 /.test
 /.test_web
+/docs/legal/
+/signing/
+*.p12
+*.p7b
+*.cer
+*.csr
+*.pwd
+*.hap
+/scratch/

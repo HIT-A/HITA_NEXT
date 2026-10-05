@@ -1,40 +1,15 @@
 {
   "app": {
-    "signingConfigs": [
-      {
-        "name": "default",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "C:\\Users\\samerberry\\.ohos\\config\\default_HitaNEXT_GbJw1wdDQm-KPoPgia_AqeSNKWA3N8ovdomaLoFv86A=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001B296C0381CB0D11E0275EEC5BCB1362FB8D9D9A9BC691C6EE627F352EA7AEE2B7E6AC74553D171A",
-          "profile": "C:\\Users\\samerberry\\.ohos\\config\\default_HitaNEXT_GbJw1wdDQm-KPoPgia_AqeSNKWA3N8ovdomaLoFv86A=.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\samerberry\\.ohos\\config\\default_HitaNEXT_GbJw1wdDQm-KPoPgia_AqeSNKWA3N8ovdomaLoFv86A=.p12",
-          "storePassword": "0000001B5E77A5AEDA9C9CE756775FBC7BED2D32E52A8D14D83CAC5E0832698FBB4D84B59903B80AD45BE6"
-        }
-      },
-      {
-        "name": "now",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "C:\\Users\\samerberry\\.ohos\\config\\now_HitaNEXT_GbJw1wdDQm-KPoPgia_AqeSNKWA3N8ovdomaLoFv86A=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001BD93657F50BCC3B475E622FC461C9AEB5489756DA7376B0F9A6162761FAF654895A8320E275F403",
-          "profile": "C:\\Users\\samerberry\\.ohos\\config\\now_HitaNEXT_GbJw1wdDQm-KPoPgia_AqeSNKWA3N8ovdomaLoFv86A=.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\samerberry\\.ohos\\config\\now_HitaNEXT_GbJw1wdDQm-KPoPgia_AqeSNKWA3N8ovdomaLoFv86A=.p12",
-          "storePassword": "0000001BBF913E77F1F095A30C5C229D80C7060582A9EC76FD25F7196C4C337C5C16E957BAFB2D9D5159AE"
-        }
-      }
-    ],
+    "signingConfigs": [],
     "products": [
       {
         "name": "default",
-        "signingConfig": "now",
         "compatibleSdkVersion": "5.0.0(12)",
         "runtimeOS": "HarmonyOS",
         "buildOption": {
+          "packOptions": {
+            "appWithSignedPkg": true
+          },
           "strictMode": {
             "caseSensitiveCheck": true,
             "useNormalizedOHMUrl": true
@@ -55,7 +30,6 @@
   "modules": [
     {
       "name": "entry",
-
       "srcPath": "./entry",
       "targets": [
         {

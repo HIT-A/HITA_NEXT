@@ -30,6 +30,11 @@ export class EasImportResult {
   eventCount: number = 0;
 }
 
+export class EasTermStartResult {
+  startTime: number = 0;
+  fromSaved: boolean = false;
+}
+
 export class EasTimetableImporter {
   private static readonly BENBU_TIMES: number[][] = [
     [8, 0, 8, 50], [8, 55, 9, 45], [10, 5, 10, 55], [11, 0, 11, 50],
@@ -86,11 +91,17 @@ export class EasTimetableImporter {
       }
       let term: EasTermItem = terms[0];
       if (selectedTerm !== undefined) {
+        let found: boolean = false;
         for (let i: number = 0; i < terms.length; i++) {
           if (terms[i].equalsKey(selectedTerm)) {
             term = terms[i];
+            found = true;
             break;
           }
+        }
+        if (!found) {
+          result.message = '所选学期已不可用，请重新选择';
+          return result;
         }
       } else {
         for (let i: number = 0; i < terms.length; i++) {
@@ -101,6 +112,15 @@ export class EasTimetableImporter {
         }
       }
       result.term = term;
+      const start: EasTermStartResult = startTimeMs === undefined ?
+        await EasTimetableImporter.loadStartDate(rdb, provider, session, term) : new EasTermStartResult();
+      if (startTimeMs !== undefined && Number.isFinite(startTimeMs) && startTimeMs > 0) {
+        start.startTime = EasTimetable.mondayMsOf(startTimeMs);
+      }
+      if (!Number.isFinite(start.startTime) || start.startTime <= 0) {
+        result.message = '未能获取开学日期，请在导入课表中手动选择';
+        return result;
+      }
       const courses: EasCourseItem[] = await provider.getTimetableOfTerm(session, term);
       result.courseCount = courses.length;
       if (courses.length === 0) {
@@ -126,9 +146,10 @@ export class EasTimetableImporter {
         }
       }
       const timetable: EasTimetable = await EasTimetableImporter.saveCourses(rdb, session, term, courses, schedule,
-        startTimeMs);
+        start.startTime);
       result.timetable = timetable;
-      const readback: EasEventItem[] = await rdb.getEventsOfTimetable(timetable.id);
+      const readback: EasEventItem[] = (await rdb.getEventsOfTimetable(timetable.id))
+        .filter((event: EasEventItem): boolean => event.type === EasEventType.CLASS);
       result.eventCount = readback.length;
       hilog.info(DOMAIN, TAG, 'RDB readback timetable=%{public}s subjects/events=%{public}d',
         timetable.id, readback.length);
@@ -140,6 +161,9 @@ export class EasTimetableImporter {
       result.message = catalogDiag.length > 0 ?
         '已导入 ' + readback.length.toString() + ' 个课次（课程属性 ' + catalogDiag + '）' :
         '已导入 ' + readback.length.toString() + ' 个课次';
+      if (start.fromSaved) {
+        result.message += '，开学日期沿用本地设置，请核对';
+      }
       return result;
     } catch (e) {
       const text: string = e instanceof Error ? e.message : String(e);
@@ -150,7 +174,7 @@ export class EasTimetableImporter {
   }
 
   private static async saveCourses(rdb: RdbHelper, session: EasSession, term: EasTermItem,
-    courses: EasCourseItem[], schedule: EasTimePeriodInDay[], startTimeMs?: number): Promise<EasTimetable> {
+    courses: EasCourseItem[], schedule: EasTimePeriodInDay[], startTimeMs: number): Promise<EasTimetable> {
     const code: string = session.campus.toString() + ':' + term.getCode();
     let timetable: EasTimetable | undefined = await rdb.getTimetableByEasCode(code);
     if (timetable === undefined) {
@@ -158,29 +182,27 @@ export class EasTimetableImporter {
       timetable.code = code;
     }
     timetable.name = term.name;
-    timetable.startTime = startTimeMs !== undefined && startTimeMs > 0 ? startTimeMs :
-      EasTimetableImporter.startOfTerm(term);
+    timetable.startTime = EasTimetable.mondayMsOf(startTimeMs);
     let maxWeek: number = 25;
     for (let i = 0; i < courses.length; i++) {
       for (let j = 0; j < courses[i].weekNumbers.length; j++) {
-        maxWeek = Math.max(maxWeek, courses[i].weekNumbers[j]);
+        const week: number = courses[i].weekNumbers[j];
+        if (Number.isInteger(week) && week > 0 && week <= 60) {
+          maxWeek = Math.max(maxWeek, week);
+        }
       }
     }
     timetable.endTime = timetable.startTime + maxWeek * 7 * 24 * 60 * 60 * 1000;
-    timetable.createdAt = Date.now();
     timetable.scheduleStructure = schedule.length > 0 ? schedule : EasTimetableImporter.scheduleStructure(session.campus);
-    await rdb.saveTimetable(timetable);
-    const savedTimetable: EasTimetable | undefined = await rdb.getTimetableById(timetable.id);
-    if (savedTimetable === undefined) {
-      throw new Error('本地课表数据库写入失败，请重试');
-    }
-    await rdb.deleteCourseFromTimetable(timetable.id);
     const subjects: EasTermSubject[] = await rdb.getSubjectsOfTimetable(timetable.id);
+    const changedSubjects: EasTermSubject[] = [];
+    const events: EasEventItem[] = [];
     let validCourseCount: number = 0;
-    let savedEventCount: number = 0;
     for (let i: number = 0; i < courses.length; i++) {
       const course: EasCourseItem = courses[i];
-      if (course.dayOfWeek < 1 || course.dayOfWeek > 7 || course.beginSection < 1 ||
+      if (!Number.isInteger(course.dayOfWeek) || !Number.isInteger(course.beginSection) ||
+        !Number.isInteger(course.sectionCount) ||
+        course.dayOfWeek < 1 || course.dayOfWeek > 7 || course.beginSection < 1 ||
         course.sectionCount < 1 || course.beginSection + course.sectionCount - 1 > timetable.scheduleStructure.length) {
         hilog.warn(DOMAIN, TAG, 'skip invalid course name=%{public}s day=%{public}d section=%{public}d count=%{public}d',
           course.name, course.dayOfWeek, course.beginSection, course.sectionCount);
@@ -202,7 +224,7 @@ export class EasTimetableImporter {
         subject.type = EasTimetableImporter.subjectTypeForCourse(course);
         subject.credit = course.credit > 0 ? course.credit : 0;
         subjects.push(subject);
-        await rdb.saveSubject(subject);
+        changedSubjects.push(subject);
       } else if (EasTimetableImporter.hasSubjectTypeHint(course)) {
         // 旧版本导入器曾把所有新科目默认写成 COM_A（必修·考试）。
         // 重新导入时，仅在教务返回了明确分类时修正已有科目，避免用不完整
@@ -212,15 +234,23 @@ export class EasTimetableImporter {
         if (subject.type !== inferredType || subject.credit !== nextCredit) {
           subject.type = inferredType;
           subject.credit = nextCredit;
-          await rdb.saveSubject(subject);
+          if (!changedSubjects.includes(subject)) {
+            changedSubjects.push(subject);
+          }
         }
       }
       const weeks: number[] = course.weekNumbers;
+      const seenWeeks: Set<number> = new Set<number>();
       for (let w: number = 0; w < weeks.length; w++) {
         const week: number = weeks[w];
-        if (week < 1 || week > maxWeek) continue;
+        if (!Number.isInteger(week) || week < 1 || week > maxWeek || seenWeeks.has(week)) continue;
+        seenWeeks.add(week);
         const timestamps: number[] = timetable.getTimestamps(week, course.dayOfWeek,
           course.beginSection, course.beginSection + course.sectionCount - 1);
+        if (!Number.isFinite(timestamps[0]) || !Number.isFinite(timestamps[1]) ||
+          timestamps[1] <= timestamps[0]) {
+          throw new Error('课程时间无效，原课表已保留，请检查节次设置');
+        }
         const event: EasEventItem = new EasEventItem();
         event.id = newId();
         event.type = EasEventType.CLASS;
@@ -233,18 +263,18 @@ export class EasTimetableImporter {
         event.to = timestamps[1];
         event.fromNumber = course.beginSection;
         event.lastNumber = course.beginSection + course.sectionCount - 1;
-        await rdb.saveEvent(event);
-        savedEventCount++;
+        events.push(event);
       }
     }
     hilog.info(DOMAIN, TAG, 'local save courses=%{public}d valid=%{public}d events=%{public}d',
-      courses.length, validCourseCount, savedEventCount);
+      courses.length, validCourseCount, events.length);
     if (courses.length > 0 && validCourseCount === 0) {
       throw new Error('课表已获取，但课程节次无法解析');
     }
-    if (validCourseCount > 0 && savedEventCount === 0) {
-      throw new Error('课表已解析，但本地没有写入任何课次');
+    if (events.length === 0) {
+      throw new Error('未解析到有效课次，原课表已保留');
     }
+    await rdb.replaceImportedCourses(timetable, changedSubjects, events);
     return timetable;
   }
 
@@ -443,26 +473,21 @@ export class EasTimetableImporter {
     return out;
   }
 
-  /** 根据学年学期推导一个可编辑的开学日。 */
-  static startOfTerm(term: EasTermItem): number {
-    const yearMatch: RegExpExecArray | null = /(\d{4})-(\d{4})/.exec(term.yearCode);
-    const startYear: number = yearMatch === null ? new Date().getFullYear() : Number(yearMatch[1]);
-    const endYear: number = yearMatch === null ? startYear + 1 : Number(yearMatch[2]);
-    let month: number = 9;
-    let year: number = startYear;
-    if (term.termCode === '2') {
-      month = 3;
-      year = endYear;
-    } else if (term.termCode === '3') {
-      month = 7;
-      year = endYear;
-    } else if (term.termCode === '4') {
-      month = 1;
-      year = endYear;
+  /** Preserve a saved date only when the calendar is unavailable, and report that fallback. */
+  static async loadStartDate(rdb: RdbHelper, provider: EasDataProvider, session: EasSession,
+    term: EasTermItem): Promise<EasTermStartResult> {
+    const out: EasTermStartResult = new EasTermStartResult();
+    const remote: number | undefined = await provider.getStartDate(session, term);
+    if (remote !== undefined && Number.isFinite(remote) && remote > 0) {
+      out.startTime = EasTimetable.mondayMsOf(remote);
+      return out;
     }
-    const date: Date = new Date(year, month - 1, 1, 0, 0, 0, 0);
-    const firstDay: number = date.getDay() === 0 ? 7 : date.getDay();
-    date.setDate(1 + ((8 - firstDay) % 7) + 7);
-    return date.getTime();
+    const saved: EasTimetable | undefined = await rdb.getTimetableByEasCode(
+      session.campus.toString() + ':' + term.getCode());
+    if (saved !== undefined && Number.isFinite(saved.startTime) && saved.startTime > 0) {
+      out.startTime = EasTimetable.mondayMsOf(saved.startTime);
+      out.fromSaved = true;
+    }
+    return out;
   }
 }

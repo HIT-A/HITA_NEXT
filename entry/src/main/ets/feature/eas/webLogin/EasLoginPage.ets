@@ -31,6 +31,12 @@ export struct EasLoginPage {
   private webController: webview.WebviewController = new webview.WebviewController();
   private loginController: EasWebLoginController = new EasWebLoginController();
   private attachStarted: boolean = false;
+  private pageActive: boolean = false;
+  private callbackGeneration: number = 0;
+  private pageLoadTimer: number = -1;
+  private recoveryTimer: number = -1;
+  private recoveryPending: boolean = false;
+  private currentPageUrl: string = '';
 
   @State progressValue: number = 0;
   @State errorText: string = '';
@@ -38,6 +44,7 @@ export struct EasLoginPage {
   @State campusDisplayName: string = '统一认证登录';
   @State webReady: boolean = false;
   @State canGoBack: boolean = false;
+  @State recoveryBusy: boolean = false;
 
   // —— 原生 MFA 覆盖层 ——
   @State mfaState: EasMfaOverlayState = new EasMfaOverlayState();
@@ -45,6 +52,8 @@ export struct EasLoginPage {
   @State mfaBusy: boolean = false;
 
   aboutToAppear(): void {
+    this.pageActive = true;
+    this.callbackGeneration++;
     // 必须在 Web 组件开始导航前开启 Cookie。安卓版在 loadUrl 前完成同样的初始化，
     // 否则 WebVPN/CAS 的跨站 Set-Cookie 可能被 ArkWeb 丢弃。
     EasWebLoginController.configureWebCookies();
@@ -68,24 +77,161 @@ export struct EasLoginPage {
       this.errorText = message;
     };
     ctrl.onFinished = (session: EasSession) => {
+      const generation: number = this.callbackGeneration;
+      this.clearPageLoadTimer();
       const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
       EasSessionStore.getInstance().init(ctx).then(() => {
         return EasSessionStore.getInstance().load(session.campus);
       }).then((oldSession: EasSession | undefined) => {
+        if (!this.pageActive || generation !== this.callbackGeneration) {
+          return Promise.resolve();
+        }
         if (oldSession !== undefined && oldSession.sessionGeneration > 0) {
           session.sessionGeneration = oldSession.sessionGeneration + 1;
         }
         return EasSessionStore.getInstance().save(session);
       }).then(() => {
-        this.onLoggedIn(session);
+        if (this.pageActive && generation === this.callbackGeneration) {
+          this.onLoggedIn(session);
+        }
       }).catch(() => {
-        this.onLoggedIn(session);
+        if (this.pageActive && generation === this.callbackGeneration) {
+          this.onLoggedIn(session);
+        }
       });
     };
   }
 
   aboutToDisappear(): void {
     this.loginController.stop();
+    this.pageActive = false;
+    this.callbackGeneration++;
+    this.clearPageLoadTimer();
+    if (this.recoveryTimer >= 0) {
+      clearTimeout(this.recoveryTimer);
+      this.recoveryTimer = -1;
+    }
+  }
+
+  private clearPageLoadTimer(): void {
+    if (this.pageLoadTimer >= 0) {
+      clearTimeout(this.pageLoadTimer);
+      this.pageLoadTimer = -1;
+    }
+  }
+
+  private watchPageLoad(url: string): void {
+    this.clearPageLoadTimer();
+    this.currentPageUrl = url;
+    this.webReady = false;
+    this.pageLoadTimer = setTimeout(() => {
+      this.pageLoadTimer = -1;
+      if (!this.pageActive) {
+        return;
+      }
+      this.webReady = true;
+      this.recoveryPending = false;
+      this.recoveryBusy = false;
+      this.errorText = '页面加载时间较长，可刷新或重置网页登录';
+    }, 20000);
+  }
+
+  private pageEnded(url: string): void {
+    if (!this.pageActive) {
+      return;
+    }
+    if (this.recoveryPending && url === 'about:blank') {
+      this.completeRecovery();
+      return;
+    }
+    if (this.recoveryBusy || url !== this.currentPageUrl) {
+      return;
+    }
+    this.clearPageLoadTimer();
+    this.webReady = true;
+    this.updateWebNavigation();
+    this.loginController.notifyPageEnd(url);
+  }
+
+  private confirmRecovery(): void {
+    if (this.recoveryBusy) {
+      return;
+    }
+    this.getUIContext().getPromptAction().showDialog({
+      title: '重置网页登录',
+      message: '将清除本应用内网页的登录状态和缓存，其他网页登录可能需要重新登录。已导入的课表、课程和设置不会删除。',
+      buttons: [{ text: '取消', color: '#6B7A90' }, { text: '重置登录', color: '#2E86E8' }]
+    }).then((result) => {
+      if (result.index === 1 && this.pageActive) {
+        this.beginRecovery();
+      }
+    }).catch(() => {});
+  }
+
+  private beginRecovery(): void {
+    if (this.recoveryBusy || !this.pageActive) {
+      return;
+    }
+    this.callbackGeneration++;
+    this.loginController.stop();
+    this.recoveryBusy = true;
+    this.recoveryPending = true;
+    this.errorText = '';
+    this.mfaState = new EasMfaOverlayState();
+    try {
+      // Leave the authentication document before clearing storage, so its scripts
+      // cannot recreate old cookies while the reset is in progress.
+      this.webController.stop();
+      this.watchPageLoad('about:blank');
+      this.webController.loadUrl('about:blank');
+    } catch (e) {
+      this.clearPageLoadTimer();
+      this.recoveryPending = false;
+      this.recoveryBusy = false;
+      this.webReady = true;
+      this.errorText = '无法重置网页登录，请退出登录窗口后重试';
+    }
+  }
+
+  private async completeRecovery(): Promise<void> {
+    if (!this.recoveryPending || !this.pageActive) {
+      return;
+    }
+    this.recoveryPending = false;
+    this.clearPageLoadTimer();
+    const generation: number = this.callbackGeneration;
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = -1;
+      if (this.pageActive && generation === this.callbackGeneration) {
+        this.callbackGeneration++;
+        this.recoveryBusy = false;
+        this.webReady = true;
+        this.errorText = '重置网页登录超时，请退出登录窗口后重试';
+      }
+    }, 15000);
+    try {
+      await webview.WebCookieManager.clearAllCookies();
+      if (!this.pageActive || generation !== this.callbackGeneration) {
+        return;
+      }
+      webview.WebStorage.deleteAllData();
+      this.webController.removeCache(true);
+      this.recoveryBusy = false;
+      this.loginController.start(this.campusCode, this.studentType);
+      this.watchPageLoad(this.initialUrl);
+      this.webController.loadUrl(this.initialUrl);
+    } catch (e) {
+      if (this.pageActive && generation === this.callbackGeneration) {
+        this.recoveryBusy = false;
+        this.webReady = true;
+        this.errorText = '无法重置网页登录，请退出登录窗口后重试';
+      }
+    } finally {
+      if (generation === this.callbackGeneration && this.recoveryTimer >= 0) {
+        clearTimeout(this.recoveryTimer);
+        this.recoveryTimer = -1;
+      }
+    }
   }
 
   private updateWebNavigation(): void {
@@ -108,6 +254,7 @@ export struct EasLoginPage {
   private cancelLogin(): void {
     this.loginController.stop();
     this.onCancel();
+    this.aboutToDisappear();
   }
 
   build() {
@@ -165,9 +312,11 @@ export struct EasLoginPage {
         .flexShrink(0)
         .backgroundColor(Color.Transparent)
         .accessibilityText('刷新认证网页')
+        .enabled(!this.recoveryBusy)
         .onClick(() => {
           try {
-            this.webReady = false;
+            this.loginController.start(this.campusCode, this.studentType);
+            this.watchPageLoad(this.currentPageUrl);
             this.progressValue = 0;
             this.webController.refresh();
           } catch (e) {}
@@ -190,12 +339,19 @@ export struct EasLoginPage {
         .visibility(this.webReady ? Visibility.None : Visibility.Visible)
 
       // 错误提示条
-      if (this.errorText.length > 0) {
+      if (this.errorText.length > 0 || this.recoveryBusy) {
         Row() {
-          Text(this.errorText)
+          Text(this.recoveryBusy ? '正在重置网页登录' : this.errorText)
             .fontSize(12)
             .fontColor('#B91C1C')
             .layoutWeight(1)
+          if (!this.recoveryBusy) {
+            Button('重置登录')
+              .fontSize(12)
+              .fontColor(HitaColors.primary)
+              .backgroundColor(Color.Transparent)
+              .onClick(() => this.confirmRecovery())
+          }
           Text('✕')
             .fontSize(12)
             .fontColor('#B91C1C')
@@ -238,19 +394,24 @@ export struct EasLoginPage {
               hilog.info(DOMAIN, TAG, 'Web controller attached, starting EAS login: %{public}s', this.initialUrl);
               this.loginController.attachWeb(this.webController);
               this.loginController.start(this.campusCode, this.studentType);
+              this.watchPageLoad(this.initialUrl);
             })
             .onPageBegin((event) => {
+              if (!this.pageActive) {
+                return;
+              }
               const u: string = event !== undefined && event !== null ? event.url : '';
               this.progressValue = 0;
-              this.webReady = false;
+              if (this.recoveryBusy && u !== 'about:blank') {
+                return;
+              }
+              this.watchPageLoad(u);
               this.updateWebNavigation();
               this.loginController.notifyPageBegin(u);
             })
             .onPageEnd((event) => {
               const u: string = event !== undefined && event !== null ? event.url : '';
-              this.webReady = true;
-              this.updateWebNavigation();
-              this.loginController.notifyPageEnd(u);
+              this.pageEnded(u);
             })
             .onProgressChange((event) => {
               const p: number = event !== undefined && event !== null ? event.newProgress : 0;
@@ -266,6 +427,15 @@ export struct EasLoginPage {
                   errStr = String(event.error);
                 }
                 this.loginController.notifyLoadError(errStr);
+                if (event.request !== undefined && event.request.isMainFrame()) {
+                  this.clearPageLoadTimer();
+                  if (this.recoveryPending) {
+                    this.recoveryPending = false;
+                    this.recoveryBusy = false;
+                  }
+                  this.webReady = true;
+                  this.errorText = '认证页面加载失败，可刷新或重置网页登录';
+                }
               }
             })
             .onConsole((event) => {
@@ -306,6 +476,7 @@ export struct EasLoginPage {
           .padding({ left: 24, right: 24, top: 24, bottom: 24 })
           .borderRadius(18)
           .backgroundColor('#FFFFFF')
+          .hitTestBehavior(HitTestMode.None)
           .shadow({ radius: 18, color: '#18000000', offsetY: 6 });
         }
 

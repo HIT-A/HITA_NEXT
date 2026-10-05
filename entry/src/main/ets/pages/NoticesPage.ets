@@ -13,6 +13,8 @@ import { AppNotice, AppNoticeCenter } from '../feature/notice/AppNoticeCenter';
 struct NoticesPage {
   @State notices: AppNotice[] = [];
   @State loading: boolean = true;
+  @State refreshing: boolean = false;
+  @State errorMessage: string = '';
 
   async aboutToAppear(): Promise<void> {
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
@@ -23,13 +25,25 @@ struct NoticesPage {
     }
     // 有缓存时立即显示；没有缓存时保留加载态，避免把网络等待误报成空公告。
     this.loading = this.notices.length === 0;
+    await this.refreshNotices();
+  }
+
+  private async refreshNotices(): Promise<void> {
+    if (this.refreshing) {
+      return;
+    }
+    this.refreshing = true;
+    this.errorMessage = '';
+    const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     try {
       const fetched: AppNotice[] = await AppNoticeCenter.fetch(ctx);
       this.notices = AppNoticeCenter.activeNotices(fetched);
     } catch (e) {
-      // fetch 内部会回落缓存；这里只兜底处理页面生命周期中的异常。
+      this.errorMessage = this.notices.length > 0 ?
+        '公告更新失败，当前显示上次保存的内容' : '公告暂时无法加载';
     } finally {
       this.loading = false;
+      this.refreshing = false;
     }
   }
 
@@ -47,12 +61,42 @@ struct NoticesPage {
           .layoutWeight(1)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Button({ type: ButtonType.Circle }) {
+          if (this.refreshing) {
+            LoadingProgress()
+              .width(20)
+              .height(20)
+              .color('#3390EC')
+          } else {
+            SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+              .fontSize(20)
+              .fontColor(['#566276'])
+          }
+        }
+        .width(44)
+        .height(44)
+        .padding(0)
+        .backgroundColor('#F2F4F7')
+        .enabled(!this.refreshing)
+        .accessibilityText('刷新公告')
+        .onClick(() => {
+          this.refreshNotices();
+        })
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .backgroundColor('#FFFFFF')
       .border({ width: { bottom: 1 }, color: '#EAECF0' })
       .alignItems(VerticalAlign.Center)
+
+      if (this.errorMessage.length > 0) {
+        Text(this.errorMessage)
+          .fontSize(13)
+          .fontColor('#8C3A3A')
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+          .backgroundColor('#FDECEC')
+      }
 
       if (this.loading) {
         LoadingProgress()
@@ -61,7 +105,7 @@ struct NoticesPage {
           .color('#3390EC')
           .margin({ top: 80 })
       } else if (this.notices.length === 0) {
-        Text('暂无公告')
+        Text(this.errorMessage.length > 0 ? '暂未获取到公告' : '暂无公告')
           .fontSize(14)
           .fontColor('#888888')
           .margin({ top: 60 })
@@ -102,11 +146,11 @@ struct NoticesPage {
               .backgroundColor(notice.isCritical() ? '#FDECEC' : '#FFFFFF')
               .borderRadius(16)
             }
-          }, (notice: AppNotice) => notice.id)
+          }, (notice: AppNotice) => notice.renderKey())
         }
         .width('100%')
         .layoutWeight(1)
-        .padding({ left: 16, right: 16, top: 12 })
+        .padding({ left: 16, right: 16, top: 12, bottom: 16 })
         .scrollBar(BarState.Off)
       }
     }
