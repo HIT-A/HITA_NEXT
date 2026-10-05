@@ -50,8 +50,7 @@ export class TimetableDrawStyle {
   static gutterRatio: number = 0.11;
   /** 块外边距（源 1dp 量级，比例化）。 */
   static blockMargin: number = 3;
-  /** 安卓端使用高对比度实色课程卡片，标题与地点均使用白色。 */
-  static blockOpacity: number = 0.88;
+  static blockText: string = '#FFFFFF';
 
   static wrap(value: string, maxChars: number, maxLines: number): string[] {
     const clean: string = value.trim();
@@ -170,7 +169,7 @@ export class TimetablePlaceLabel {
 export function drawTimetablePlaces(ctx: CanvasRenderingContext2D, w: number, h: number,
   labels: TimetablePlaceLabel[], elapsedMs: number): number {
   ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = 'rgba(255,255,255,0.78)';
+  ctx.fillStyle = TimetableDrawStyle.blockText;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
   let nextDelay: number = -1;
@@ -200,6 +199,39 @@ export function argbToCss(argb: number, alpha: number): string {
   const g: number = (argb >> 8) & 0xFF;
   const b: number = argb & 0xFF;
   return 'rgba(' + r.toString() + ',' + g.toString() + ',' + b.toString() + ',' + alpha.toString() + ')';
+}
+
+function linearChannel(channel: number): number {
+  const value: number = channel / 255;
+  return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+}
+
+function blockLuminance(r: number, g: number, b: number): number {
+  return 0.2126 * linearChannel(r) + 0.7152 * linearChannel(g) + 0.0722 * linearChannel(b);
+}
+
+/** Keep saved hues, but darken pale cards for at least 4.5:1 contrast with white text. */
+export function timetableBlockColor(argb: number): number {
+  const source: number = argb === 0 ? 0xFF2E86E8 : argb;
+  const r: number = (source >> 16) & 0xFF;
+  const g: number = (source >> 8) & 0xFF;
+  const b: number = source & 0xFF;
+  let scale: number = 1;
+  if (blockLuminance(r, g, b) > 0.18) {
+    let low: number = 0;
+    let high: number = 1;
+    for (let i: number = 0; i < 8; i++) {
+      const mid: number = (low + high) / 2;
+      if (blockLuminance(r * mid, g * mid, b * mid) <= 0.18) {
+        low = mid;
+      } else {
+        high = mid;
+      }
+    }
+    scale = low;
+  }
+  return (0xFF000000 | (Math.floor(r * scale) << 16) |
+    (Math.floor(g * scale) << 8) | Math.floor(b * scale)) >>> 0;
 }
 
 /** 圆角矩形路径（不依赖 roundRect，用 moveTo/lineTo/quadraticCurveTo 拼角）。 */
@@ -449,12 +481,13 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     const x: number = gridLeft + (dow - 1) * colW + layout.lane * laneW + m;
     const bw: number = Math.max(12, laneW - m * 2);
     const radius: number = Math.max(8, Math.min(18, bw * 0.22));
-    const eventColor: number = ev.color === 0 ? 0xFF2E86E8 : ev.color;
-    const color: string = argbToCss(eventColor, TimetableDrawStyle.blockOpacity);
+    const eventColor: number = timetableBlockColor(ev.color);
+    // Opaque cards keep their contrast even over bright or detailed wallpapers.
+    const color: string = argbToCss(eventColor, 1);
     ctx.fillStyle = color;
     roundedRectPath(ctx, x, y, bw, bh, radius);
     ctx.fill();
-    ctx.strokeStyle = argbToCss(eventColor, 0.98);
+    ctx.strokeStyle = color;
     ctx.lineWidth = 1;
     roundedRectPath(ctx, x, y, bw, bh, radius);
     ctx.stroke();
@@ -502,7 +535,7 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     const titleLines: string[] = TimetableDrawStyle.wrap(ev.name === 'NULL' ? '' : ev.name,
       titleMaxChars, maxTitleLines);
     ctx.font = 'bold ' + titleFont.toString() + fontUnit;
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = TimetableDrawStyle.blockText;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     if (titleLines.length > 0) {
@@ -522,7 +555,7 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
       }
     }
     if (canShowPlace) {
-      ctx.fillStyle = 'rgba(255,255,255,0.78)';
+      ctx.fillStyle = TimetableDrawStyle.blockText;
       const placeFont: number = Math.round(10 * textScale);
       ctx.font = placeFont.toString() + fontUnit;
       ctx.textAlign = 'center';

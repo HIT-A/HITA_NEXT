@@ -1704,10 +1704,9 @@ struct Home {
           .backgroundColor(Color.Transparent)
 
           Button({ type: ButtonType.Circle }) {
-            Text('A')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.timetableTextColor);
+            SymbolGlyph($r('sys.symbol.paintpalette'))
+              .fontSize(20)
+              .fontColor([COLOR_PRIMARY]);
           }
           .width(44)
           .height(44)
@@ -1720,7 +1719,7 @@ struct Home {
           })
 
           Button({ type: ButtonType.Circle }) {
-            SymbolGlyph($r('sys.symbol.camera'))
+            SymbolGlyph($r('sys.symbol.picture'))
               .fontSize(20)
               .fontColor([COLOR_PRIMARY]);
           }

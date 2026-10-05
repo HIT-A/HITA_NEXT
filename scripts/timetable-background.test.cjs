@@ -17,7 +17,10 @@ test('timetable photo picker copies a gallery image and covers the page without 
 
   const home = read('pages/Home.ets');
   const tab = home.slice(home.indexOf('  tabTimetable()'), home.indexOf('  statusBanner('));
-  assert.match(tab, /sys\.symbol\.camera/);
+  assert.match(tab, /sys\.symbol\.picture/);
+  assert.match(tab, /sys\.symbol\.paintpalette/);
+  assert.doesNotMatch(tab, /sys\.symbol\.camera|Text\('A'\)/);
+  assert.match(tab, /this\.timetablePaletteOpen = !this\.timetablePaletteOpen/);
   assert.match(tab, /this\.onTimetableBackgroundTap\(\)/);
   assert.match(home, /text: '更换壁纸'/);
   assert.match(home, /text: '移除壁纸'/);

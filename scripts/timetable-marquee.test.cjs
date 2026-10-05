@@ -23,7 +23,8 @@ function load(file) {
 }
 const { placeMarqueeFrame, PLACE_MARQUEE_PAUSE_MS, PLACE_MARQUEE_SPEED } =
   load('feature/timetable/views/PlaceMarquee.ets');
-const { drawTimetableWeek, drawTimetablePlaces, TimetablePlaceLabel, timetableEventSpan } =
+const { drawTimetableWeek, drawTimetablePlaces, TimetablePlaceLabel, timetableEventSpan,
+  timetableBlockColor, argbToCss, TimetableDrawStyle } =
   load('feature/timetable/views/TimetableWeekDraw.ets');
 const { EasEventItem, EasTimetable } = load('common/model/timetable/TimetableModels.ets');
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 0.0001, `${actual} != ${expected}`);
@@ -77,6 +78,14 @@ function canvas() {
     'quadraticCurveTo', 'closePath', 'fill', 'stroke', 'setLineDash', 'save', 'restore', 'rect', 'clip']) {
     ctx[method] = (...args) => ctx.calls.push([method, ...args]);
   }
+  ctx.paints = [];
+  for (const method of ['fill', 'stroke', 'fillText']) {
+    const record = ctx[method];
+    ctx[method] = (...args) => {
+      ctx.paints.push({ method, color: method === 'stroke' ? ctx.strokeStyle : ctx.fillStyle, args });
+      record(...args);
+    };
+  }
   ctx.measureText = text => {
     ctx.calls.push(['measureText', text]);
     return { width: text.length * 7 };
@@ -99,6 +108,59 @@ function fixture() {
   second.to = second.from + 105 * 60000;
   return { timetable, events: [first, second] };
 }
+
+function luminance(argb) {
+  const linear = shift => {
+    const value = ((argb >>> shift) & 255) / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * linear(16) + 0.7152 * linear(8) + 0.0722 * linear(0);
+}
+
+test('saved pastel colors and custom colors retain readable white text without changing the model palette', () => {
+  const models = fs.readFileSync(path.join(root, 'common/model/timetable/TimetableModels.ets'), 'utf8');
+  const detail = fs.readFileSync(path.join(root, 'pages/TimetableDetailPage.ets'), 'utf8');
+  const colors = [...models.matchAll(/0xFF[0-9A-F]{6}/gi),
+    ...detail.matchAll(/0xFF[0-9A-F]{6}/gi)].map(match => Number(match[0]));
+  // Include arbitrary custom colors, signed ARGB, zero fallback and channel extremes.
+  for (let r = 0; r <= 255; r += 51) {
+    for (let g = 0; g <= 255; g += 51) {
+      for (let b = 0; b <= 255; b += 51) colors.push(0xFF000000 | r << 16 | g << 8 | b);
+    }
+  }
+  colors.push(0, 0xFFFFFFFF, 0xFF14213D);
+  for (const color of colors) {
+    const result = timetableBlockColor(color);
+    assert.ok(1.05 / (luminance(result) + 0.05) >= 4.5, result.toString(16));
+    assert.equal(result >>> 24, 255);
+    assert.equal(timetableBlockColor(result), result);
+    if (color !== 0 && luminance(color) <= 0.18) assert.equal(result, color >>> 0);
+  }
+  assert.equal(timetableBlockColor(0), timetableBlockColor(0xFF2E86E8));
+});
+
+test('cards are opaque on both default and wallpaper backgrounds and classroom text stays white', () => {
+  const { timetable, events } = fixture();
+  events[0].color = 0xFFFFB74D;
+  events[1].color = 0xFF81C784;
+  const originalColors = events.map(event => event.color);
+  for (const fillPage of [true, false]) {
+    const base = canvas();
+    const labels = drawTimetableWeek(base, 380, 830, timetable, events, 1, false, 50, 0, fillPage);
+    const fills = base.paints.filter(paint => paint.method === 'fill');
+    assert.deepEqual(fills.map(paint => paint.color),
+      originalColors.map(color => argbToCss(timetableBlockColor(color), 1)));
+    const firstCard = base.paints.findIndex(paint => paint.method === 'fill');
+    const cardText = base.paints.slice(firstCard).filter(paint => paint.method === 'fillText');
+    assert.ok(cardText.length >= 3);
+    assert.ok(cardText.every(paint => paint.color === '#FFFFFF'));
+    const overlay = canvas();
+    drawTimetablePlaces(overlay, 380, 830, labels, 1600);
+    assert.ok(overlay.paints.length > 0);
+    assert.ok(overlay.paints.every(paint => paint.color === TimetableDrawStyle.blockText));
+    assert.deepEqual(events.map(event => event.color), originalColors);
+  }
+});
 
 test('static layout draws short classrooms but caches only overflowing labels for animation', () => {
   const { timetable, events } = fixture();
