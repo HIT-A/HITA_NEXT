@@ -78,8 +78,8 @@ HitaNEXT/
 │       │   ├── feature/timetable/    # 周课表绘制、课表选择与 ICS 导入
 │       │   └── common/               # 数据库、模型与通用工具
 │       └── resources/                # 字符串、颜色、图标等资源
-├── docs/                             # 迁移记录、接口笔记与设备调试文档
-├── scripts/                          # 静态检查脚本
+├── docs/                             # 使用、构建验证与图标设计文档
+├── scripts/                          # 构建工具、静态检查与回归测试
 ├── build-profile.json5
 └── hvigorfile.ts
 ```
@@ -92,6 +92,10 @@ HitaNEXT/
 - `entry/src/main/ets/feature/eas/EasTimetableImporter.ets`：远端课程到本地课表的转换与写入。
 - `entry/src/main/ets/feature/timetable/views/TimetableWeekDraw.ets`：周课表网格及课程卡片绘制。
 - `entry/src/main/ets/common/db/RdbHelper.ets`：本地课表、科目和事件数据库。
+
+仓库仅维护当前鸿蒙实现、应用资源、构建工具和测试，不收录安卓源码副本、
+反编译材料或临时抓取截图。`scratch/`、`.analysis/` 和 `HITA_Android_src/`
+属于本地参考目录，已加入 `.gitignore`。
 
 ## 开发与构建
 
@@ -140,6 +144,12 @@ entry/build/default/outputs/default/
 ```bash
 node scripts/static-checks.cjs
 ```
+
+使用和验证说明：
+
+- [使用说明](docs/usage.md)
+- [构建与设备验证](docs/DEVICE-RUNBOOK.md)
+- [应用功能边界与回归检查](docs/production-surface.md)
 
 ## 数据与隐私
 

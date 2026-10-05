@@ -15,3 +15,8 @@
 /.cxx
 /.test
 /.test_web
+
+# Local reference downloads and reverse-engineering workspace
+/scratch/
+/.analysis/
+/HITA_Android_src/

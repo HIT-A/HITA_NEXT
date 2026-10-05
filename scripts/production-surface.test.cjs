@@ -113,7 +113,7 @@ test('academic errors expose only known user messages, never internal diagnostic
   for (const detail of [
     'SQLite: Generic error',
     'HTTP 500: <html>server error</html>',
-    'EAS_SCORES_ENDPOINT_NOT_CAPTURED: docs/eas-api-capture.md',
+    'EAS_SCORES_ENDPOINT_NOT_CAPTURED: internal/endpoint-config.txt',
     'C:\\Users\\developer\\project\\internal.ets',
     '',
     'unexpected response'
@@ -137,7 +137,7 @@ test('import results omit course matching diagnostics and retain internal logs',
   assert.match(importer, /message = '已导入 ' \+ readback\.length\.toString\(\) \+ ' 个课次'/);
   assert.match(importer, /EasUserMessages\.fromError/);
   const provider = fs.readFileSync(path.join(etsRoot, 'feature/eas/EasDataProvider.ets'), 'utf8');
-  assert.doesNotMatch(provider, /EAS_SCORES_ENDPOINT_NOT_CAPTURED|请按 docs\/eas-api-capture/);
+  assert.doesNotMatch(provider, /EAS_SCORES_ENDPOINT_NOT_CAPTURED|抓包回填/);
 });
 
 test('new courses use an explicit/current timetable, never a generated fallback', () => {

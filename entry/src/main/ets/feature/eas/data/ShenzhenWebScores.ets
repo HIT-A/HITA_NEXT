@@ -1,7 +1,7 @@
 /**
  * ShenzhenWebScores.ets — 深圳成绩 JSON 解析（1:1 移植新版 ShenzhenWebScoreParser.java）。
  *
- * 出处：.analysis/decomp/cn/limpu/hita/data/source/web/eas/ShenzhenWebScoreParser.java
+ * 成绩字段与回退顺序参考 HITA Android。
  * 返回形态：{code, msg(message 兜底), content.list[]}；条目字段：
  *   xscj/zzcj/zpcj（三选一成绩文本）、kcdm、kcmc、xf、xs、kcxz/kcxzen、kclb/kclben、
  *   yxmc、khfs、xnxqmc（缺失时回填请求学期 term.name）

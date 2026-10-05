@@ -1,10 +1,5 @@
 /**
- * EasSession.ets — 会话模型，对应新版 HITA 逆向规格 EASToken（ArkTS 移植）。
- *
- * 出处：
- *  - .analysis/decomp/cn/limpu/hita/data/model/eas/EASToken.java
- *  - .analysis/decomp/cn/limpu/hita/data/model/eas/EASToken$Companion.java
- *  - .analysis/decomp/cn/limpu/hita/data/model/eas/EASToken$Campus.java / EASToken$TYPE.java
+ * EasSession.ets — 教务会话模型，兼容 HITA Android 的 EASToken 数据语义。
  *
  * 登录主产物是 webCookies（门户 Cookie）；cookies 为自有后端/旧式会话（本整合可空）。
  */

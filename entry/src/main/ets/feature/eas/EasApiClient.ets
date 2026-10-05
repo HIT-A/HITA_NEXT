@@ -1,11 +1,11 @@
 /**
- * EasApiClient.ets — 教务数据 HTTP 客户端：Cookie 注入 / 失效判定（对应蓝本 §4.4/§4.5）。
+ * EasApiClient.ets — 教务数据 HTTP 客户端：Cookie 注入与会话失效判定。
  *
- * 数据端点形态（逆向规格 §2.2.6）：
+ * 校区数据端点形态：
  *  - 深圳：JSON（ParsedShenzhenWebScores: code/msg/content.list[] …）
  *  - 威海：webvpn 编码前缀下的端点（kjscx/queryJxlListBySjid、cjcx/queryQmcj …），带 JSESSIONID
  *  - 本部：ivpn 内网域名 + CAS 会话（HIT / JSESSIONID）
- * ⚠️ 各校区完整接口清单待 M0 真机抓包固化（docs/eas-api-capture.md）。
+ * 请求路径由 EasDataProvider 配置。
  */
 import { http } from '@kit.NetworkKit';
 import { EasCampusConfig, EasCampusUrls, EasUserAgent } from './webLogin/EasWebLoginConfig';

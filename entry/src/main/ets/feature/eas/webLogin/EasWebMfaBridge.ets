@@ -1,14 +1,8 @@
 /**
- * EasWebMfaBridge.ets — 统一认证 MFA/二次验证桥接（对应蓝本 §2.2.5 / §4.1）。
+ * EasWebMfaBridge.ets — 统一认证 MFA/二次验证桥接。
  *
- * 注入 JS 全文对齐反编译（笔记 docs/eas-page-predicate-notes.md §7/§9）：
- *  - detect：WebViewLoginActivity L1337 检测脚本（逐字）
- *  - submit：submitNativeMfaInput L4781-4793 注入体（逐字语义 + 结果 {ok,error,inputId}）
- *  - switch：switchNativeMfaMethod L4795-4825 注入体（调用 mobileChangeOtherType）
- *  - send：triggerNativeMfaSendCode L4827-4843 注入体（逐字）
- * 覆盖层状态模型对应 MfaOverlayState.java（见本文件 EasMfaOverlayState）。
- *
- * 做法 = “原生 UI 输入 → runJavaScript 填表并点击”，与平台 API 解耦 → ArkWeb 可复刻。
+ * 验证码检测、提交、发送及验证方式切换参考 HITA Android。
+ * 原生输入通过 ArkWeb runJavaScript 填入校方网页并触发对应操作。
  */
 import { webview } from '@kit.ArkWeb';
 

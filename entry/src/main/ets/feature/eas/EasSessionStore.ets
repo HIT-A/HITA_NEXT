@@ -1,8 +1,7 @@
 /**
- * EasSessionStore.ets — EAS 会话持久化（ArkTS preferences，对应蓝本 §4.4 简化版）。
+ * EasSessionStore.ets — 使用 Preferences 持久化教务会话。
  *
- * 蓝本建议 RDB 表 eas_session + HUKS 加密（后续升级）；M1 先用 preferences 落 JSON，
- * 敏感字段（cookie/token）在加密接入前以文档标注 TODO。
+ * Cookie 和 token 当前以 JSON 保存，尚未接入 HUKS 加密。
  */
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';

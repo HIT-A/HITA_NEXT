@@ -1,13 +1,8 @@
 /**
  * EasWebLoginConfig.ets — 三校区 CampusConfig 表（ArkTS 侧直接作为配置文件）。
  *
- * 出处（逐字对齐反编译常量）：
- *  - .analysis/decomp/cn/limpu/hita/ui/eas/login/WebViewLoginActivity$Companion$CampusUrls.java
- *  - .analysis/decomp/cn/limpu/hita/ui/eas/login/WebViewLoginActivity$CampusWebConfig.java
- *  - .analysis/decomp/cn/limpu/hita/ui/eas/login/WebViewLoginActivity.java L229（桌面 UA）
- *  - WebLoginSuccessPolicy.java（shenzhenCookieProbeUrls）
- *
- * 对应蓝本 §2.2.3。判定谓词见 EasWebLoginProbe.ets。
+ * 校区 URL、User-Agent 和 Cookie 探针配置参考 HITA Android。
+ * 页面与会话判定见 EasWebLoginProbe.ets。
  */
 import { EasCampus } from '../EasSession';
 

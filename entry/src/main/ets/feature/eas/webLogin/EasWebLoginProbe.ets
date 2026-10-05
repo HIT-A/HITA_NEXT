@@ -1,18 +1,8 @@
 /**
  * EasWebLoginProbe.ets — URL/页面/会话判定谓词集（纯函数，与平台无关，可单测回归）。
  *
- * 出处（行为逐字还原；行号 = WebViewLoginActivity.java / 各 *.java 反编译）：
- *  - WebLoginSuccessPolicy.java：isShenzhenAuthenticatedPage / isWeihaiAuthenticatedPage /
- *    shenzhenCookieProbeUrls / shenzhenWebBaseUrl
- *  - EASToken$Companion.java：hasShenzhenWebSessionCookies
- *  - ShenzhenWebAutoLogin.java：isProxyRoot / reauthenticationUrl / normalizeStudentType
- *  - WebViewLoginActivity.java：
- *    hasRequiredCookies L2339-2426 / hasUrlJsession L2428-2446 / hasWeihaiVpnTicket L2452-2489 /
- *    parseCookies L3483-3592 / extractJsessionidFromUrl L1488-1512 /
- *    isSuccessPage L2845-3013 / isJwtsPage L2689-2759 / isPortalHomePage L2771-2837 /
- *    isTrustPortalPage L3015-3033 / isMfaPage L2761-2769 / isShenzhenProxyJwPage L2839-2843
- *
- * 整理笔记：docs/eas-cookie-finish-notes.md（§0-13、§A-C）、docs/eas-page-predicate-notes.md
+ * 判定规则参考 HITA Android 的 WebLoginSuccessPolicy、ShenzhenWebAutoLogin
+ * 和 WebViewLoginActivity，并适配鸿蒙端的 Cookie 采集流程。
  */
 import { EasCampus } from '../EasSession';
 import { EasCampusUrls } from './EasWebLoginConfig';
@@ -86,7 +76,7 @@ function equalsIgnoreCase(a: string, b: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * 深圳 Web 会话成立（EASToken$Companion L28-63 逐字语义，**修正蓝本表述**）：
+ * 深圳 Web 会话成立：
  * `(!js.isBlank() && !route.isBlank()) || !session.isBlank()`
  * —— 直连会话需要 JSESSIONID + route；代理会话可由非空 SESSION 单独成立。
  */
@@ -256,7 +246,6 @@ export function isShenzhenAuthenticatedPage(url: string, cookies: Map<string, st
 /**
  * 威海成功页（L164-317）：path 含 /http/ 或 kbcx|cjcx|kjscx|query|index（成功路径集合），
  * 且非登录页（logincas、endsWith /login、/login/），且含 wengine_vpn_ticket* key 且 JSESSIONID 非空。
- * ⚠️ 该文件 CFR 控制流存在多义（真机校准项，见笔记 D）。
  */
 export function isWeihaiAuthenticatedPage(url: string, cookies: Map<string, string>): boolean {
   const path: string = pathOf(url);

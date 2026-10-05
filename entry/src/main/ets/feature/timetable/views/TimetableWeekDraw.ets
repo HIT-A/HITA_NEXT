@@ -1,7 +1,7 @@
 /**
  * TimetableWeekDraw.ets — 课表周视图绘制模块（Canvas 纯函数，状态由宿主页面持有）。
  *
- * 语义依据 docs/eas-timetable-view-notes.md（HITA_X TimeTableView 几何还原）：
+ * 周视图时间轴与课程布局参考 HITA Android：
  *  - 7 等分列；时间轴 08:00–23:00，网格每小时一格；
  *  - 事件块按真实时刻分钟定位：yTop = minutesFromAxisStart/60 * hourH，
  *    高 = durationMinutes/60 * hourH；x=(dow-1)*colW（dow 周一=1）；
