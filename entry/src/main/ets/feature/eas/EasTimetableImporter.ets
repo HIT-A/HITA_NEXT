@@ -31,6 +31,11 @@ export class EasImportResult {
   eventCount: number = 0;
 }
 
+export class EasTermStartResult {
+  startTime: number = 0;
+  fromSaved: boolean = false;
+}
+
 export class EasTimetableImporter {
   private static readonly BENBU_TIMES: number[][] = [
     [8, 0, 8, 50], [8, 55, 9, 45], [10, 5, 10, 55], [11, 0, 11, 50],
@@ -71,11 +76,17 @@ export class EasTimetableImporter {
       }
       let term: EasTermItem = terms[0];
       if (selectedTerm !== undefined) {
+        let found: boolean = false;
         for (let i: number = 0; i < terms.length; i++) {
           if (terms[i].equalsKey(selectedTerm)) {
             term = terms[i];
+            found = true;
             break;
           }
+        }
+        if (!found) {
+          result.message = '所选学期已不可用，请重新选择';
+          return result;
         }
       } else {
         for (let i: number = 0; i < terms.length; i++) {
@@ -86,6 +97,15 @@ export class EasTimetableImporter {
         }
       }
       result.term = term;
+      const start: EasTermStartResult = startTimeMs === undefined ?
+        await EasTimetableImporter.loadStartDate(rdb, provider, session, term) : new EasTermStartResult();
+      if (startTimeMs !== undefined && Number.isFinite(startTimeMs) && startTimeMs > 0) {
+        start.startTime = EasTimetable.mondayMsOf(startTimeMs);
+      }
+      if (!Number.isFinite(start.startTime) || start.startTime <= 0) {
+        result.message = '未能获取开学日期，请在导入课表中手动选择';
+        return result;
+      }
       const courses: EasCourseItem[] = await provider.getTimetableOfTerm(session, term);
       result.courseCount = courses.length;
       if (courses.length === 0) {
@@ -111,7 +131,7 @@ export class EasTimetableImporter {
         }
       }
       const timetable: EasTimetable = await EasTimetableImporter.saveCourses(rdb, session, term, courses, schedule,
-        startTimeMs);
+        start.startTime);
       result.timetable = timetable;
       const readback: EasEventItem[] = await rdb.getEventsOfTimetable(timetable.id);
       result.eventCount = readback.length;
@@ -123,6 +143,9 @@ export class EasTimetableImporter {
       }
       result.success = true;
       result.message = '已导入 ' + readback.length.toString() + ' 个课次';
+      if (start.fromSaved) {
+        result.message += '，开学日期沿用本地设置，请核对';
+      }
       return result;
     } catch (e) {
       const text: string = e instanceof Error ? e.message : String(e);
@@ -133,7 +156,7 @@ export class EasTimetableImporter {
   }
 
   private static async saveCourses(rdb: RdbHelper, session: EasSession, term: EasTermItem,
-    courses: EasCourseItem[], schedule: EasTimePeriodInDay[], startTimeMs?: number): Promise<EasTimetable> {
+    courses: EasCourseItem[], schedule: EasTimePeriodInDay[], startTimeMs: number): Promise<EasTimetable> {
     const code: string = session.campus.toString() + ':' + term.getCode();
     let timetable: EasTimetable | undefined = await rdb.getTimetableByEasCode(code);
     if (timetable === undefined) {
@@ -141,8 +164,7 @@ export class EasTimetableImporter {
       timetable.code = code;
     }
     timetable.name = term.name;
-    timetable.startTime = startTimeMs !== undefined && startTimeMs > 0 ? startTimeMs :
-      EasTimetableImporter.startOfTerm(term);
+    timetable.startTime = EasTimetable.mondayMsOf(startTimeMs);
     let maxWeek: number = 25;
     for (let i = 0; i < courses.length; i++) {
       for (let j = 0; j < courses[i].weekNumbers.length; j++) {
@@ -445,29 +467,21 @@ export class EasTimetableImporter {
     return out;
   }
 
-  /** 根据学年学期推导一个可编辑的开学日。 */
-  static startOfTerm(term: EasTermItem): number {
-    const yearMatch: RegExpExecArray | null = /(\d{4})-(\d{4})/.exec(term.yearCode);
-    const startYear: number = yearMatch === null ? new Date().getFullYear() : Number(yearMatch[1]);
-    const endYear: number = yearMatch === null ? startYear + 1 : Number(yearMatch[2]);
-    let month: number = 9;
-    let year: number = startYear;
-    if (term.termCode !== '2' && term.termCode !== '3' && term.termCode !== '4') {
-      return EasTimetable.autumnTermStart(startYear);
+  /** Preserve a saved date only when the calendar is unavailable, and report that fallback. */
+  static async loadStartDate(rdb: RdbHelper, provider: EasDataProvider, session: EasSession,
+    term: EasTermItem): Promise<EasTermStartResult> {
+    const out: EasTermStartResult = new EasTermStartResult();
+    const remote: number | undefined = await provider.getStartDate(session, term);
+    if (remote !== undefined && Number.isFinite(remote) && remote > 0) {
+      out.startTime = EasTimetable.mondayMsOf(remote);
+      return out;
     }
-    if (term.termCode === '2') {
-      month = 3;
-      year = endYear;
-    } else if (term.termCode === '3') {
-      month = 7;
-      year = endYear;
-    } else if (term.termCode === '4') {
-      month = 1;
-      year = endYear;
+    const saved: EasTimetable | undefined = await rdb.getTimetableByEasCode(
+      session.campus.toString() + ':' + term.getCode());
+    if (saved !== undefined && Number.isFinite(saved.startTime) && saved.startTime > 0) {
+      out.startTime = EasTimetable.mondayMsOf(saved.startTime);
+      out.fromSaved = true;
     }
-    const date: Date = new Date(year, month - 1, 1, 0, 0, 0, 0);
-    const firstDay: number = date.getDay() === 0 ? 7 : date.getDay();
-    date.setDate(1 + ((8 - firstDay) % 7) + 7);
-    return date.getTime();
+    return out;
   }
 }

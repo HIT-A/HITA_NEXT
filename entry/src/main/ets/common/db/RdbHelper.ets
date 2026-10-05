@@ -73,7 +73,6 @@ export class RdbHelper {
     await this.execSql(CREATE_SUBJECT);
     await this.execSql(CREATE_EVENTS);
     await this.repairLegacyWeihaiTimetables();
-    await this.repairLegacyAutumnTermStart();
   }
 
   private s(): relationalStore.RdbStore {
@@ -177,53 +176,6 @@ export class RdbHelper {
       }
       hilog.info(DOMAIN, TAG, 'repaired legacy Weihai timetable=%{public}s events=%{public}d',
         timetable.id, events.length);
-    }
-  }
-
-  /**
-   * 早期版本把秋季学期默认开学日算成 9 月第二个周一（2026 年为 9 月 14 日），
-   * 导致整张课表晚两周。仍停留在旧默认值的教务课表整体平移到新的开学日。
-   */
-  private async repairLegacyAutumnTermStart(): Promise<void> {
-    const timetables: EasTimetable[] = await this.getTimetables();
-    for (let i: number = 0; i < timetables.length; i++) {
-      const timetable: EasTimetable = timetables[i];
-      const match: RegExpExecArray | null = /:(\d{4})-\d{4}0?1$/.exec(timetable.code);
-      if (match === null) {
-        continue;
-      }
-      const year: number = Number(match[1]);
-      const legacy: Date = new Date(year, 8, 1, 0, 0, 0, 0);
-      const firstDay: number = legacy.getDay() === 0 ? 7 : legacy.getDay();
-      legacy.setDate(1 + ((8 - firstDay) % 7) + 7);
-      const delta: number = EasTimetable.autumnTermStart(year) - legacy.getTime();
-      if (timetable.startTime !== legacy.getTime() || delta === 0) {
-        continue;
-      }
-      const manualSubjects: Set<string> = new Set<string>();
-      const subjects: EasTermSubject[] = await this.getSubjectsOfTimetable(timetable.id);
-      for (let j: number = 0; j < subjects.length; j++) {
-        if (subjects[j].field === 'manual') {
-          manualSubjects.add(subjects[j].id);
-        }
-      }
-      const events: EasEventItem[] = await this.getEventsOfTimetable(timetable.id);
-      let shifted: number = 0;
-      for (let j: number = 0; j < events.length; j++) {
-        const event: EasEventItem = events[j];
-        if (event.type !== EasEventType.CLASS || manualSubjects.has(event.subjectId)) {
-          continue;
-        }
-        event.from += delta;
-        event.to += delta;
-        await this.saveEvent(event);
-        shifted++;
-      }
-      timetable.startTime += delta;
-      timetable.endTime += delta;
-      await this.saveTimetable(timetable);
-      hilog.info(DOMAIN, TAG, 'shifted autumn term start timetable=%{public}s events=%{public}d',
-        timetable.id, shifted);
     }
   }
 

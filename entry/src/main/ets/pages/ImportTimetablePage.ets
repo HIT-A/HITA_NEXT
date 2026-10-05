@@ -1,5 +1,6 @@
 /** Android-style timetable import configuration page. */
 import { common } from '@kit.AbilityKit';
+import { RdbHelper } from '../common/db/RdbHelper';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
@@ -9,7 +10,7 @@ import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
 import { EasDataProvider } from '../feature/eas/EasDataProvider';
 import { EasUserMessages } from '../feature/eas/EasUserMessages';
-import { EasImportResult, EasTimetableImporter } from '../feature/eas/EasTimetableImporter';
+import { EasImportResult, EasTermStartResult, EasTimetableImporter } from '../feature/eas/EasTimetableImporter';
 import { EasTermItem } from '../feature/eas/model/EasModels';
 import { EasTimeInDay, EasTimePeriodInDay, EasTimetable } from '../common/model/timetable/TimetableModels';
 import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
@@ -27,7 +28,9 @@ const TEXT_SECONDARY: string = '#4E5C72';
 struct ImportTimetablePage {
   @State terms: EasTermItem[] = [];
   @State selectedTermIndex: number = -1;
-  @State startTime: number = Date.now();
+  @State startTime: number = 0;
+  @State detailsLoading: boolean = false;
+  @State dateNotice: string = '';
   @State schedule: EasTimePeriodInDay[] = [];
   @State loading: boolean = true;
   @State importing: boolean = false;
@@ -37,6 +40,7 @@ struct ImportTimetablePage {
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
   private session: EasSession | undefined = undefined;
   private pageScroller: Scroller = new Scroller();
+  private detailsGeneration: number = 0;
 
   async aboutToAppear(): Promise<void> {
     await this.load();
@@ -69,25 +73,64 @@ struct ImportTimetablePage {
           break;
         }
       }
-      const term: EasTermItem | undefined = this.selectedTerm();
-      this.startTime = term === undefined ? Date.now() : ImportTimetablePage.startOfTerm(term);
-      this.schedule = ImportTimetablePage.defaultSchedule(this.session.campus);
-      if (this.session.campus === EasCampus.SHENZHEN && term !== undefined) {
-        try {
-          const remote: EasTimePeriodInDay[] = await provider.getShenzhenScheduleStructure(
-            this.session as EasSession, term);
-          if (remote.length > 0) {
-            this.schedule = remote;
-          }
-        } catch (e) {
-          // Keep the local fallback if the optional schedule endpoint is unavailable.
-        }
-      }
+      await this.loadTermDetails();
     } catch (e) {
       this.error = EasUserMessages.fromError(e instanceof Error ? e.message : String(e),
         '无法加载课表信息，请稍后重试');
     } finally {
       this.loading = false;
+    }
+  }
+
+  aboutToDisappear(): void {
+    this.detailsGeneration++;
+  }
+
+  private async loadTermDetails(): Promise<void> {
+    const generation: number = ++this.detailsGeneration;
+    const term: EasTermItem | undefined = this.selectedTerm();
+    const session: EasSession | undefined = this.session;
+    this.startTime = 0;
+    this.dateNotice = '';
+    this.error = '';
+    if (term === undefined || session === undefined) {
+      this.detailsLoading = false;
+      return;
+    }
+    this.detailsLoading = true;
+    this.schedule = ImportTimetablePage.defaultSchedule(session.campus);
+    try {
+      const rdb: RdbHelper = RdbHelper.getInstance();
+      await rdb.init(this.getUIContext().getHostContext() as common.Context);
+      const provider: EasDataProvider = new EasDataProvider(new EasApiClient());
+      const start: EasTermStartResult = await EasTimetableImporter.loadStartDate(rdb, provider, session, term);
+      let schedule: EasTimePeriodInDay[] = ImportTimetablePage.defaultSchedule(session.campus);
+      if (session.campus === EasCampus.SHENZHEN) {
+        try {
+          const remote: EasTimePeriodInDay[] = await provider.getShenzhenScheduleStructure(session, term);
+          if (remote.length > 0) {
+            schedule = remote;
+          }
+        } catch (e) {
+          // The optional bell schedule does not invalidate the calendar date.
+        }
+      }
+      if (generation !== this.detailsGeneration) {
+        return;
+      }
+      this.startTime = start.startTime;
+      this.schedule = schedule;
+      this.dateNotice = start.fromSaved ? '校历暂不可用，已保留本地日期，请核对' :
+        start.startTime > 0 ? '' : '未获取到开学日期，请手动选择';
+    } catch (e) {
+      if (generation === this.detailsGeneration) {
+        this.error = EasUserMessages.fromError(e instanceof Error ? e.message : String(e),
+          '无法读取教务校历，请稍后重试或手动选择日期');
+      }
+    } finally {
+      if (generation === this.detailsGeneration) {
+        this.detailsLoading = false;
+      }
     }
   }
 
@@ -99,7 +142,7 @@ struct ImportTimetablePage {
   }
 
   private chooseTerm(): void {
-    if (this.terms.length === 0) {
+    if (this.terms.length === 0 || this.importing) {
       return;
     }
     const range: string[] = [];
@@ -116,36 +159,31 @@ struct ImportTimetablePage {
           return;
         }
         this.selectedTermIndex = index;
-        const term: EasTermItem | undefined = this.selectedTerm();
-        if (term !== undefined) {
-          this.startTime = ImportTimetablePage.startOfTerm(term);
-          if (this.session !== undefined && this.session.campus === EasCampus.SHENZHEN) {
-            try {
-              const remote: EasTimePeriodInDay[] = await new EasDataProvider(new EasApiClient())
-                .getShenzhenScheduleStructure(this.session as EasSession, term);
-              if (remote.length > 0) {
-                this.schedule = remote;
-              }
-            } catch (e) {
-            }
-          }
-        }
+        await this.loadTermDetails();
       }
     });
   }
 
   private chooseStartDate(): void {
+    if (this.detailsLoading || this.importing) {
+      return;
+    }
+    const generation: number = this.detailsGeneration;
     this.getUIContext().showDatePickerDialog({
-      selected: new Date(this.startTime),
+      selected: this.startTime > 0 ? new Date(this.startTime) : new Date(),
       onDateAccept: (date: Date) => {
-        const selected: Date = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
-        this.startTime = selected.getTime();
+        if (generation !== this.detailsGeneration || this.importing) {
+          return;
+        }
+        this.startTime = EasTimetable.mondayMsOf(date.getTime());
+        this.dateNotice = '';
+        this.error = '';
       }
     });
   }
 
   private editPeriod(index: number): void {
-    if (index < 0 || index >= this.schedule.length) {
+    if (this.detailsLoading || this.importing || index < 0 || index >= this.schedule.length) {
       return;
     }
     const period: EasTimePeriodInDay = this.schedule[index];
@@ -196,7 +234,8 @@ struct ImportTimetablePage {
   }
 
   private async import(): Promise<void> {
-    if (this.importing || this.selectedTerm() === undefined || this.session === undefined) {
+    if (this.importing || this.detailsLoading || this.startTime <= 0 ||
+      this.selectedTerm() === undefined || this.session === undefined) {
       return;
     }
     this.importing = true;
@@ -302,7 +341,8 @@ struct ImportTimetablePage {
           .borderRadius(18)
           .height(36)
           .padding({ left: 16, right: 16 })
-          .enabled(!this.importing && this.selectedTerm() !== undefined)
+          .enabled(!this.importing && !this.loading && !this.detailsLoading &&
+            this.startTime > 0 && this.selectedTerm() !== undefined)
           .onClick(() => this.import());
       }
       .width('100%')
@@ -358,18 +398,21 @@ struct ImportTimetablePage {
   private dateCard() {
     Row() {
       Column() {
-        Text('开学日期')
+        Text('开学日期 · 第一教学周周一')
           .fontSize(13)
           .fontColor(TEXT_SECONDARY);
-        Text(ImportTimetablePage.dateText(this.startTime))
+        Text(this.detailsLoading ? '读取校历中' : this.startTime > 0 ?
+          ImportTimetablePage.dateText(this.startTime) : '请选择日期')
           .fontSize(18)
           .fontWeight(FontWeight.Medium)
           .fontColor(TEXT_PRIMARY)
           .margin({ top: 6 });
-        Text('点击调整，课程日期会同步平移')
-          .fontSize(12)
-          .fontColor(TEXT_SECONDARY)
-          .margin({ top: 4 });
+        if (this.dateNotice.length > 0) {
+          Text(this.dateNotice)
+            .fontSize(12)
+            .fontColor('#B45309')
+            .margin({ top: 4 });
+        }
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start);
@@ -456,10 +499,6 @@ struct ImportTimetablePage {
   private static dateText(timestamp: number): string {
     const d: Date = new Date(timestamp);
     return d.getFullYear().toString() + '年' + (d.getMonth() + 1).toString() + '月' + d.getDate().toString() + '日';
-  }
-
-  private static startOfTerm(term: EasTermItem): number {
-    return EasTimetableImporter.startOfTerm(term);
   }
 
   private static defaultSchedule(campus: EasCampus): EasTimePeriodInDay[] {

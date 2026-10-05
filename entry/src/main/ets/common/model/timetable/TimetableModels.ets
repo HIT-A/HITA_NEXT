@@ -224,11 +224,6 @@ export class EasTimetable {
     return d.getTime() - (dow - 1) * DAY_MILLIS;
   }
 
-  /** 秋季学期默认开学日：9 月 1 日所在周的周一（2026 年为 8 月 31 日）。 */
-  static autumnTermStart(year: number): number {
-    return EasTimetable.mondayMsOf(new Date(year, 8, 1, 0, 0, 0, 0).getTime());
-  }
-
   /** 星期几：周一=1 … 周日=7（对应 TimeTools.getDow）。 */
   static dowOfMs(ts: number): number {
     const d: Date = new Date(ts);

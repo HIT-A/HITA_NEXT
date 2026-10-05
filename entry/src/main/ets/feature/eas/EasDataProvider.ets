@@ -11,6 +11,7 @@ import { EasCourseItem, EasCourseScoreItem, EasExamItem, EasTermItem } from './m
 import { EasTimePeriodInDay } from '../../common/model/timetable/TimetableModels';
 import { easWebLoginConfigFor, EasCampusConfig, EasCampusUrls } from './webLogin/EasWebLoginConfig';
 import { EasLegacyTimetableParser } from './data/EasLegacyTimetableParser';
+import { EasAcademicCalendar } from './data/EasAcademicCalendar';
 import { EasLegacyCourseCatalogParser, LegacyCourseAttributes } from './data/EasLegacyCourseCatalogParser';
 import { ParsedShenzhenWebScores, parseShenzhenWebScores } from './data/ShenzhenWebScores';
 import { ParsedShenzhenWebExams, parseShenzhenWebExams } from './data/ShenzhenWebExams';
@@ -32,6 +33,7 @@ export class EasShenzhenEndpoints {
   static timetablePath: string = '/xszykb/queryxszykbzong';
   static selectedSubjectsPath: string = '/Xsxk/queryYxkc?sf_request_type=ajax';
   static scheduleStructurePath: string = '/component/queryKbjg';
+  static weekDatesPath: string = '/component/queryRlZcSj';
   static scoresPath: string = '/cjgl/grcjcx/grcjcx';
   /** 学生考试安排；不同部署路径略有差异，查询时按序尝试。 */
   static examPaths: string[] = [
@@ -47,6 +49,7 @@ export class EasWeihaiEndpoints {
   static scoreTermsPath: string = '/cjcx/queryQmcj';
   static timetableTermsPath: string = '/kbcx/queryGrkb';
   static timetablePath: string = '/kbcx/queryGrkb';
+  static calendarPath: string = '/xlcx/queryXlcx';
   static scoresPath: string = '';
 }
 
@@ -55,6 +58,7 @@ export class EasBenbuEndpoints {
   static scoreTermsPath: string = '/cjcx/queryQmcj';
   static timetableTermsPath: string = '/kbcx/queryGrkb';
   static timetablePath: string = '/kbcx/queryGrkb';
+  static calendarPath: string = '/xlcx/queryXlcx';
   static scoresPath: string = '';
 }
 
@@ -121,6 +125,35 @@ export class EasDataProvider {
       throw new Error('未获取到学期列表');
     }
     return terms;
+  }
+
+  /** Read week-one Monday from the calendar, not from course/score term selectors. */
+  async getStartDate(session: EasSession, term: EasTermItem): Promise<number | undefined> {
+    let resp: EasApiResponse;
+    if (session.campus === EasCampus.SHENZHEN) {
+      const cfg = easWebLoginConfigFor(session.campus, session.getStudentType());
+      const body: string = 'xn=' + encodeURIComponent(term.yearCode) +
+        '&xq=' + encodeURIComponent(term.termCode) + '&djz=1';
+      resp = await this.api.request(session, cfg, EasShenzhenEndpoints.weekDatesPath,
+        EasDataProvider.shenzhenFormOptions(session, body, 20000, '/Xsxk/query/1'));
+    } else {
+      const path: string = session.campus === EasCampus.WEIHAI ?
+        EasWeihaiEndpoints.calendarPath : EasBenbuEndpoints.calendarPath;
+      const fields: Map<string, string> = new Map<string, string>();
+      fields.set('xnxq', term.getCode());
+      resp = await this.postForm(session, path, fields, 20000);
+    }
+    if (resp.statusCode === 401 || resp.statusCode === 403 ||
+      EasDataProvider.isLoginResponse(resp.body)) {
+      throw new Error('教务会话已失效，请重新登录');
+    }
+    const date: number | undefined = !EasDataProvider.isHttpOk(resp) ? undefined :
+      session.campus === EasCampus.SHENZHEN ? EasAcademicCalendar.parseShenzhenJson(resp.body, term) :
+        EasAcademicCalendar.parseLegacyHtml(resp.body, term);
+    hilog.info(DOMAIN, TAG, 'calendar campus=%{public}s term=%{public}s status=%{public}d start=%{public}s',
+      session.campus.toString(), term.getCode(), resp.statusCode,
+      date === undefined ? 'unavailable' : new Date(date).toDateString());
+    return date;
   }
 
   async getTimetableOfTerm(session: EasSession, term: EasTermItem): Promise<EasCourseItem[]> {
