@@ -11,7 +11,8 @@ import { uiMaterial } from '@kit.ArkUI';
 const DOCK_BAR_WIDTH: number = 212;
 
 export class DockBarMaterial {
-  static floatingStyle(bottomMargin: number, hideMask: boolean = false): FloatingTabBarStyle {
+  static floatingStyle(bottomMargin: number, hideMask: boolean = false,
+    darkMode: boolean = false): FloatingTabBarStyle {
     const style: FloatingTabBarStyle = {
       barWidth: {
         smallBarWidth: DOCK_BAR_WIDTH,
@@ -19,7 +20,7 @@ export class DockBarMaterial {
         largeBarWidth: DOCK_BAR_WIDTH
       },
       barBottomMargin: bottomMargin,
-      maskColor: hideMask ? Color.Transparent : '#66F1F3F5',
+      maskColor: hideMask ? Color.Transparent : (darkMode ? '#99101214' : '#66F1F3F5'),
       maskHeight: hideMask ? 0 : 92
     };
     try {

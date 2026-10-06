@@ -1,4 +1,4 @@
-import { AbilityConstant, common, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, common, Configuration, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { display, window } from '@kit.ArkUI';
 import {
@@ -11,6 +11,7 @@ import {
 } from '../common/theme/StatusBarInset';
 import { ClassReminderScheduler } from '../feature/timetable/data/ClassReminderScheduler';
 import { ClassReminderStore } from '../feature/timetable/data/ClassReminderStore';
+import { AppearanceStore } from '../common/theme/AppearanceStore';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'HitaNEXT';
@@ -21,6 +22,7 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate(STATUS_BAR_INSET_KEY, STATUS_BAR_INSET_FALLBACK);
     AppStorage.setOrCreate(NAV_BAR_INSET_KEY, NAV_BAR_INSET_FALLBACK);
     AppStorage.setOrCreate(KEYBOARD_INSET_KEY, KEYBOARD_INSET_FALLBACK);
+    AppearanceStore.getInstance().initialize(this.context);
     void this.restoreClassReminders();
   }
 
@@ -37,6 +39,7 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       hilog.info(DOMAIN, TAG, 'Succeeded in loading content.');
+      AppearanceStore.getInstance().onContentReady();
     });
   }
 
@@ -44,13 +47,7 @@ export default class EntryAbility extends UIAbility {
     try {
       const mainWindow: window.Window = await windowStage.getMainWindow();
       await mainWindow.setWindowLayoutFullScreen(true);
-      await mainWindow.setWindowBackgroundColor('#F4F7FC');
-      await mainWindow.setWindowSystemBarProperties({
-        statusBarColor: '#00FFFFFF',
-        statusBarContentColor: '#14213D',
-        navigationBarColor: '#00FFFFFF',
-        navigationBarContentColor: '#4E5C72'
-      });
+      AppearanceStore.getInstance().attachWindow(mainWindow);
       this.captureSystemInsets(mainWindow);
       this.captureKeyboardInset(mainWindow);
       mainWindow.on('avoidAreaChange', (data: window.AvoidAreaOptions) => {
@@ -111,12 +108,18 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageDestroy(): void {
+    AppearanceStore.getInstance().detachWindow();
     hilog.info(DOMAIN, TAG, 'Ability onWindowStageDestroy');
   }
 
   onForeground(): void {
     hilog.info(DOMAIN, TAG, 'Ability onForeground');
     void this.restoreClassReminders();
+    AppearanceStore.getInstance().onConfigurationUpdate(this.context.config);
+  }
+
+  onConfigurationUpdate(config: Configuration): void {
+    AppearanceStore.getInstance().onConfigurationUpdate(config);
   }
 
   onBackground(): void {

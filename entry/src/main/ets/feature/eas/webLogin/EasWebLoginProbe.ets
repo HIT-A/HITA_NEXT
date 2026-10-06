@@ -248,12 +248,15 @@ export function isShenzhenAuthenticatedPage(url: string, cookies: Map<string, st
  * 且非登录页（logincas、endsWith /login、/login/），且含 wengine_vpn_ticket* key 且 JSESSIONID 非空。
  */
 export function isWeihaiAuthenticatedPage(url: string, cookies: Map<string, string>): boolean {
+  if (hostOf(url) !== 'webvpn.hitwh.edu.cn') {
+    return false;
+  }
   const path: string = pathOf(url);
   const pathOk: boolean = path.indexOf('/http/') >= 0 || path.indexOf('kbcx') >= 0 ||
     path.indexOf('cjcx') >= 0 || path.indexOf('kjscx') >= 0 || path.indexOf('query') >= 0 ||
     path.indexOf('index') >= 0;
   const loginish: boolean = path.indexOf('logincas') >= 0 || path.endsWith('/login') ||
-    path.indexOf('/login/') >= 0;
+    path.indexOf('/login/') >= 0 || path.indexOf('authserver') >= 0 || path.indexOf('reauth') >= 0;
   if (!pathOk || loginish) {
     return false;
   }
@@ -403,6 +406,9 @@ export enum EasPageKind {
  */
 export function isSuccessPageFor(url: string, cookies: Map<string, string>, campus: EasCampus,
   studentType: string): boolean {
+  if (isAuthenticationPage(url) || isMfaPage(url)) {
+    return false;
+  }
   if (campus === EasCampus.SHENZHEN) {
     return isShenzhenAuthenticatedPage(url, cookies);
   }

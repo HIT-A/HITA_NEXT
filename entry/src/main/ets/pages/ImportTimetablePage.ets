@@ -17,11 +17,11 @@ import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSele
 import { HitaColors } from '../common/theme/HitaColors';
 
 const HEADER_HEIGHT: number = 64;
-const PAGE_BG: string = '#F4F7FC';
+const PAGE_BG: ResourceColor = $r('app.color.hita_page');
 const PAGE_BG_RGB: string = '244,247,252';
-const CARD_BG: string = '#FFFFFF';
-const TEXT_PRIMARY: string = '#14213D';
-const TEXT_SECONDARY: string = '#4E5C72';
+const CARD_BG: ResourceColor = $r('app.color.hita_surface');
+const TEXT_PRIMARY: ResourceColor = $r('app.color.hita_text');
+const TEXT_SECONDARY: ResourceColor = $r('app.color.hita_text_secondary');
 
 @Entry
 @Component
@@ -294,13 +294,13 @@ struct ImportTimetablePage {
             if (this.error.length > 0) {
               Text(this.error)
                 .fontSize(13)
-                .fontColor('#C23B4A')
+                .fontColor($r('app.color.hita_error_c23b4a'))
                 .width('100%');
             }
             if (this.message.length > 0) {
               Text(this.message)
                 .fontSize(13)
-                .fontColor('#248A5A')
+                .fontColor($r('app.color.hita_success'))
                 .width('100%');
             }
             Blank().height(36);
@@ -337,7 +337,7 @@ struct ImportTimetablePage {
         Button(this.importing ? '导入中' : '导入')
           .fontSize(14)
           .fontColor('#FFFFFF')
-          .backgroundColor(this.importing ? '#AFC8E8' : HitaColors.primary)
+          .backgroundColor(this.importing ? $r('app.color.hita_disabled') : HitaColors.primaryFill)
           .borderRadius(18)
           .height(36)
           .padding({ left: 16, right: 16 })
@@ -410,7 +410,7 @@ struct ImportTimetablePage {
         if (this.dateNotice.length > 0) {
           Text(this.dateNotice)
             .fontSize(12)
-            .fontColor('#B45309')
+            .fontColor($r('app.color.hita_warning'))
             .margin({ top: 4 });
         }
       }
@@ -458,7 +458,7 @@ struct ImportTimetablePage {
             .width(34)
             .height(34)
             .borderRadius(17)
-            .backgroundColor('#E8F3FD')
+            .backgroundColor($r('app.color.hita_selected_e8f3fd'))
             .alignContent(Alignment.Center);
             Column() {
               Text('第 ' + (index + 1).toString() + ' 节')
@@ -474,7 +474,7 @@ struct ImportTimetablePage {
             .margin({ left: 12 });
             Text('›')
               .fontSize(22)
-              .fontColor('#A3ADBB');
+              .fontColor($r('app.color.hita_text_hint_a3adbb'));
           }
           .width('100%')
           .height(58)
@@ -483,7 +483,7 @@ struct ImportTimetablePage {
           if (index < this.schedule.length - 1) {
             Divider()
               .strokeWidth(1)
-              .color('#EEF1F5')
+              .color($r('app.color.hita_divider_eef1f5'))
               .margin({ left: 46 });
           }
         }, (period: EasTimePeriodInDay, index: number) => index.toString() + period.toString());

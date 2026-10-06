@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const ts = require('typescript');
+global.$r = name => ({ id: -1, type: 10001, params: [name] });
 
 const root = path.resolve(__dirname, '../entry/src/main/ets');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');

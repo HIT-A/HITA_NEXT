@@ -34,7 +34,7 @@ test('timetable photo picker copies a gallery image and covers the page without 
   assert.match(tab, /backgroundColor\(Color\.Transparent\)/);
   assert.match(tab, /accessibilityText\('选择时间表字体颜色'\)/);
   assert.match(tab, /TimetableTheme\.PALETTE/);
-  assert.match(home, /drawTimetableWeek\([\s\S]*!this\.hasTimetableBackground\(\), this\.timetableTextColor\)/);
+  assert.match(home, /drawTimetableWeek\([\s\S]*!this\.hasTimetableBackground\(\), this\.timetableInk\(\), this\.darkMode\)/);
   assert.match(tab, /timetableDateHeader\(\)/);
   assert.match(tab, /timetableDateHeader\(\)[\s\S]*backgroundColor\(Color\.Transparent\)/);
   assert.match(tab, /Text\(this\.timetableCampusTerm\(\)\)[\s\S]*?\.backgroundColor\(Color\.Transparent\)/);

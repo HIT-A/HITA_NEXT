@@ -201,6 +201,30 @@ export function argbToCss(argb: number, alpha: number): string {
   return 'rgba(' + r.toString() + ',' + g.toString() + ',' + b.toString() + ',' + alpha.toString() + ')';
 }
 
+class TimetableSurfaceColors {
+  bg: string;
+  gridLine: string;
+  minorLine: string;
+  textMain: string;
+  textSub: string;
+  todayHeadBg: string;
+  header: string;
+  todayHeader: string;
+  todayMask: string;
+
+  constructor(dark: boolean) {
+    this.bg = dark ? '#101214' : TimetableDrawStyle.bg;
+    this.gridLine = dark ? '#3A414B' : TimetableDrawStyle.gridLine;
+    this.minorLine = dark ? '#262B32' : '#EEF2F6';
+    this.textMain = dark ? '#ECEFF4' : TimetableDrawStyle.textMain;
+    this.textSub = dark ? '#BCC3CF' : TimetableDrawStyle.textSub;
+    this.todayHeadBg = dark ? '#85B8FF' : TimetableDrawStyle.todayHeadBg;
+    this.header = dark ? '#101214' : '#FFFFFF';
+    this.todayHeader = dark ? '#243A53' : '#E6F0FC';
+    this.todayMask = dark ? 'rgba(133,184,255,0.10)' : TimetableDrawStyle.todayMask;
+  }
+}
+
 function linearChannel(channel: number): number {
   const value: number = channel / 255;
   return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
@@ -270,18 +294,19 @@ export function eventsOfWeek(timetable: EasTimetable, events: EasEventItem[],
 
 function drawWeekHeader(ctx: CanvasRenderingContext2D, w: number, headerH: number,
   timetable: EasTimetable, weekNumber: number, isCurrentWeek: boolean,
-  fillPage: boolean = true, labelColor: string = ''): void {
+  fillPage: boolean = true, labelColor: string = '', darkMode: boolean = false): void {
+  const surface: TimetableSurfaceColors = new TimetableSurfaceColors(darkMode);
   const gridTop: number = headerH + 2;
   const gridLeft: number = Math.max(TimetableDrawStyle.gutterMin, w * TimetableDrawStyle.gutterRatio);
   const colW: number = (w - gridLeft) / 7;
   const fontUnit: string = 'vp sans-serif';
   const weekMonday: number = timetable.startTime + (weekNumber - 1) * WEEK_MILLIS;
   const todayDow: number = EasTimetable.dowOfMs(Date.now());
-  const mainInk: string = ink(labelColor, TimetableDrawStyle.textMain);
-  const subInk: string = ink(labelColor, TimetableDrawStyle.textSub);
+  const mainInk: string = ink(labelColor, surface.textMain);
+  const subInk: string = ink(labelColor, surface.textSub);
 
   if (fillPage) {
-    ctx.fillStyle = TimetableDrawStyle.bg;
+    ctx.fillStyle = surface.bg;
     ctx.fillRect(0, 0, w, gridTop);
   }
   ctx.textBaseline = 'middle';
@@ -289,16 +314,16 @@ function drawWeekHeader(ctx: CanvasRenderingContext2D, w: number, headerH: numbe
     const x: number = gridLeft + d * colW;
     const isToday: boolean = isCurrentWeek && todayDow === d + 1;
     if (fillPage) {
-      ctx.fillStyle = isToday ? '#E6F0FC' : '#FFFFFF';
+      ctx.fillStyle = isToday ? surface.todayHeader : surface.header;
       ctx.fillRect(x, 4, colW, headerH - 2);
     }
-    ctx.fillStyle = isToday && labelColor.length === 0 ? TimetableDrawStyle.todayHeadBg : mainInk;
+    ctx.fillStyle = isToday && labelColor.length === 0 ? surface.todayHeadBg : mainInk;
     ctx.font = 'bold ' + (isToday ? '11' : '10') + fontUnit;
     ctx.textAlign = 'center';
     ctx.fillText(DOW_NAMES[d], x + colW / 2, headerH / 2 - 11);
     const date: Date = new Date(weekMonday + d * DAY_MILLIS);
     ctx.font = '10' + fontUnit;
-    ctx.fillStyle = isToday && labelColor.length === 0 ? TimetableDrawStyle.todayHeadBg : subInk;
+    ctx.fillStyle = isToday && labelColor.length === 0 ? surface.todayHeadBg : subInk;
     ctx.fillText(date.getDate().toString(), x + colW / 2, headerH / 2 + 16);
   }
   const firstDay: Date = new Date(weekMonday);
@@ -322,14 +347,15 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   timetable: EasTimetable, events: EasEventItem[], weekNumber: number,
   isCurrentWeek: boolean, hourHeightOverride: number = 0,
   headerHeightOverride: number = 0, drawHeader: boolean = true,
-  fillPage: boolean = true, labelColor: string = ''): TimetablePlaceLabel[] {
+  fillPage: boolean = true, labelColor: string = '', darkMode: boolean = false): TimetablePlaceLabel[] {
+  const surface: TimetableSurfaceColors = new TimetableSurfaceColors(darkMode);
   const scrollingPlaces: TimetablePlaceLabel[] = [];
   if (w <= 0 || h <= 0) {
     return scrollingPlaces;
   }
   ctx.clearRect(0, 0, w, h);
   if (fillPage) {
-    ctx.fillStyle = TimetableDrawStyle.bg;
+    ctx.fillStyle = surface.bg;
     ctx.fillRect(0, 0, w, h);
   }
 
@@ -349,7 +375,7 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   const todayDow: number = EasTimetable.dowOfMs(Date.now());
 
   if (drawHeader) {
-    drawWeekHeader(ctx, w, headerH, timetable, weekNumber, isCurrentWeek, fillPage, labelColor);
+    drawWeekHeader(ctx, w, headerH, timetable, weekNumber, isCurrentWeek, fillPage, labelColor, darkMode);
   }
 
   // 今日列整列遮罩（仅当前周）。
@@ -357,14 +383,14 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   // top edge so the highlight continues through the intentional top padding
   // before the first 08:00 grid line instead of being cut by a white band.
   if (isCurrentWeek) {
-    ctx.fillStyle = TimetableDrawStyle.todayMask;
+    ctx.fillStyle = surface.todayMask;
     const todayMaskTop: number = drawHeader ? gridTop : 0;
     ctx.fillRect(gridLeft + (todayDow - 1) * colW, todayMaskTop, colW,
       gridBottom - todayMaskTop);
   }
 
   // 网格（每小时一格）+ 左侧整点标签
-  ctx.strokeStyle = TimetableDrawStyle.gridLine;
+  ctx.strokeStyle = surface.gridLine;
   ctx.lineWidth = 1;
   for (let i = 0; i <= hoursInDay; i++) {
     const y: number = gridTop + i * hourH;
@@ -375,7 +401,7 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.stroke();
   }
   ctx.setLineDash([]);
-  ctx.strokeStyle = '#EEF2F6';
+  ctx.strokeStyle = surface.minorLine;
   for (let i = 0; i < hoursInDay; i++) {
     const y: number = gridTop + (i + 0.5) * hourH;
     ctx.beginPath();
@@ -384,7 +410,7 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.stroke();
   }
   ctx.font = '10' + fontUnit;
-  ctx.fillStyle = ink(labelColor, TimetableDrawStyle.textSub);
+  ctx.fillStyle = ink(labelColor, surface.textSub);
   for (let hour = AXIS_START_HOUR; hour < AXIS_END_HOUR; hour++) {
     const y: number = gridTop + (hour - AXIS_START_HOUR) * hourH;
     const label: string = hour.toString() + ':00';

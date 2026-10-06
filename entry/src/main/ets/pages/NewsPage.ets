@@ -7,13 +7,13 @@ import { HeaderFade } from '../common/theme/HeaderFade';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { NewsCategory, NewsItem, NewsPage as NewsPageResult, NewsService } from '../feature/news/NewsService';
 
-const COLOR_PRIMARY: string = '#2E86E8';
+const COLOR_PRIMARY: ResourceColor = $r('app.color.hita_primary');
 const SURFACE_RGB: string = '244,247,252';
-const COLOR_CARD: string = '#FFFFFF';
-const COLOR_TEXT_PRIMARY: string = '#14213D';
-const COLOR_TEXT_SECONDARY: string = '#4E5C72';
-const COLOR_TEXT_HINT: string = '#5A6880';
-const COLOR_NAV_ACTIVE: string = '#E3EEFC';
+const COLOR_CARD: ResourceColor = $r('app.color.hita_surface');
+const COLOR_TEXT_PRIMARY: ResourceColor = $r('app.color.hita_text');
+const COLOR_TEXT_SECONDARY: ResourceColor = $r('app.color.hita_text_secondary');
+const COLOR_TEXT_HINT: ResourceColor = $r('app.color.hita_text_secondary_5a6880');
+const COLOR_NAV_ACTIVE: ResourceColor = $r('app.color.hita_selected');
 
 @Entry
 @Component
@@ -140,7 +140,7 @@ struct NewsPage {
         }
         .width('100%')
         .padding(4)
-        .backgroundColor('#EAF0F7')
+        .backgroundColor($r('app.color.hita_control_eaf0f7'))
         .borderRadius(16);
       }
       .width('100%')
@@ -150,7 +150,7 @@ struct NewsPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F4F7FC')
+    .backgroundColor($r('app.color.hita_page'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM]);
   }
 

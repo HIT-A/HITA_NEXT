@@ -9,6 +9,7 @@ import { HeaderFade } from '../theme/HeaderFade';
 
 @Component
 export struct HeaderFadeMask {
+  @StorageProp('hita_appearance_dark') darkMode: boolean = false;
   @Prop maskOpacity: number = 0;
   /** 与遮罩下方页面底色一致的 RGB 分量。 */
   @Prop rgb: string = '244,247,252';
@@ -28,16 +29,17 @@ export struct HeaderFadeMask {
   }
 
   private stops(): Array<[ResourceColor, number]> {
+    const rgb: string = this.darkMode ? '16,18,20' : this.rgb;
     const offsets: number[] = this.headerHeight > 0 ? HeaderFade.HEADER_OFFSETS : HeaderFade.OFFSETS;
     const alphas: number[] = this.headerHeight > 0 ? HeaderFade.HEADER_ALPHAS : HeaderFade.ALPHAS;
     const stops: Array<[ResourceColor, number]> = [];
     if (this.fromBottom) {
       for (let i: number = offsets.length - 1; i >= 0; i--) {
-        stops.push([HeaderFade.rgba(this.rgb, alphas[i]), 1 - offsets[i]]);
+        stops.push([HeaderFade.rgba(rgb, alphas[i]), 1 - offsets[i]]);
       }
     } else {
       for (let i: number = 0; i < offsets.length; i++) {
-        stops.push([HeaderFade.rgba(this.rgb, alphas[i]), offsets[i]]);
+        stops.push([HeaderFade.rgba(rgb, alphas[i]), offsets[i]]);
       }
     }
     return stops;

@@ -5,11 +5,11 @@ import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/the
 import { CampusPortal, CampusPortalGroup } from '../feature/portal/CampusPortal';
 
 const HEADER_HEIGHT: number = 60;
-const PAGE_BG: string = '#F4F7FC';
+const PAGE_BG: ResourceColor = $r('app.color.hita_page');
 const PAGE_BG_RGB: string = '244,247,252';
-const COLOR_PRIMARY: string = '#2E86E8';
-const COLOR_TEXT_PRIMARY: string = '#14213D';
-const COLOR_TEXT_SECONDARY: string = '#4E5C72';
+const COLOR_PRIMARY: ResourceColor = $r('app.color.hita_primary');
+const COLOR_TEXT_PRIMARY: ResourceColor = $r('app.color.hita_text');
+const COLOR_TEXT_SECONDARY: ResourceColor = $r('app.color.hita_text_secondary');
 
 @Entry
 @Component
@@ -108,7 +108,7 @@ struct PortalsPage {
       .height(40)
       .flexShrink(0)
       .borderRadius(20)
-      .backgroundColor('#E3EEFC')
+      .backgroundColor($r('app.color.hita_selected'))
       .alignContent(Alignment.Center);
       Column() {
         Text(portal.title)
@@ -132,7 +132,7 @@ struct PortalsPage {
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    .backgroundColor('#FFFFFF')
+    .backgroundColor($r('app.color.hita_surface'))
     .borderRadius(16)
     .onClick(() => {
       this.open(portal);

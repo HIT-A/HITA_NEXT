@@ -47,7 +47,17 @@ test('timetable wallpaper hides only the background mask, not the dock material'
   assert.equal(style.maskHeight, 0);
   assert.ok(style.systemMaterial);
   const home = read('pages/Home.ets');
-  assert.match(home, /barFloatingStyle\(DockBarMaterial\.floatingStyle\(12 \+ this\.navBarInset,\s*this\.selectedNav === TAB_TIMETABLE && this\.hasTimetableBackground\(\)\)\)/);
+  assert.match(home, /barFloatingStyle\(DockBarMaterial\.floatingStyle\(12 \+ this\.navBarInset,\s*this\.selectedNav === TAB_TIMETABLE && this\.hasTimetableBackground\(\), this\.darkMode\)\)/);
+});
+
+test('the dark dock changes only its mask color and keeps wallpaper unobscured', () => {
+  const dock = material();
+  const light = dock.floatingStyle(36, false, false);
+  const dark = dock.floatingStyle(36, false, true);
+  assert.equal(dark.maskColor, '#99101214');
+  assert.deepEqual({ ...dark, maskColor: light.maskColor }, light);
+  assert.equal(dock.floatingStyle(36, true, true).maskColor, 'transparent');
+  assert.equal(dock.floatingStyle(36, true, true).maskHeight, 0);
 });
 
 test('dock material follows device quality and falls back when quality lookup fails', () => {

@@ -12,7 +12,7 @@ import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { AppNotice, AppNoticeCenter } from '../feature/notice/AppNoticeCenter';
 
 const HEADER_HEIGHT: number = 60;
-const PAGE_BG: string = '#F6F7FA';
+const PAGE_BG: ResourceColor = $r('app.color.hita_page_f6f7fa');
 const PAGE_BG_RGB: string = '246,247,250';
 
 @Entry
@@ -49,12 +49,12 @@ struct NoticesPage {
         LoadingProgress()
           .width(32)
           .height(32)
-          .color('#3390EC')
+          .color($r('app.color.hita_primary_3390ec'))
           .margin({ top: HEADER_HEIGHT + 80 })
       } else if (this.notices.length === 0) {
         Text('暂无公告')
           .fontSize(14)
-          .fontColor('#5A6880')
+          .fontColor($r('app.color.hita_text_secondary_5a6880'))
           .margin({ top: HEADER_HEIGHT + 60 })
       } else {
         this.noticeList()
@@ -71,7 +71,7 @@ struct NoticesPage {
         Text('公告')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#1A1A1A')
+          .fontColor($r('app.color.hita_text_1a1a1a'))
           .layoutWeight(1)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -105,16 +105,16 @@ struct NoticesPage {
               Text(notice.title)
                 .fontSize(16)
                 .fontWeight(FontWeight.Bold)
-                .fontColor('#1A1A1A')
+                .fontColor($r('app.color.hita_text_1a1a1a'))
                 .layoutWeight(1)
                 .maxLines(2)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
               if (notice.isCritical()) {
                 Text('重要')
                   .fontSize(11)
-                  .fontColor('#D93025')
+                  .fontColor($r('app.color.hita_error'))
                   .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-                  .backgroundColor('#FFFFFF')
+                  .backgroundColor($r('app.color.hita_surface'))
                   .borderRadius(10)
               }
             }
@@ -124,13 +124,13 @@ struct NoticesPage {
             Text(notice.body)
               .fontSize(13)
               .lineHeight(20)
-              .fontColor(notice.isCritical() ? '#8C3A3A' : '#566276')
+              .fontColor(notice.isCritical() ? $r('app.color.hita_error_8c3a3a') : $r('app.color.hita_text_secondary_566276'))
               .width('100%')
               .margin({ top: 8 })
           }
           .width('100%')
           .padding(16)
-          .backgroundColor(notice.isCritical() ? '#FDECEC' : '#FFFFFF')
+          .backgroundColor(notice.isCritical() ? $r('app.color.hita_error_surface_fdecec') : $r('app.color.hita_surface'))
           .borderRadius(16)
         }
       }, (notice: AppNotice) => notice.id)

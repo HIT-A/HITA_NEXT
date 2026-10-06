@@ -14,7 +14,7 @@ function load(file) {
   cache.set(absolute, mod);
   const source = fs.readFileSync(absolute, 'utf8')
     .replace(/^@Component\r?\n/gm, '')
-    .replace(/@Prop\s+/g, '')
+    .replace(/@(Prop|StorageProp)(\([^)]*\))?\s+/g, '')
     .replace('export struct HeaderFadeMask', 'export class HeaderFadeMask');
   const output = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
@@ -66,6 +66,17 @@ test('tabs swipe between neighbours except over a timetable grid, whose swipes p
   assert.match(home, /PanGesture\(\{ direction: PanDirection\.Horizontal/);
   assert.match(home, /handleChromeTabPanEnd/);
   assert.match(home, /this\.tabsController\.changeIndex\(target\)/);
+});
+
+test('header and footer masks use the dark page color without changing the fade curve', () => {
+  const mask = new HeaderFadeMask();
+  mask.darkMode = true;
+  mask.headerHeight = 56;
+  const expected = HeaderFade.HEADER_OFFSETS.map((offset, i) =>
+    [HeaderFade.rgba('16,18,20', HeaderFade.HEADER_ALPHAS[i]), offset]);
+  assert.deepEqual(mask.stops(), expected);
+  mask.fromBottom = true;
+  assert.deepEqual(mask.stops(), expected.slice().reverse().map(([color, offset]) => [color, 1 - offset]));
 });
 
 test('week paging commits on a shorter drag or a quick flick', () => {

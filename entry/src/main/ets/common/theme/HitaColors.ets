@@ -1,9 +1,10 @@
 /** Shared colors used by the login, navigation and timetable management views. */
 export class HitaColors {
-  static readonly primary: string = '#3390EC';
-  static readonly onPrimary: string = '#FFFFFF';
-  static readonly onSurface: string = '#1A1A1A';
-  static readonly onSurfaceVariant: string = '#808080';
-  static readonly error: string = '#D93025';
-  static readonly divider: string = '#E8E8E8';
+  static readonly primary: Resource = $r('app.color.hita_primary');
+  static readonly primaryFill: Resource = $r('app.color.hita_primary_fill');
+  static readonly onPrimary: ResourceColor = '#FFFFFF';
+  static readonly onSurface: ResourceColor = $r('app.color.hita_text');
+  static readonly onSurfaceVariant: ResourceColor = $r('app.color.hita_text_secondary');
+  static readonly error: Resource = $r('app.color.hita_error');
+  static readonly divider: ResourceColor = $r('app.color.hita_divider');
 }

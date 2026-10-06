@@ -284,12 +284,21 @@ export class EasWebMfaBridge {
 
   /** 执行任意注入脚本并返回结果（可抛异常→空串）。 */
   static async runJs(controller: webview.WebviewController, script: string): Promise<string> {
-    try {
-      const res: string = await controller.runJavaScript(script);
-      return res === undefined || res === null ? '' : res;
-    } catch (e) {
-      return '';
-    }
+    return new Promise<string>((resolve) => {
+      const timer: number = setTimeout(() => resolve(''), 5000);
+      try {
+        controller.runJavaScript(script).then((result: string) => {
+          clearTimeout(timer);
+          resolve(result === undefined || result === null ? '' : result);
+        }).catch(() => {
+          clearTimeout(timer);
+          resolve('');
+        });
+      } catch (e) {
+        clearTimeout(timer);
+        resolve('');
+      }
+    });
   }
 
   /** runJavaScript 返回带引号包裹的字符串：去外层引号与 \" 转义。 */

@@ -23,6 +23,7 @@ const DOMAIN: number = 0x0000;
 
 @Component
 export struct EasLoginPage {
+  @StorageProp('hita_appearance_dark') darkMode: boolean = false;
   @Prop campusCode: string = 'SHENZHEN';
   @Prop studentType: string = '1';
   onCancel: () => void = () => {};
@@ -31,6 +32,12 @@ export struct EasLoginPage {
   private webController: webview.WebviewController = new webview.WebviewController();
   private loginController: EasWebLoginController = new EasWebLoginController();
   private attachStarted: boolean = false;
+  private pageActive: boolean = false;
+  private callbackGeneration: number = 0;
+  private pageLoadTimer: number = -1;
+  private recoveryTimer: number = -1;
+  private recoveryPending: boolean = false;
+  private currentPageUrl: string = '';
 
   @State progressValue: number = 0;
   @State errorText: string = '';
@@ -38,6 +45,7 @@ export struct EasLoginPage {
   @State campusDisplayName: string = '统一认证登录';
   @State webReady: boolean = false;
   @State canGoBack: boolean = false;
+  @State recoveryBusy: boolean = false;
 
   // —— 原生 MFA 覆盖层 ——
   @State mfaState: EasMfaOverlayState = new EasMfaOverlayState();
@@ -45,6 +53,8 @@ export struct EasLoginPage {
   @State mfaBusy: boolean = false;
 
   aboutToAppear(): void {
+    this.pageActive = true;
+    this.callbackGeneration++;
     // 必须在 Web 组件开始导航前开启 Cookie。安卓版在 loadUrl 前完成同样的初始化，
     // 否则 WebVPN/CAS 的跨站 Set-Cookie 可能被 ArkWeb 丢弃。
     EasWebLoginController.configureWebCookies();
@@ -68,24 +78,161 @@ export struct EasLoginPage {
       this.errorText = message;
     };
     ctrl.onFinished = (session: EasSession) => {
+      const generation: number = this.callbackGeneration;
+      this.clearPageLoadTimer();
       const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
       EasSessionStore.getInstance().init(ctx).then(() => {
         return EasSessionStore.getInstance().load(session.campus);
       }).then((oldSession: EasSession | undefined) => {
+        if (!this.pageActive || generation !== this.callbackGeneration) {
+          return Promise.resolve();
+        }
         if (oldSession !== undefined && oldSession.sessionGeneration > 0) {
           session.sessionGeneration = oldSession.sessionGeneration + 1;
         }
         return EasSessionStore.getInstance().save(session);
       }).then(() => {
-        this.onLoggedIn(session);
+        if (this.pageActive && generation === this.callbackGeneration) {
+          this.onLoggedIn(session);
+        }
       }).catch(() => {
-        this.onLoggedIn(session);
+        if (this.pageActive && generation === this.callbackGeneration) {
+          this.onLoggedIn(session);
+        }
       });
     };
   }
 
   aboutToDisappear(): void {
     this.loginController.stop();
+    this.pageActive = false;
+    this.callbackGeneration++;
+    this.clearPageLoadTimer();
+    if (this.recoveryTimer >= 0) {
+      clearTimeout(this.recoveryTimer);
+      this.recoveryTimer = -1;
+    }
+  }
+
+  private clearPageLoadTimer(): void {
+    if (this.pageLoadTimer >= 0) {
+      clearTimeout(this.pageLoadTimer);
+      this.pageLoadTimer = -1;
+    }
+  }
+
+  private watchPageLoad(url: string): void {
+    this.clearPageLoadTimer();
+    this.currentPageUrl = url;
+    this.webReady = false;
+    this.pageLoadTimer = setTimeout(() => {
+      this.pageLoadTimer = -1;
+      if (!this.pageActive) {
+        return;
+      }
+      this.webReady = true;
+      this.recoveryPending = false;
+      this.recoveryBusy = false;
+      this.errorText = '页面加载时间较长，可刷新或重置网页登录';
+    }, 20000);
+  }
+
+  private pageEnded(url: string): void {
+    if (!this.pageActive) {
+      return;
+    }
+    if (this.recoveryPending && url === 'about:blank') {
+      this.completeRecovery();
+      return;
+    }
+    if (this.recoveryBusy || url !== this.currentPageUrl) {
+      return;
+    }
+    this.clearPageLoadTimer();
+    this.webReady = true;
+    this.updateWebNavigation();
+    this.loginController.notifyPageEnd(url);
+  }
+
+  private confirmRecovery(): void {
+    if (this.recoveryBusy) {
+      return;
+    }
+    this.getUIContext().getPromptAction().showDialog({
+      title: '重置网页登录',
+      message: '将清除本应用内网页的登录状态和缓存，其他网页登录可能需要重新登录。已导入的课表、课程和设置不会删除。',
+      buttons: [{ text: '取消', color: $r('app.color.hita_text_secondary_6b7a90') }, { text: '重置登录', color: $r('app.color.hita_primary') }]
+    }).then((result) => {
+      if (result.index === 1 && this.pageActive) {
+        this.beginRecovery();
+      }
+    }).catch(() => {});
+  }
+
+  private beginRecovery(): void {
+    if (this.recoveryBusy || !this.pageActive) {
+      return;
+    }
+    this.callbackGeneration++;
+    this.loginController.stop();
+    this.recoveryBusy = true;
+    this.recoveryPending = true;
+    this.errorText = '';
+    this.mfaState = new EasMfaOverlayState();
+    try {
+      // Leave the authentication document before clearing storage, so its scripts
+      // cannot recreate old cookies while the reset is in progress.
+      this.webController.stop();
+      this.watchPageLoad('about:blank');
+      this.webController.loadUrl('about:blank');
+    } catch (e) {
+      this.clearPageLoadTimer();
+      this.recoveryPending = false;
+      this.recoveryBusy = false;
+      this.webReady = true;
+      this.errorText = '无法重置网页登录，请退出登录窗口后重试';
+    }
+  }
+
+  private async completeRecovery(): Promise<void> {
+    if (!this.recoveryPending || !this.pageActive) {
+      return;
+    }
+    this.recoveryPending = false;
+    this.clearPageLoadTimer();
+    const generation: number = this.callbackGeneration;
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = -1;
+      if (this.pageActive && generation === this.callbackGeneration) {
+        this.callbackGeneration++;
+        this.recoveryBusy = false;
+        this.webReady = true;
+        this.errorText = '重置网页登录超时，请退出登录窗口后重试';
+      }
+    }, 15000);
+    try {
+      await webview.WebCookieManager.clearAllCookies();
+      if (!this.pageActive || generation !== this.callbackGeneration) {
+        return;
+      }
+      webview.WebStorage.deleteAllData();
+      this.webController.removeCache(true);
+      this.recoveryBusy = false;
+      this.loginController.start(this.campusCode, this.studentType);
+      this.watchPageLoad(this.initialUrl);
+      this.webController.loadUrl(this.initialUrl);
+    } catch (e) {
+      if (this.pageActive && generation === this.callbackGeneration) {
+        this.recoveryBusy = false;
+        this.webReady = true;
+        this.errorText = '无法重置网页登录，请退出登录窗口后重试';
+      }
+    } finally {
+      if (generation === this.callbackGeneration && this.recoveryTimer >= 0) {
+        clearTimeout(this.recoveryTimer);
+        this.recoveryTimer = -1;
+      }
+    }
   }
 
   private updateWebNavigation(): void {
@@ -108,6 +255,7 @@ export struct EasLoginPage {
   private cancelLogin(): void {
     this.loginController.stop();
     this.onCancel();
+    this.aboutToDisappear();
   }
 
   build() {
@@ -165,9 +313,11 @@ export struct EasLoginPage {
         .flexShrink(0)
         .backgroundColor(Color.Transparent)
         .accessibilityText('刷新认证网页')
+        .enabled(!this.recoveryBusy)
         .onClick(() => {
           try {
-            this.webReady = false;
+            this.loginController.start(this.campusCode, this.studentType);
+            this.watchPageLoad(this.currentPageUrl);
             this.progressValue = 0;
             this.webController.refresh();
           } catch (e) {}
@@ -177,7 +327,7 @@ export struct EasLoginPage {
       .width('100%')
       .height(62)
       .padding({ left: 16, right: 16 })
-      .backgroundColor('#FFFFFF')
+      .backgroundColor($r('app.color.hita_surface'))
       .border({ width: { bottom: 1 }, color: HitaColors.divider })
       .alignItems(VerticalAlign.Center)
 
@@ -186,33 +336,43 @@ export struct EasLoginPage {
         .width('100%')
         .height(3)
         .color(HitaColors.primary)
-        .backgroundColor('#E8F1FB')
+        .backgroundColor($r('app.color.hita_selected_e8f1fb'))
         .visibility(this.webReady ? Visibility.None : Visibility.Visible)
 
       // 错误提示条
-      if (this.errorText.length > 0) {
+      if (this.errorText.length > 0 || this.recoveryBusy) {
         Row() {
-          Text(this.errorText)
+          Text(this.recoveryBusy ? '正在重置网页登录' : this.errorText)
             .fontSize(12)
-            .fontColor('#B91C1C')
+            .fontColor($r('app.color.hita_error_b91c1c'))
             .layoutWeight(1)
+          if (!this.recoveryBusy) {
+            Button('重置登录')
+              .fontSize(12)
+              .fontColor(HitaColors.primary)
+              .backgroundColor(Color.Transparent)
+              .onClick(() => this.confirmRecovery())
+          }
           Text('✕')
             .fontSize(12)
-            .fontColor('#B91C1C')
+            .fontColor($r('app.color.hita_error_b91c1c'))
             .onClick(() => {
               this.errorText = '';
             })
         }
         .width('100%')
         .padding({ left: 14, right: 14, top: 9, bottom: 9 })
-        .backgroundColor('#FFF1F0')
-        .border({ width: { bottom: 1 }, color: '#FFD6D2' })
+        .backgroundColor($r('app.color.hita_error_surface_fff1f0'))
+        .border({ width: { bottom: 1 }, color: $r('app.color.hita_error_border') })
       }
 
       // ═══════════════ Web 容器（占满全屏剩余空间） ═══════════════
       Stack({ alignContent: Alignment.Center }) {
         if (this.initialUrl.length > 0) {
           Web({ src: this.initialUrl, controller: this.webController })
+            .darkMode(this.darkMode ? WebDarkMode.On : WebDarkMode.Off)
+            // Authentication pages own their CAPTCHA/QR colors; never invert them.
+            .forceDarkAccess(false)
             .domStorageAccess(true)
             .javaScriptAccess(true)
             .databaseAccess(true)
@@ -238,19 +398,24 @@ export struct EasLoginPage {
               hilog.info(DOMAIN, TAG, 'Web controller attached, starting EAS login: %{public}s', this.initialUrl);
               this.loginController.attachWeb(this.webController);
               this.loginController.start(this.campusCode, this.studentType);
+              this.watchPageLoad(this.initialUrl);
             })
             .onPageBegin((event) => {
+              if (!this.pageActive) {
+                return;
+              }
               const u: string = event !== undefined && event !== null ? event.url : '';
               this.progressValue = 0;
-              this.webReady = false;
+              if (this.recoveryBusy && u !== 'about:blank') {
+                return;
+              }
+              this.watchPageLoad(u);
               this.updateWebNavigation();
               this.loginController.notifyPageBegin(u);
             })
             .onPageEnd((event) => {
               const u: string = event !== undefined && event !== null ? event.url : '';
-              this.webReady = true;
-              this.updateWebNavigation();
-              this.loginController.notifyPageEnd(u);
+              this.pageEnded(u);
             })
             .onProgressChange((event) => {
               const p: number = event !== undefined && event !== null ? event.newProgress : 0;
@@ -266,6 +431,15 @@ export struct EasLoginPage {
                   errStr = String(event.error);
                 }
                 this.loginController.notifyLoadError(errStr);
+                if (event.request !== undefined && event.request.isMainFrame()) {
+                  this.clearPageLoadTimer();
+                  if (this.recoveryPending) {
+                    this.recoveryPending = false;
+                    this.recoveryBusy = false;
+                  }
+                  this.webReady = true;
+                  this.errorText = '认证页面加载失败，可刷新或重置网页登录';
+                }
               }
             })
             .onConsole((event) => {
@@ -287,7 +461,7 @@ export struct EasLoginPage {
               .height(54)
               .objectFit(ImageFit.Contain)
               .borderRadius(15)
-              .backgroundColor('#FFFFFF')
+              .backgroundColor($r('app.color.hita_surface'))
               .shadow({ radius: 12, color: '#14000000', offsetY: 4 });
             LoadingProgress()
               .width(28)
@@ -305,7 +479,8 @@ export struct EasLoginPage {
           }
           .padding({ left: 24, right: 24, top: 24, bottom: 24 })
           .borderRadius(18)
-          .backgroundColor('#FFFFFF')
+          .backgroundColor($r('app.color.hita_surface'))
+          .hitTestBehavior(HitTestMode.None)
           .shadow({ radius: 18, color: '#18000000', offsetY: 6 });
         }
 
@@ -335,7 +510,7 @@ export struct EasLoginPage {
                   .type(InputType.Normal)
                   .fontSize(16)
                   .height(44)
-                  .backgroundColor('#F3F4F6')
+                  .backgroundColor($r('app.color.hita_control_f3f4f6'))
                   .borderRadius(8)
                   .padding({ left: 12, right: 12 })
                   .onChange((value: string) => {
@@ -350,7 +525,7 @@ export struct EasLoginPage {
                     .fontSize(13)
                     .height(36)
                     .borderRadius(18)
-                    .backgroundColor('#FFFFFF')
+                    .backgroundColor($r('app.color.hita_surface'))
                     .fontColor(HitaColors.primary)
                     .border({ width: 1, color: HitaColors.primary })
                     .onClick(() => {
@@ -365,7 +540,7 @@ export struct EasLoginPage {
                     .fontSize(13)
                     .height(36)
                     .borderRadius(18)
-                    .backgroundColor('#FFFFFF')
+                    .backgroundColor($r('app.color.hita_surface'))
                     .fontColor(HitaColors.primary)
                     .border({ width: 1, color: HitaColors.primary })
                     .onClick(() => {
@@ -382,7 +557,7 @@ export struct EasLoginPage {
                 .width('100%')
                 .height(44)
                 .borderRadius(22)
-                .backgroundColor(HitaColors.primary)
+                .backgroundColor($r('app.color.hita_primary_fill'))
                 .fontColor(HitaColors.onPrimary)
                 .enabled(!this.mfaBusy)
                 .onClick(() => {
@@ -398,7 +573,7 @@ export struct EasLoginPage {
             .width('88%')
             .padding({ left: 22, right: 22, top: 22, bottom: 22 })
             .borderRadius(20)
-            .backgroundColor('#FFFFFF')
+            .backgroundColor($r('app.color.hita_surface'))
             .shadow({ radius: 22, color: 'rgba(0,0,0,0.18)', offsetY: 8 })
           }
           .width('100%')
@@ -412,6 +587,6 @@ export struct EasLoginPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#FFFFFF')
+    .backgroundColor($r('app.color.hita_surface'))
   }
 }

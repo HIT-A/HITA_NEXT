@@ -401,10 +401,10 @@ export struct EventEditorForm {
             Text(this.sheetTitle())
               .fontSize(20)
               .fontWeight(FontWeight.Bold)
-              .fontColor('#1D2B45')
+              .fontColor($r('app.color.hita_text_1d2b45'))
             Text(this.sheetSubtitle())
               .fontSize(12)
-              .fontColor('#72809A')
+              .fontColor($r('app.color.hita_text_secondary_72809a'))
               .margin({ top: 3 })
           }
           .layoutWeight(1)
@@ -431,7 +431,7 @@ export struct EventEditorForm {
         .width('100%')
         .height(56)
         .padding({ left: 16, right: 16 })
-        .backgroundColor('#3390EC')
+        .backgroundColor($r('app.color.hita_primary_fill'))
         .alignItems(VerticalAlign.Center)
       }
 
@@ -446,13 +446,13 @@ export struct EventEditorForm {
             Text('名称')
               .fontSize(14)
               .fontWeight(FontWeight.Medium)
-              .fontColor('#202B45')
+              .fontColor($r('app.color.hita_text_202b45'))
             TextInput({ placeholder: '事件名称', text: this.name })
               .fontSize(16)
               .height(46)
               .padding({ left: 12, right: 12 })
-              .backgroundColor('#FFFFFF')
-              .border({ width: 1, color: '#D7E0EC' })
+              .backgroundColor($r('app.color.hita_surface'))
+              .border({ width: 1, color: $r('app.color.hita_divider_d7e0ec') })
               .borderRadius(13)
               .margin({ top: 6 })
               .onChange((value: string) => {
@@ -461,7 +461,7 @@ export struct EventEditorForm {
           }
           .width('100%')
           .padding(12)
-          .backgroundColor('#FFFFFF')
+          .backgroundColor($r('app.color.hita_surface'))
           .borderRadius(14)
           .alignItems(HorizontalAlign.Start)
         }
@@ -470,13 +470,13 @@ export struct EventEditorForm {
             Text('地点（可空）')
               .fontSize(14)
               .fontWeight(FontWeight.Medium)
-              .fontColor('#202B45')
+              .fontColor($r('app.color.hita_text_202b45'))
             TextInput({ placeholder: '地点 / 教室 / 在线', text: this.place })
               .fontSize(16)
               .height(46)
               .padding({ left: 12, right: 12 })
-              .backgroundColor('#FFFFFF')
-              .border({ width: 1, color: '#D7E0EC' })
+              .backgroundColor($r('app.color.hita_surface'))
+              .border({ width: 1, color: $r('app.color.hita_divider_d7e0ec') })
               .borderRadius(13)
               .margin({ top: 6 })
               .onChange((value: string) => {
@@ -485,7 +485,7 @@ export struct EventEditorForm {
           }
           .width('100%')
           .padding(12)
-          .backgroundColor('#FFFFFF')
+          .backgroundColor($r('app.color.hita_surface'))
           .borderRadius(14)
           .alignItems(HorizontalAlign.Start)
         }
@@ -494,13 +494,13 @@ export struct EventEditorForm {
             Text('教师 / 组织者（可空）')
               .fontSize(14)
               .fontWeight(FontWeight.Medium)
-              .fontColor('#202B45')
+              .fontColor($r('app.color.hita_text_202b45'))
             TextInput({ placeholder: '教师 / 联系人', text: this.teacher })
               .fontSize(16)
               .height(46)
               .padding({ left: 12, right: 12 })
-              .backgroundColor('#FFFFFF')
-              .border({ width: 1, color: '#D7E0EC' })
+              .backgroundColor($r('app.color.hita_surface'))
+              .border({ width: 1, color: $r('app.color.hita_divider_d7e0ec') })
               .borderRadius(13)
               .margin({ top: 6 })
               .onChange((value: string) => {
@@ -509,7 +509,7 @@ export struct EventEditorForm {
           }
           .width('100%')
           .padding(12)
-          .backgroundColor('#FFFFFF')
+          .backgroundColor($r('app.color.hita_surface'))
           .borderRadius(14)
           .alignItems(HorizontalAlign.Start)
         }
@@ -528,7 +528,7 @@ export struct EventEditorForm {
         if (this.hint.length > 0) {
           Text(this.hint)
             .fontSize(12)
-            .fontColor(this.saved ? '#2E7D32' : '#D93025')
+            .fontColor(this.saved ? $r('app.color.hita_success_2e7d32') : $r('app.color.hita_error'))
             .width('100%')
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -537,7 +537,7 @@ export struct EventEditorForm {
         Button(this.loading ? '正在读取' : (this.saving ? '正在保存' : '保存'))
           .width('100%')
           .height(44)
-          .backgroundColor('#3390EC')
+          .backgroundColor($r('app.color.hita_primary_fill'))
           .borderRadius(22)
           .enabled(!this.loading && !this.loadFailed && !this.saving && !this.saved)
           .onClick(() => {
@@ -551,11 +551,11 @@ export struct EventEditorForm {
         top: 8,
         bottom: 10
       })
-      .backgroundColor(this.sheetMode ? '#F6F8FC' : '#F5F6F8')
+      .backgroundColor(this.sheetMode ? $r('app.color.hita_surface_soft') : $r('app.color.hita_page_f5f6f8'))
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.sheetMode ? '#F6F8FC' : '#F5F6F8')
+    .backgroundColor(this.sheetMode ? $r('app.color.hita_surface_soft') : $r('app.color.hita_page_f5f6f8'))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
@@ -569,8 +569,8 @@ export struct EventEditorForm {
           .layoutWeight(1)
           .height(38)
           .margin({ left: index === 0 ? 0 : 3, right: index === TYPE_ITEMS.length - 1 ? 0 : 3 })
-          .backgroundColor(this.typeIdx === index ? '#3390EC' : '#FFFFFF')
-          .fontColor(this.typeIdx === index ? '#FFFFFF' : '#333333')
+          .backgroundColor(this.typeIdx === index ? $r('app.color.hita_primary_fill') : $r('app.color.hita_surface'))
+          .fontColor(this.typeIdx === index ? '#FFFFFF' : $r('app.color.hita_text_333333'))
           .borderRadius(10)
           .onClick(() => {
             this.typeIdx = index;
@@ -580,7 +580,7 @@ export struct EventEditorForm {
     .width('100%')
     .height(48)
     .padding(5)
-    .backgroundColor('#E8EDF4')
+    .backgroundColor($r('app.color.hita_control_e8edf4'))
     .borderRadius(14)
   }
 
@@ -591,23 +591,23 @@ export struct EventEditorForm {
         Text('日期')
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
-          .fontColor('#202B45')
+          .fontColor($r('app.color.hita_text_202b45'))
         Text(this.dateText())
           .fontSize(18)
           .fontWeight(FontWeight.Medium)
-          .fontColor('#1D2B45')
+          .fontColor($r('app.color.hita_text_1d2b45'))
           .margin({ top: 6 })
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
       SymbolGlyph($r('sys.symbol.calendar'))
         .fontSize(24)
-        .fontColor(['#3390EC'])
+        .fontColor([$r('app.color.hita_primary_3390ec')])
     }
     .width('100%')
     .alignItems(VerticalAlign.Center)
     .padding(14)
-    .backgroundColor('#FFFFFF')
+    .backgroundColor($r('app.color.hita_surface'))
     .borderRadius(16)
     .onClick(() => {
       this.chooseDate();
@@ -620,29 +620,29 @@ export struct EventEditorForm {
       Text('时间')
         .fontSize(14)
         .fontWeight(FontWeight.Medium)
-        .fontColor('#202B45')
+        .fontColor($r('app.color.hita_text_202b45'))
       Row({ space: 10 }) {
         Row() {
           Column() {
             Text('开始时间')
               .fontSize(12)
-              .fontColor('#72809A')
+              .fontColor($r('app.color.hita_text_secondary_72809a'))
             Text(this.startLabel())
               .fontSize(18)
               .fontWeight(FontWeight.Medium)
-              .fontColor('#1D2B45')
+              .fontColor($r('app.color.hita_text_1d2b45'))
               .margin({ top: 6 })
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
           SymbolGlyph($r('sys.symbol.clock'))
             .fontSize(20)
-            .fontColor(['#3390EC'])
+            .fontColor([$r('app.color.hita_primary_3390ec')])
         }
         .layoutWeight(1)
         .alignItems(VerticalAlign.Center)
         .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-        .backgroundColor('#F6F8FC')
+        .backgroundColor($r('app.color.hita_surface_soft'))
         .borderRadius(12)
         .onClick(() => {
           this.pickStartTime();
@@ -651,23 +651,23 @@ export struct EventEditorForm {
           Column() {
             Text('结束时间')
               .fontSize(12)
-              .fontColor('#72809A')
+              .fontColor($r('app.color.hita_text_secondary_72809a'))
             Text(this.endLabel())
               .fontSize(18)
               .fontWeight(FontWeight.Medium)
-              .fontColor('#1D2B45')
+              .fontColor($r('app.color.hita_text_1d2b45'))
               .margin({ top: 6 })
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Start)
           SymbolGlyph($r('sys.symbol.clock'))
             .fontSize(20)
-            .fontColor(['#3390EC'])
+            .fontColor([$r('app.color.hita_primary_3390ec')])
         }
         .layoutWeight(1)
         .alignItems(VerticalAlign.Center)
         .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-        .backgroundColor('#F6F8FC')
+        .backgroundColor($r('app.color.hita_surface_soft'))
         .borderRadius(12)
         .onClick(() => {
           this.pickEndTime();
@@ -679,7 +679,7 @@ export struct EventEditorForm {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding(14)
-    .backgroundColor('#FFFFFF')
+    .backgroundColor($r('app.color.hita_surface'))
     .borderRadius(16)
   }
 

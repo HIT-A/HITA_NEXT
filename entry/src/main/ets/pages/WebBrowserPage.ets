@@ -8,6 +8,7 @@ import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 @Entry
 @Component
 struct WebBrowserPage {
+  @StorageProp('hita_appearance_dark') darkMode: boolean = false;
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
   @State url: string = '';
   @State titleText: string = '详情';
@@ -59,18 +60,18 @@ struct WebBrowserPage {
         Text(this.titleText)
           .fontSize(17)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#1A1A1A')
+          .fontColor($r('app.color.hita_text_1a1a1a'))
           .layoutWeight(1)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
         Button({ type: ButtonType.Circle }) {
           SymbolGlyph($r('sys.symbol.arrow_clockwise'))
             .fontSize(18)
-            .fontColor(['#2E86E8'])
+            .fontColor([$r('app.color.hita_primary')])
         }
         .width(40)
         .height(40)
-        .backgroundColor('#F2F4F7')
+        .backgroundColor($r('app.color.hita_control'))
         .accessibilityText('刷新')
         .onClick(() => {
           this.failed = false;
@@ -82,24 +83,26 @@ struct WebBrowserPage {
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-      .backgroundColor('#FFFFFF')
+      .backgroundColor($r('app.color.hita_surface'))
       .alignItems(VerticalAlign.Center)
 
       if (this.progress > 0 && this.progress < 100) {
         Progress({ value: this.progress, total: 100, type: ProgressType.Linear })
           .width('100%')
           .height(2)
-          .color('#2E86E8')
+          .color($r('app.color.hita_primary'))
       }
 
       if (this.url.length === 0) {
         Text('没有可打开的链接')
           .fontSize(14)
-          .fontColor('#5A6880')
+          .fontColor($r('app.color.hita_text_secondary_5a6880'))
           .margin({ top: 60 })
       } else {
         Stack() {
           Web({ src: this.url, controller: this.controller })
+            .darkMode(this.darkMode ? WebDarkMode.On : WebDarkMode.Off)
+            .forceDarkAccess(this.darkMode)
             .width('100%')
             .height('100%')
             .javaScriptAccess(true)
@@ -120,12 +123,12 @@ struct WebBrowserPage {
             Column() {
               Text('页面加载失败，请检查网络后点右上角刷新')
                 .fontSize(14)
-                .fontColor('#4E5C72')
+                .fontColor($r('app.color.hita_text_secondary'))
             }
             .width('100%')
             .height('100%')
             .justifyContent(FlexAlign.Center)
-            .backgroundColor('#F6F7FA')
+            .backgroundColor($r('app.color.hita_page_f6f7fa'))
           }
         }
         .width('100%')
@@ -135,6 +138,6 @@ struct WebBrowserPage {
     .width('100%')
     .height('100%')
     .padding({ top: this.statusBarInset })
-    .backgroundColor('#FFFFFF')
+    .backgroundColor($r('app.color.hita_surface'))
   }
 }

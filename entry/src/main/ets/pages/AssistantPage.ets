@@ -12,12 +12,12 @@ import { AssistantMessage, AssistantRole, AssistantService } from '../feature/as
 import { AssistantProvider, AssistantSettings, AssistantSettingsStore } from '../feature/assistant/AssistantSettingsStore';
 import { KEYBOARD_INSET_FALLBACK, NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 
-const COLOR_PRIMARY: string = '#2E86E8';
-const COLOR_CARD: string = '#FFFFFF';
-const COLOR_TEXT_PRIMARY: string = '#14213D';
-const COLOR_TEXT_SECONDARY: string = '#4E5C72';
-const COLOR_TEXT_HINT: string = '#5A6880';
-const COLOR_NAV_ACTIVE: string = '#E3EEFC';
+const COLOR_PRIMARY: ResourceColor = $r('app.color.hita_primary');
+const COLOR_CARD: ResourceColor = $r('app.color.hita_surface');
+const COLOR_TEXT_PRIMARY: ResourceColor = $r('app.color.hita_text');
+const COLOR_TEXT_SECONDARY: ResourceColor = $r('app.color.hita_text_secondary');
+const COLOR_TEXT_HINT: ResourceColor = $r('app.color.hita_text_secondary_5a6880');
+const COLOR_NAV_ACTIVE: ResourceColor = $r('app.color.hita_selected');
 const SURFACE_RGB: string = '244,247,252';
 const HEADER_BODY: number = 56;
 
@@ -260,7 +260,7 @@ struct AssistantPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F4F7FC')
+    .backgroundColor($r('app.color.hita_page'))
     .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.KEYBOARD], [SafeAreaEdge.BOTTOM]);
   }
 
@@ -297,7 +297,7 @@ struct AssistantPage {
       }
       .width('100%')
       .padding(4)
-      .backgroundColor('#EAF0F7')
+      .backgroundColor($r('app.color.hita_control_eaf0f7'))
       .borderRadius(14)
       .margin({ top: 12 });
       TextInput({ placeholder: this.provider === AssistantProvider.ZHIPU ? '智谱开放平台 API Key' : 'DeepSeek API Key',
@@ -305,7 +305,7 @@ struct AssistantPage {
         .type(InputType.Password)
         .height(42)
         .margin({ top: 10 })
-        .backgroundColor('#F4F7FC')
+        .backgroundColor($r('app.color.hita_page'))
         .borderRadius(12)
         .onChange((value: string) => {
           this.apiKeyDraft = value;
@@ -323,7 +323,7 @@ struct AssistantPage {
           .layoutWeight(1)
           .height(40)
           .fontColor('#FFFFFF')
-          .backgroundColor(COLOR_PRIMARY)
+          .backgroundColor($r('app.color.hita_primary_fill'))
           .onClick(() => {
             this.saveSettings();
           });
@@ -363,7 +363,7 @@ struct AssistantPage {
           .fontColor('#FFFFFF')
           .lineHeight(22)
           .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-          .backgroundColor(COLOR_PRIMARY)
+          .backgroundColor($r('app.color.hita_primary_fill'))
           .borderRadius(16)
           .constraintSize({ maxWidth: '82%' })
           .copyOption(CopyOptions.LocalDevice);
@@ -434,7 +434,8 @@ struct AssistantPage {
       }
       .width(44)
       .height(44)
-      .backgroundColor(this.input.trim().length > 0 && !this.chat.sending ? COLOR_PRIMARY : '#AFC8E8')
+      .backgroundColor(this.input.trim().length > 0 && !this.chat.sending ?
+        $r('app.color.hita_primary_fill') : $r('app.color.hita_disabled'))
       .enabled(this.input.trim().length > 0 && !this.chat.sending)
       .accessibilityText('发送')
       .onClick(() => {

@@ -9,4 +9,11 @@ export class TimetableTheme {
     '#14213D', '#FFFFFF',
     '#E53935', '#FB8C00', '#F9A825', '#43A047', '#00ACC1', '#1E88E5', '#8E24AA'
   ];
+
+  static resolveText(selected: string, dark: boolean, hasWallpaper: boolean): string {
+    if (!hasWallpaper && selected.toUpperCase() === TimetableTheme.DEFAULT_TEXT) {
+      return dark ? '#ECEFF4' : TimetableTheme.DEFAULT_TEXT;
+    }
+    return selected;
+  }
 }

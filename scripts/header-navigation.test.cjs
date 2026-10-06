@@ -27,7 +27,9 @@ test('the shared button keeps the reference style and accessible click target', 
   assert.match(source, /sys\.symbol\.chevron_left/);
   assert.match(source, /\.width\(44\)[\s\S]*\.height\(44\)/);
   assert.match(source, /\.flexShrink\(0\)/);
-  assert.match(source, /\.backgroundColor\('#F2F4F7'\)/);
+  assert.match(source, /\.backgroundColor\(\$r\('app\.color\.hita_control'\)\)/);
+  const colors = JSON.parse(read('../resources/base/element/color.json')).color;
+  assert.equal(colors.find(item => item.name === 'hita_control').value, '#F2F4F7');
   assert.match(source, /\.accessibilityText\(this\.accessibilityLabel\)/);
   assert.match(source, /\.onClick\(\(\) => \{\s*this\.onBack\(\);/);
 });

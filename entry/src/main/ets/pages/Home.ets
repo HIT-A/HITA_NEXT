@@ -11,6 +11,7 @@ import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
 import { TimetableTheme } from '../common/theme/TimetableTheme';
+import { AppearanceMode, AppearanceStore } from '../common/theme/AppearanceStore';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { DockBarMaterial } from '../common/theme/ImmersiveDockModifier';
 import { RdbHelper } from '../common/db/RdbHelper';
@@ -42,17 +43,17 @@ import {
 } from '../feature/timetable/views/TimetableWeekDraw';
 
 const DAY_MS: number = 24 * 60 * 60 * 1000;
-const COLOR_PRIMARY: string = '#2E86E8';
-const COLOR_SURFACE: string = '#F4F7FC';
-const COLOR_CARD: string = '#FFFFFF';
-const COLOR_TEXT_PRIMARY: string = '#14213D';
-const COLOR_TEXT_SECONDARY: string = '#4E5C72';
-const COLOR_TEXT_HINT: string = '#5A6880';
-const COLOR_NAV_ACTIVE: string = '#E3EEFC';
-const COLOR_CLASS: string = '#2E86E8';
-const COLOR_EXAM: string = '#8A2E42';
-const COLOR_OTHER: string = '#1B4F9C';
-const COLOR_TAG: string = '#0F6E56';
+const COLOR_PRIMARY: Resource = $r('app.color.hita_primary');
+const COLOR_SURFACE: ResourceColor = $r('app.color.hita_page');
+const COLOR_CARD: ResourceColor = $r('app.color.hita_surface');
+const COLOR_TEXT_PRIMARY: ResourceColor = $r('app.color.hita_text');
+const COLOR_TEXT_SECONDARY: ResourceColor = $r('app.color.hita_text_secondary');
+const COLOR_TEXT_HINT: ResourceColor = $r('app.color.hita_text_secondary_5a6880');
+const COLOR_NAV_ACTIVE: ResourceColor = $r('app.color.hita_selected');
+const COLOR_CLASS: ResourceColor = $r('app.color.hita_primary');
+const COLOR_EXAM: ResourceColor = $r('app.color.hita_error_8a2e42');
+const COLOR_OTHER: ResourceColor = $r('app.color.hita_link');
+const COLOR_TAG: ResourceColor = $r('app.color.hita_success_0f6e56');
 const TIMETABLE_BOTTOM_SAFE_EXTENSION: number = 56;
 const TAB_TODAY: number = 0;
 const TAB_TIMETABLE: number = 1;
@@ -91,6 +92,10 @@ class TimetableMarqueeCallback extends FrameCallback {
 @Entry
 @Component
 struct Home {
+  @StorageProp('hita_appearance_mode') appearanceMode: AppearanceMode = AppearanceMode.SYSTEM;
+  @StorageProp('hita_appearance_dark') @Watch('onAppearanceChanged') darkMode: boolean = false;
+  @State appearanceBusy: boolean = false;
+  @State appearanceExpanded: boolean = false;
   @State todayItems: EasEventItem[] = [];
   @State timelineText: string = '暂无今日日程';
   @State currentTab: number = 0;
@@ -143,7 +148,7 @@ struct Home {
   @State moreHeaderMaskOpacity: number = 0;
   @State selectedNav: number = TAB_TODAY;
   @State timetableBgUri: string = '';
-  @State timetableTextColor: string = COLOR_TEXT_PRIMARY;
+  @State timetableTextColor: string = TimetableTheme.DEFAULT_TEXT;
   @State timetablePaletteOpen: boolean = false;
   @State timetableChromeH: number = TIMETABLE_CHROME_FALLBACK;
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
@@ -164,7 +169,7 @@ struct Home {
     const bgPath: string = TimetableBackgroundStore.loadPath(ctx);
     this.timetableBgUri = bgPath.length > 0 ? TimetableBackgroundStore.toDisplayUri(bgPath) : '';
     this.timetableTextColor = await TimetableSelectionStore.getInstance()
-      .loadTextColor(COLOR_TEXT_PRIMARY);
+      .loadTextColor(TimetableTheme.DEFAULT_TEXT);
     const params: Object | undefined = this.getUIContext().getRouter().getParams();
     if (params !== undefined && params !== null) {
       const record: Record<string, string> = params as Record<string, string>;
@@ -189,6 +194,28 @@ struct Home {
     this.pageVisible = false;
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.OFFSET);
     this.stopTimetableMarquee();
+  }
+
+  private onAppearanceChanged(): void {
+    this.drawTimetableNow();
+  }
+
+  private timetableInk(): string {
+    return TimetableTheme.resolveText(this.timetableTextColor, this.darkMode, this.hasTimetableBackground());
+  }
+
+  private async selectAppearance(mode: AppearanceMode): Promise<void> {
+    if (this.appearanceBusy || this.appearanceMode === mode) {
+      return;
+    }
+    this.appearanceBusy = true;
+    try {
+      await AppearanceStore.getInstance().select(mode);
+    } catch (_) {
+      this.getUIContext().getPromptAction().showToast({ message: '外观设置未保存，请重试' });
+    } finally {
+      this.appearanceBusy = false;
+    }
   }
 
   aboutToDisappear(): void {
@@ -410,7 +437,7 @@ struct Home {
     const labels: TimetablePlaceLabel[] = drawTimetableWeek(this.timetableCanvas,
       this.timetableAreaW, canvasHeight,
       this.currentTimetable, weekEvents, this.timetableWeek, current === this.timetableWeek,
-      hourHeight, 0, false, !this.hasTimetableBackground(), this.timetableTextColor);
+      hourHeight, 0, false, !this.hasTimetableBackground(), this.timetableInk(), this.darkMode);
     if (labels.length !== this.timetablePlaceLabels.length ||
       labels.some((label: TimetablePlaceLabel, index: number): boolean =>
         !label.matches(this.timetablePlaceLabels[index]))) {
@@ -740,7 +767,7 @@ struct Home {
       title: '时间表壁纸',
       buttons: [
         { text: '更换壁纸', color: COLOR_PRIMARY },
-        { text: '移除壁纸', color: '#E53935' }
+        { text: '移除壁纸', color: $r('app.color.hita_error_e53935') }
       ]
     }).then((ret) => {
       if (ret.index === 0) {
@@ -850,7 +877,7 @@ struct Home {
     return '课';
   }
 
-  private static eventColor(type: EasEventType): string {
+  private static eventColor(type: EasEventType): ResourceColor {
     if (type === EasEventType.CLASS) {
       return COLOR_CLASS;
     }
@@ -876,7 +903,7 @@ struct Home {
     return '';
   }
 
-  private static statusColor(status: string): string {
+  private static statusColor(status: string): ResourceColor {
     if (status === '进行中') {
       return COLOR_PRIMARY;
     }
@@ -886,14 +913,14 @@ struct Home {
     return COLOR_TEXT_HINT;
   }
 
-  private static statusBgColor(status: string): string {
+  private static statusBgColor(status: string): ResourceColor {
     if (status === '进行中') {
-      return '#E3EEFC';
+      return $r('app.color.hita_selected');
     }
     if (status === '即将开始') {
-      return '#EAF3FD';
+      return $r('app.color.hita_selected_eaf3fd');
     }
-    return '#F1F4F8';
+    return $r('app.color.hita_control_f1f4f8');
   }
 
   private static defaultCanvasColor(type: EasEventType): number {
@@ -1033,7 +1060,7 @@ struct Home {
     .scrollable(!this.tabSwipeLocked())
     .animationDuration(TAB_SWIPE_MS)
     .barFloatingStyle(DockBarMaterial.floatingStyle(12 + this.navBarInset,
-      this.selectedNav === TAB_TIMETABLE && this.hasTimetableBackground()))
+      this.selectedNav === TAB_TIMETABLE && this.hasTimetableBackground(), this.darkMode))
     .backgroundColor(this.currentTab === 1 ? Color.Transparent : COLOR_SURFACE)
     .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.KEYBOARD], [SafeAreaEdge.BOTTOM])
     .onAreaChange((oldValue: Area, newValue: Area) => {
@@ -1054,7 +1081,7 @@ struct Home {
       showClose: false,
       preferType: SheetType.BOTTOM,
       backgroundColor: COLOR_SURFACE,
-      maskColor: 'rgba(20,33,61,0.24)',
+      maskColor: $r('app.color.hita_sheet_mask'),
       onDisappear: () => {
         // Keep content and height stable until the dismissal animation finishes.
         this.activeSheetVisible = false;
@@ -1200,7 +1227,7 @@ struct Home {
           Text(this.activeClass.place.length > 0 ? this.activeClass.place : '上课中')
             .fontSize(13)
             .fontColor('#FFFFFF')
-            .backgroundColor('#5AA2EE')
+            .backgroundColor($r('app.color.hita_hero_chip'))
             .borderRadius(12)
             .padding({ left: 8, right: 8, top: 3, bottom: 3 })
             .maxLines(1)
@@ -1213,7 +1240,7 @@ struct Home {
           .width('100%')
           .height(5)
           .color('#FFFFFF')
-          .backgroundColor('#5AA2EE')
+          .backgroundColor($r('app.color.hita_hero_chip'))
           .margin({ top: 12 });
         Text('今日已上 ' + this.completedClassCount().toString() + ' 节，共 ' +
           this.todayClassCount().toString() + ' 节')
@@ -1234,7 +1261,7 @@ struct Home {
           Text(this.nextClass.place.length > 0 ? this.nextClass.place : '待开始')
             .fontSize(12)
             .fontColor('#FFFFFF')
-            .backgroundColor('#5AA2EE')
+            .backgroundColor($r('app.color.hita_hero_chip'))
             .borderRadius(12)
             .padding({ left: 8, right: 8, top: 3, bottom: 3 })
             .maxLines(1)
@@ -1252,7 +1279,7 @@ struct Home {
     }
     .width('100%')
     .padding({ left: 18, right: 18, top: 16, bottom: 16 })
-    .backgroundColor(COLOR_PRIMARY)
+    .backgroundColor($r('app.color.hita_primary_fill'))
     .borderRadius(24)
     .shadow({ radius: 14, color: '#262E86E8', offsetY: 6 })
     .margin({ top: 12 });
@@ -1286,7 +1313,7 @@ struct Home {
       Blank()
       Text('—')
         .fontSize(48)
-        .fontColor('#C9D2DE')
+        .fontColor($r('app.color.hita_divider_c9d2de'))
         .margin({ bottom: 14 })
       Text(this.hasTimetable ? '今日暂无日程' : '还没有可展示的课表')
         .fontSize(17)
@@ -1317,13 +1344,13 @@ struct Home {
           Row()
             .width(2)
             .height(28)
-            .backgroundColor('#DCE4F0');
+            .backgroundColor($r('app.color.hita_divider_dce4f0'));
           Stack() {
             if (event.containsTimestamp(this.nowTick)) {
               Circle()
                 .width(22)
                 .height(22)
-                .fill('#CFE3FA');
+                .fill($r('app.color.hita_selected_cfe3fa'));
               Circle()
                 .width(14)
                 .height(14)
@@ -1332,7 +1359,7 @@ struct Home {
               Circle()
                 .width(event.to <= this.nowTick ? 18 : 12)
                 .height(event.to <= this.nowTick ? 18 : 12)
-                .fill(event.to <= this.nowTick ? '#C9D1DD' : Home.eventColor(event.type));
+                .fill(event.to <= this.nowTick ? $r('app.color.hita_divider_c9d1dd') : Home.eventColor(event.type));
             }
             if (event.to <= this.nowTick && !event.containsTimestamp(this.nowTick)) {
               SymbolGlyph($r('sys.symbol.checkmark'))
@@ -1362,7 +1389,7 @@ struct Home {
             Text('已结束')
               .fontSize(11)
               .fontColor(COLOR_TEXT_HINT)
-              .backgroundColor('#F2F4F7')
+              .backgroundColor($r('app.color.hita_control'))
               .borderRadius(9)
               .padding({ left: 7, right: 7, top: 3, bottom: 3 });
           }
@@ -1421,7 +1448,7 @@ struct Home {
                   .fontSize(12)
                   .fontColor(COLOR_TEXT_SECONDARY)
                   .margin({ left: 5 })
-                  .backgroundColor('#E3EEFC')
+                  .backgroundColor($r('app.color.hita_selected'))
                   .borderRadius(11)
                   .padding({ left: 7, right: 7, top: 3, bottom: 3 })
                   .maxLines(1)
@@ -1445,7 +1472,7 @@ struct Home {
               .width('100%')
               .height(3)
               .color(COLOR_PRIMARY)
-              .backgroundColor('#E8F1FB')
+              .backgroundColor($r('app.color.hita_selected_e8f1fb'))
               .margin({ top: 10 });
           }
         }
@@ -1458,7 +1485,7 @@ struct Home {
     .backgroundColor(COLOR_CARD)
     .borderRadius(16)
     .border({ width: event.containsTimestamp(this.nowTick) ? 1.5 : 1,
-      color: event.containsTimestamp(this.nowTick) ? '#9CC5F5' : '#EDF1F7' })
+      color: event.containsTimestamp(this.nowTick) ? $r('app.color.hita_focus') : $r('app.color.hita_divider_edf1f7') })
     .clip(true)
     .margin({ bottom: 2 });
   }
@@ -1470,7 +1497,7 @@ struct Home {
         .fontSize(14)
         .height(40)
         .fontColor('#FFFFFF')
-        .backgroundColor(COLOR_PRIMARY)
+        .backgroundColor($r('app.color.hita_primary_fill'))
         .borderRadius(20)
         .onClick(() => {
           if (this.sessionInfo === undefined) {
@@ -1498,17 +1525,17 @@ struct Home {
         .width(48)
         .fontSize(11)
         .fontWeight(FontWeight.Bold)
-        .fontColor(this.timetableTextColor)
+        .fontColor(this.timetableInk())
         .textAlign(TextAlign.Center)
       ForEach(DOW_NAMES, (name: string, dayIndex: number) => {
         Column() {
           Text(name)
             .fontSize(this.timetableHeaderIsToday(dayIndex) ? 11 : 10)
             .fontWeight(FontWeight.Bold)
-            .fontColor(this.timetableTextColor)
+            .fontColor(this.timetableInk())
           Text(this.timetableHeaderDate(dayIndex))
             .fontSize(10)
-            .fontColor(this.timetableTextColor)
+            .fontColor(this.timetableInk())
             .margin({ top: 4 })
         }
         .layoutWeight(1)
@@ -1542,10 +1569,10 @@ struct Home {
             Text('还没有课表数据')
               .fontSize(16)
               .fontWeight(FontWeight.Medium)
-              .fontColor(this.timetableTextColor)
+              .fontColor(this.timetableInk())
             Text('暂无已导入或手动创建的课表')
               .fontSize(13)
-              .fontColor(this.timetableTextColor)
+              .fontColor(this.timetableInk())
               .margin({ top: 8, bottom: 16 })
             this.emptyTimetableActions();
           }
@@ -1641,12 +1668,12 @@ struct Home {
               '第' + this.timetableWeek.toString() + '周')
               .fontSize(34)
               .fontWeight(FontWeight.Bold)
-              .fontColor(this.timetableTextColor)
+              .fontColor(this.timetableInk())
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
             Text(this.timetableCampusTerm())
               .fontSize(15)
-              .fontColor(this.timetableTextColor)
+              .fontColor(this.timetableInk())
               .backgroundColor(Color.Transparent)
               .borderRadius(12)
               .padding({ left: 11, right: 11, top: 5, bottom: 5 })
@@ -1703,7 +1730,7 @@ struct Home {
               .backgroundColor(color)
               .border({
                 width: this.timetableTextColor === color ? 2 : 1,
-                color: color === TimetableTheme.WHITE_TEXT ? '#C5CDD8' :
+                color: color === TimetableTheme.WHITE_TEXT ? $r('app.color.hita_divider_c5cdd8') :
                   (this.timetableTextColor === color ? color : 'rgba(255,255,255,0.85)')
               })
               .accessibilityText('字体颜色')
@@ -1747,7 +1774,7 @@ struct Home {
   }
 
   @Builder
-  statusBanner(message: string, background: string, foreground: string) {
+  statusBanner(message: string, background: ResourceColor, foreground: ResourceColor) {
     Row() {
       Text('•')
         .fontSize(18)
@@ -1855,6 +1882,7 @@ struct Home {
           this.moreSectionTitle('设置');
           Column() {
             this.moreToggleRow($r('sys.symbol.bell'), '课程提醒', this.classReminderSubtitle());
+            this.appearanceSettings();
             this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '公告',
               '版本更新 · 服务与故障通知', () => {
                 this.getUIContext().getRouter().pushUrl({ url: 'pages/NoticesPage' });
@@ -1906,6 +1934,101 @@ struct Home {
   }
 
   @Builder
+  appearanceSettings() {
+    Column() {
+      Row() {
+        Stack() {
+          SymbolGlyph($r('sys.symbol.moon'))
+            .fontSize(22)
+            .fontColor([COLOR_PRIMARY]);
+        }
+        .width(40)
+        .height(40)
+        .borderRadius(20)
+        .alignContent(Alignment.Center)
+        .backgroundColor(COLOR_NAV_ACTIVE);
+        Column() {
+          Text('深色模式')
+            .fontSize(14)
+            .fontColor(COLOR_TEXT_PRIMARY)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis });
+          Text(this.appearanceMode === AppearanceMode.DARK ? '已开启' :
+            (this.appearanceMode === AppearanceMode.LIGHT ? '已关闭' : '跟随系统'))
+            .fontSize(12)
+            .fontColor(COLOR_TEXT_SECONDARY)
+            .margin({ top: 2 })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis });
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: 12 });
+        Text('›')
+          .fontSize(23)
+          .fontColor(COLOR_TEXT_SECONDARY)
+          .rotate({ angle: this.appearanceExpanded ? 90 : 0 });
+      }
+      .width('100%')
+      .height(56)
+      .padding({ left: 16, right: 16 })
+      .alignItems(VerticalAlign.Center)
+      .accessibilityDescription(this.appearanceExpanded ? '已展开' : '已收起')
+      .onClick(() => {
+        this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseInOut }, () => {
+          this.appearanceExpanded = !this.appearanceExpanded;
+        });
+      });
+      if (this.appearanceExpanded) {
+        Row({ space: 8 }) {
+          this.appearanceOption(AppearanceMode.DARK, '开启');
+          this.appearanceOption(AppearanceMode.LIGHT, '关闭');
+          this.appearanceOption(AppearanceMode.SYSTEM, '跟随系统');
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 4, bottom: 12 })
+        .transition(TransitionEffect.OPACITY);
+      }
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start);
+  }
+
+  @Builder
+  appearanceOption(mode: AppearanceMode, label: string) {
+    Row({ space: 4 }) {
+      Radio({ value: mode, group: 'appearance_mode' })
+        .checked(this.appearanceMode === mode)
+        .width(18)
+        .height(18)
+        .margin(0)
+        .radioStyle({ checkedBackgroundColor: COLOR_PRIMARY })
+        .enabled(!this.appearanceBusy)
+        .accessibilityText('深色模式：' + label)
+        .onChange((checked: boolean) => {
+          if (checked) {
+            void this.selectAppearance(mode);
+          }
+        });
+      Text(label)
+        .fontSize(13)
+        .fontColor(COLOR_TEXT_PRIMARY)
+        .maxLines(1);
+    }
+    .width(0)
+    .layoutWeight(1)
+    .height(44)
+    .padding({ left: 6, right: 6 })
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor(this.appearanceMode === mode ? COLOR_NAV_ACTIVE : $r('app.color.hita_control'))
+    .borderRadius(8)
+    .enabled(!this.appearanceBusy)
+    .onClick(() => {
+      void this.selectAppearance(mode);
+    });
+  }
+
+  @Builder
   userCard() {
     Row() {
       Column() {
@@ -1918,7 +2041,8 @@ struct Home {
       .width(40)
       .height(40)
       .borderRadius(20)
-      .backgroundColor(this.sessionInfo === undefined ? '#AAB4C1' : COLOR_PRIMARY)
+      .backgroundColor(this.sessionInfo === undefined ? $r('app.color.hita_disabled_aab4c1') :
+        $r('app.color.hita_primary_fill'))
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center);
       Column() {
@@ -2096,7 +2220,7 @@ struct Home {
         }
         .width('100%')
         .padding(4)
-        .backgroundColor('#EAF0F7')
+        .backgroundColor($r('app.color.hita_control_eaf0f7'))
         .borderRadius(16)
         .margin({ top: 7 });
       }
@@ -2116,7 +2240,7 @@ struct Home {
           .width(48)
           .height(48)
           .borderRadius(24)
-          .backgroundColor(COLOR_PRIMARY)
+          .backgroundColor($r('app.color.hita_primary_fill'))
           .alignContent(Alignment.Center);
           Column() {
             Text(this.sessionSheetInfo.name.length > 0 ? this.sessionSheetInfo.name :
@@ -2139,15 +2263,15 @@ struct Home {
           Text('已连接')
             .fontSize(12)
             .fontWeight(FontWeight.Medium)
-            .fontColor('#248A5A')
+            .fontColor($r('app.color.hita_success'))
             .padding({ left: 9, right: 9, top: 5, bottom: 5 })
-            .backgroundColor('#E6F5ED')
+            .backgroundColor($r('app.color.hita_success_surface'))
             .borderRadius(12);
         }
         .width('100%')
         .padding(15)
-        .backgroundColor('#F8FAFD')
-        .border({ width: 1, color: '#E3EAF2' })
+        .backgroundColor($r('app.color.hita_surface_soft_f8fafd'))
+        .border({ width: 1, color: $r('app.color.hita_divider_e3eaf2') })
         .borderRadius(18)
         .margin({ top: 16 });
 
@@ -2168,8 +2292,8 @@ struct Home {
             .height(46)
             .fontSize(15)
             .fontWeight(FontWeight.Medium)
-            .fontColor('#D93025')
-            .backgroundColor('#FCE8E6')
+            .fontColor($r('app.color.hita_error'))
+            .backgroundColor($r('app.color.hita_error_surface'))
             .borderRadius(17)
             .onClick(() => {
               this.logoutSession();
@@ -2212,7 +2336,7 @@ struct Home {
             .fontSize(15)
             .fontWeight(FontWeight.Medium)
             .fontColor('#FFFFFF')
-            .backgroundColor(COLOR_PRIMARY)
+            .backgroundColor($r('app.color.hita_primary_fill'))
             .borderRadius(17)
             .margin({ top: 14 })
             .onClick(() => {
@@ -2232,8 +2356,8 @@ struct Home {
         }
         .width('100%')
         .padding(16)
-        .backgroundColor('#F8FAFD')
-        .border({ width: 1, color: '#E3EAF2' })
+        .backgroundColor($r('app.color.hita_surface_soft_f8fafd'))
+        .border({ width: 1, color: $r('app.color.hita_divider_e3eaf2') })
         .borderRadius(18)
         .margin({ top: 16 });
       }
@@ -2249,7 +2373,7 @@ struct Home {
         .width(9)
         .height(9)
         .fill(this.sessionSheetCampus === code ? COLOR_PRIMARY : 'transparent')
-        .stroke(this.sessionSheetCampus === code ? COLOR_PRIMARY : '#A9B4C2')
+        .stroke(this.sessionSheetCampus === code ? COLOR_PRIMARY : $r('app.color.hita_text_hint_a9b4c2'))
         .strokeWidth(1.5);
       Text(label)
         .fontSize(15)

@@ -27,6 +27,7 @@ const { drawTimetableWeek, drawTimetablePlaces, TimetablePlaceLabel, timetableEv
   timetableBlockColor, argbToCss, TimetableDrawStyle } =
   load('feature/timetable/views/TimetableWeekDraw.ets');
 const { EasEventItem, EasTimetable } = load('common/model/timetable/TimetableModels.ets');
+const { TimetableTheme } = load('common/theme/TimetableTheme.ets');
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 0.0001, `${actual} != ${expected}`);
 
 test('fitting classrooms stay still and do not request animation frames', () => {
@@ -79,7 +80,7 @@ function canvas() {
     ctx[method] = (...args) => ctx.calls.push([method, ...args]);
   }
   ctx.paints = [];
-  for (const method of ['fill', 'stroke', 'fillText']) {
+  for (const method of ['fill', 'stroke', 'fillText', 'fillRect']) {
     const record = ctx[method];
     ctx[method] = (...args) => {
       ctx.paints.push({ method, color: method === 'stroke' ? ctx.strokeStyle : ctx.fillStyle, args });
@@ -116,6 +117,36 @@ function luminance(argb) {
   };
   return 0.2126 * linear(16) + 0.7152 * linear(8) + 0.0722 * linear(0);
 }
+
+test('dark timetable changes the canvas surface and labels without moving or recoloring courses', () => {
+  const { timetable, events } = fixture();
+  const light = canvas(), dark = canvas();
+  drawTimetableWeek(light, 380, 830, timetable, events, 1, false, 50, 64, true, true, '', false);
+  drawTimetableWeek(dark, 380, 830, timetable, events, 1, false, 50, 64, true, true, '', true);
+  assert.deepEqual(dark.calls, light.calls);
+  assert.equal(dark.paints.find(p => p.method === 'fillRect').color, '#101214');
+  assert.equal(dark.paints.find(p => p.method === 'fillText' && p.args[0] === '8:00').color, '#BCC3CF');
+  assert.equal(dark.paints.find(p => p.method === 'stroke').color, '#3A414B');
+  assert.deepEqual(dark.paints.filter(p => p.method === 'fill'), light.paints.filter(p => p.method === 'fill'));
+  const headerText = dark.paints.filter(p => p.method === 'fillText').slice(0, 15);
+  assert.ok(headerText.every(p => ['#ECEFF4', '#BCC3CF'].includes(p.color)));
+});
+
+test('dark timetable does not paint a solid background over a wallpaper or overwrite custom labels', () => {
+  const { timetable, events } = fixture();
+  const ctx = canvas();
+  drawTimetableWeek(ctx, 380, 830, timetable, events, 1, false, 50, 64, true, false, '#FFFFFF', true);
+  assert.equal(ctx.paints.filter(p => p.method === 'fillRect').length, 0);
+  assert.ok(ctx.paints.filter(p => p.method === 'fillText').every(p => p.color === '#FFFFFF'));
+  assert.equal(TimetableTheme.resolveText('#14213D', true, false), '#ECEFF4');
+  assert.equal(TimetableTheme.resolveText('#14213D', false, false), '#14213D');
+  for (const custom of TimetableTheme.PALETTE) {
+    assert.equal(TimetableTheme.resolveText(custom, true, true), custom);
+    if (custom !== TimetableTheme.DEFAULT_TEXT) {
+      assert.equal(TimetableTheme.resolveText(custom, true, false), custom);
+    }
+  }
+});
 
 test('saved pastel colors and custom colors retain readable white text without changing the model palette', () => {
   const models = fs.readFileSync(path.join(root, 'common/model/timetable/TimetableModels.ets'), 'utf8');

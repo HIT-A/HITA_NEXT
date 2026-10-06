@@ -17,7 +17,7 @@ const WEEK_MS: number = 7 * 24 * 60 * 60 * 1000;
 const DOMAIN: number = 0x0000;
 const TAG: string = 'HitaTimetableMgr';
 const HEADER_HEIGHT: number = 64;
-const PAGE_BG: string = '#F6F7FA';
+const PAGE_BG: ResourceColor = $r('app.color.hita_page_f6f7fa');
 const PAGE_BG_RGB: string = '246,247,250';
 
 @Entry
@@ -178,7 +178,7 @@ struct TimetableManagerPage {
       title: '删除课表',
       message: '确定删除选中的 ' + count.toString() + ' 张课表及其全部课程吗？',
       buttons: [
-        { text: '取消', color: '#7B8190' },
+        { text: '取消', color: $r('app.color.hita_text_secondary_7b8190') },
         { text: '删除', color: HitaColors.error }
       ]
     }).then((ret) => {
@@ -251,12 +251,12 @@ struct TimetableManagerPage {
           Text(timetable.name.length > 0 ? timetable.name : '未命名课表')
             .fontSize(20)
             .fontWeight(FontWeight.Bold)
-            .fontColor('#202633')
+            .fontColor($r('app.color.hita_text_202633'))
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
           Text(TimetableManagerPage.dateRange(timetable))
             .fontSize(12)
-            .fontColor('#788196')
+            .fontColor($r('app.color.hita_text_secondary_788196'))
             .margin({ top: 8 })
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -267,7 +267,7 @@ struct TimetableManagerPage {
       }
       .width('100%')
       .height(260)
-      .backgroundColor('#FFFFFF')
+      .backgroundColor($r('app.color.hita_surface'))
       .borderRadius(24)
       .shadow({ radius: 12, color: '#10000000', offsetY: 4 })
       .onClick(() => {
@@ -290,7 +290,7 @@ struct TimetableManagerPage {
         .height(26)
         .padding({ left: 10, right: 10 })
         .justifyContent(FlexAlign.Center)
-        .backgroundColor(HitaColors.primary)
+        .backgroundColor($r('app.color.hita_primary_fill'))
         .borderRadius(13)
         .margin({ top: 12, right: 12 })
       }
@@ -305,7 +305,7 @@ struct TimetableManagerPage {
         .width(30)
         .height(30)
         .justifyContent(FlexAlign.Center)
-        .backgroundColor(this.selected(timetable.id) ? HitaColors.primary : '#D7DCE5')
+        .backgroundColor(this.selected(timetable.id) ? HitaColors.primaryFill : $r('app.color.hita_divider'))
         .borderRadius(15)
         .margin({ top: 12, right: 12 })
       }
@@ -330,9 +330,9 @@ struct TimetableManagerPage {
     .width('100%')
     .height(260)
     .justifyContent(FlexAlign.Center)
-    .backgroundColor('#FFFFFF')
+    .backgroundColor($r('app.color.hita_surface'))
     .borderRadius(24)
-    .border({ width: 1, color: '#DDE4EE', style: BorderStyle.Dashed })
+    .border({ width: 1, color: $r('app.color.hita_divider_dde4ee'), style: BorderStyle.Dashed })
   }
 
   @Builder
@@ -345,7 +345,7 @@ struct TimetableManagerPage {
     .width(64)
     .height(64)
     .alignContent(Alignment.Center)
-    .backgroundColor('#E8F3FD')
+    .backgroundColor($r('app.color.hita_selected_e8f3fd'))
     .borderRadius(32)
     .onClick(action);
   }
@@ -404,7 +404,7 @@ struct TimetableManagerPage {
         Text(this.selectionMode ? '已选择 ' + this.selectedIds.length.toString() + ' 项' : '课表管理')
           .fontSize(22)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#202633')
+          .fontColor($r('app.color.hita_text_202633'))
           .layoutWeight(1)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -473,17 +473,17 @@ struct TimetableManagerPage {
     return '#78A9DE';
   }
 
-  private static seasonLight(ms: number): string {
+  private static seasonLight(ms: number): ResourceColor {
     const month: number = new Date(ms).getMonth() + 1;
     if (month >= 3 && month <= 5) {
-      return '#DDF3E5';
+      return $r('app.color.hita_success_surface_ddf3e5');
     }
     if (month >= 6 && month <= 8) {
-      return '#FBEAC8';
+      return $r('app.color.hita_warning_surface');
     }
     if (month >= 9 && month <= 11) {
-      return '#F8DCD4';
+      return $r('app.color.hita_error_surface_f8dcd4');
     }
-    return '#DCEAF8';
+    return $r('app.color.hita_selected_dceaf8');
   }
 }

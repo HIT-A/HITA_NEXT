@@ -16,7 +16,7 @@ import { EasCourseScoreItem, EasTermItem } from '../feature/eas/model/EasModels'
 import { EasApiClient } from '../feature/eas/EasApiClient';
 
 const HEADER_HEIGHT: number = 60;
-const PAGE_BG: string = '#F6F7FA';
+const PAGE_BG: ResourceColor = $r('app.color.hita_page_f6f7fa');
 const PAGE_BG_RGB: string = '246,247,250';
 
 @Entry
@@ -91,10 +91,10 @@ struct ScorePage {
           LoadingProgress()
             .width(48)
             .height(48)
-            .color('#3390EC')
+            .color($r('app.color.hita_primary_3390ec'))
           Text('正在查询…')
             .fontSize(14)
-            .fontColor('#808080')
+            .fontColor($r('app.color.hita_text_secondary_808080'))
             .margin({ top: 12 })
         }
         .width('100%')
@@ -106,16 +106,16 @@ struct ScorePage {
         Column() {
           Text('◉')
             .fontSize(48)
-            .fontColor('#B7C7D9')
+            .fontColor($r('app.color.hita_text_hint_b7c7d9'))
             .margin({ bottom: 12 })
           Text('暂无成绩数据')
             .fontSize(16)
             .fontWeight(FontWeight.Medium)
-            .fontColor('#1A1A1A')
+            .fontColor($r('app.color.hita_text_1a1a1a'))
             .margin({ bottom: 8 })
           Text(this.hasSession ? '点击右上角“查询”获取成绩' : '登录教务后即可查询成绩')
             .fontSize(13)
-            .fontColor('#808080')
+            .fontColor($r('app.color.hita_text_secondary_808080'))
             .textAlign(TextAlign.Center)
             .lineHeight(20)
             .margin({ bottom: 24 })
@@ -126,7 +126,7 @@ struct ScorePage {
               .fontColor('#FFFFFF')
               .height(44)
               .padding({ left: 32, right: 32 })
-              .backgroundColor('#3390EC')
+              .backgroundColor($r('app.color.hita_primary_fill'))
               .borderRadius(22)
               .textAlign(TextAlign.Center)
               .onClick(() => {
@@ -153,14 +153,14 @@ struct ScorePage {
             Column() {
               Text(this.modeText)
                 .fontSize(12)
-                .fontColor('#808080')
+                .fontColor($r('app.color.hita_text_secondary_808080'))
                 .width('100%')
                 .maxLines(2)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
               if (this.msg.length > 0) {
                 Text(this.msg)
                   .fontSize(12)
-                  .fontColor('#2E7D32')
+                  .fontColor($r('app.color.hita_success_2e7d32'))
                   .width('100%')
                   .margin({ top: 4 })
               }
@@ -176,7 +176,7 @@ struct ScorePage {
                   Text(it.courseName)
                     .fontSize(15)
                     .fontWeight(FontWeight.Bold)
-                    .fontColor('#1A1A1A')
+                    .fontColor($r('app.color.hita_text_1a1a1a'))
                     .maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
                     .layoutWeight(1)
@@ -192,19 +192,19 @@ struct ScorePage {
                 Row({ space: 6 }) {
                   Text(it.courseCode)
                     .fontSize(12)
-                    .fontColor('#808080')
+                    .fontColor($r('app.color.hita_text_secondary_808080'))
                   Text('·')
                     .fontSize(12)
-                    .fontColor('#B0B4BA')
+                    .fontColor($r('app.color.hita_text_hint_b0b4ba'))
                   Text(it.courseProperty.length > 0 ? it.courseProperty : '—')
                     .fontSize(12)
-                    .fontColor('#808080')
+                    .fontColor($r('app.color.hita_text_secondary_808080'))
                   Text('·')
                     .fontSize(12)
-                    .fontColor('#B0B4BA')
+                    .fontColor($r('app.color.hita_text_hint_b0b4ba'))
                   Text(it.courseCategory.length > 0 ? it.courseCategory : '—')
                     .fontSize(12)
-                    .fontColor('#808080')
+                    .fontColor($r('app.color.hita_text_secondary_808080'))
                 }
                 .width('100%')
                 .margin({ top: 6 })
@@ -212,35 +212,35 @@ struct ScorePage {
                 Row({ space: 4 }) {
                   Text('学分')
                     .fontSize(12)
-                    .fontColor('#B0B4BA')
+                    .fontColor($r('app.color.hita_text_hint_b0b4ba'))
                   Text(ScorePage.num(it.credits))
                     .fontSize(12)
-                    .fontColor('#808080')
+                    .fontColor($r('app.color.hita_text_secondary_808080'))
                     .fontWeight(FontWeight.Medium)
                   Text('·')
                     .fontSize(12)
-                    .fontColor('#B0B4BA')
+                    .fontColor($r('app.color.hita_text_hint_b0b4ba'))
                   Text('学时')
                     .fontSize(12)
-                    .fontColor('#B0B4BA')
+                    .fontColor($r('app.color.hita_text_hint_b0b4ba'))
                   Text(it.hours.toString())
                     .fontSize(12)
-                    .fontColor('#808080')
+                    .fontColor($r('app.color.hita_text_secondary_808080'))
                     .fontWeight(FontWeight.Medium)
                   if (it.assessMethod.length > 0) {
                     Text('·')
                       .fontSize(12)
-                      .fontColor('#B0B4BA')
+                      .fontColor($r('app.color.hita_text_hint_b0b4ba'))
                     Text(it.assessMethod)
                       .fontSize(12)
-                      .fontColor('#808080')
+                      .fontColor($r('app.color.hita_text_secondary_808080'))
                   }
                   Text('·')
                     .fontSize(12)
-                    .fontColor('#B0B4BA')
+                    .fontColor($r('app.color.hita_text_hint_b0b4ba'))
                   Text(it.termName)
                     .fontSize(12)
-                    .fontColor('#808080')
+                    .fontColor($r('app.color.hita_text_secondary_808080'))
                 }
                 .width('100%')
                 .margin({ top: 4 })
@@ -249,14 +249,14 @@ struct ScorePage {
                 if (it.schoolName.length > 0) {
                   Text(it.schoolName)
                     .fontSize(11)
-                    .fontColor('#B0B4BA')
+                    .fontColor($r('app.color.hita_text_hint_b0b4ba'))
                     .width('100%')
                     .margin({ top: 6 })
                 }
               }
               .width('100%')
               .padding(14)
-              .backgroundColor('#FFFFFF')
+              .backgroundColor($r('app.color.hita_surface'))
               .borderRadius(12)
               .shadow({ radius: 8, color: '#14000000', offsetY: 2 })
             }
@@ -285,7 +285,7 @@ struct ScorePage {
         Text('成绩查询')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#1A1A1A')
+          .fontColor($r('app.color.hita_text_1a1a1a'))
           .layoutWeight(1)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -293,11 +293,11 @@ struct ScorePage {
         Text('查询')
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
-          .fontColor('#3390EC')
+          .fontColor($r('app.color.hita_primary_3390ec'))
           .height(32)
           .padding({ left: 12, right: 12 })
           .borderRadius(16)
-          .backgroundColor('#EBF4FC')
+          .backgroundColor($r('app.color.hita_selected_ebf4fc'))
           .textAlign(TextAlign.Center)
           .onClick(() => {
             this.queryReal();
@@ -333,19 +333,19 @@ struct ScorePage {
     return s;
   }
 
-  static scoreColor(it: EasCourseScoreItem): string {
+  static scoreColor(it: EasCourseScoreItem): ResourceColor {
     if (it.finalScores >= 90) {
-      return '#2E7D32';
+      return $r('app.color.hita_success_2e7d32');
     }
     if (it.finalScores >= 80) {
-      return '#3390EC';
+      return $r('app.color.hita_primary_3390ec');
     }
     if (it.finalScores >= 60) {
-      return '#808080';
+      return $r('app.color.hita_text_secondary_808080');
     }
     if (it.finalScoresText.length > 0 && it.finalScores < 0) {
-      return '#3390EC'; // 等级制文本（优/良/通过…）
+      return $r('app.color.hita_primary_3390ec'); // 等级制文本（优/良/通过…）
     }
-    return '#D93025';
+    return $r('app.color.hita_error');
   }
 }

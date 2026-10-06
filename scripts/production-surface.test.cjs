@@ -232,8 +232,10 @@ test('the repository notice feed contains no developer examples', () => {
 test('the window fills the status bar instead of leaving a white top inset', () => {
   const ability = fs.readFileSync(path.join(etsRoot, 'entryability/EntryAbility.ets'), 'utf8');
   assert.match(ability, /setWindowLayoutFullScreen\(true\)/);
-  assert.match(ability, /setWindowBackgroundColor\('#F4F7FC'\)/);
-  assert.match(ability, /statusBarColor: '#00FFFFFF'/);
+  assert.match(ability, /AppearanceStore\.getInstance\(\)\.attachWindow\(mainWindow\)/);
+  const appearance = fs.readFileSync(path.join(etsRoot, 'common/theme/AppearanceStore.ets'), 'utf8');
+  assert.match(appearance, /setWindowBackgroundColor\(dark \? '#101214' : '#F4F7FC'\)/);
+  assert.match(appearance, /statusBarColor: '#00000000'/);
   const colors = fs.readFileSync(path.join(root, 'entry/src/main/resources/base/element/color.json'), 'utf8');
   assert.match(colors, /"name": "start_window_background"[\s\S]*?"value": "#F4F7FC"/);
   const home = fs.readFileSync(path.join(etsRoot, 'pages/Home.ets'), 'utf8');

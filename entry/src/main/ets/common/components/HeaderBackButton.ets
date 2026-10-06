@@ -16,7 +16,7 @@ export struct HeaderBackButton {
     .height(44)
     .padding(0)
     .flexShrink(0)
-    .backgroundColor('#F2F4F7')
+    .backgroundColor($r('app.color.hita_control'))
     .accessibilityText(this.accessibilityLabel)
     .onClick(() => {
       this.onBack();
