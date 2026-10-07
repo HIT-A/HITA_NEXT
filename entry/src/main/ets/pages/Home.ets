@@ -28,6 +28,7 @@ import { TimetableBackgroundStore } from '../feature/timetable/data/TimetableBac
 import { ClassReminderStore } from '../feature/timetable/data/ClassReminderStore';
 import { ClassReminderScheduler, ClassReminderSyncResult } from '../feature/timetable/data/ClassReminderScheduler';
 import { IcsImportResult, TimetableIcsImporter } from '../feature/timetable/data/TimetableIcsImporter';
+import { CalendarExportResult, TimetableCalendarExporter } from '../feature/timetable/data/TimetableCalendarExporter';
 import {
   AXIS_END_HOUR,
   AXIS_START_HOUR,
@@ -101,6 +102,7 @@ struct Home {
   @State currentTab: number = 0;
   @State hasTimetable: boolean = false;
   @State timetableCount: number = 0;
+  @State calendarExporting: boolean = false;
   @State currentTimetable: EasTimetable | undefined = undefined;
   @State recentTimetable: EasTimetable | undefined = undefined;
   @State importing: boolean = false;
@@ -806,6 +808,20 @@ struct Home {
     this.timetablePaletteOpen = false;
     await TimetableSelectionStore.getInstance().saveTextColor(color);
     this.drawTimetableNow();
+  }
+
+  private async exportToCalendar(): Promise<void> {
+    if (this.calendarExporting) {
+      return;
+    }
+    this.calendarExporting = true;
+    try {
+      const ctx: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const result: CalendarExportResult = await TimetableCalendarExporter.exportTimetable(ctx, this.currentTimetable);
+      this.getUIContext().getPromptAction().showToast({ message: result.message, duration: 3500 });
+    } finally {
+      this.calendarExporting = false;
+    }
   }
 
   private async importIcsTimetable(): Promise<void> {
@@ -1832,6 +1848,11 @@ struct Home {
             this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '导入 ICS 课表',
               '从日历文件导入课程', () => {
                 this.importIcsTimetable();
+              });
+            this.moreNavigationRow($r('sys.symbol.calendar'),
+              this.calendarExporting ? '正在导出至手机日历…' : '导出至手机日历',
+              this.currentTimetable === undefined ? '暂无课表' : this.currentTimetable.name, () => {
+                this.exportToCalendar();
               });
           }
           .width('100%')

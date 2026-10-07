@@ -11,6 +11,14 @@
     {
       "name": "EntryAbility_label",
       "value": "HITA"
+    },
+    {
+      "name": "calendar_read_reason",
+      "value": "用于检查已导出的课表日程，避免重复添加"
+    },
+    {
+      "name": "calendar_write_reason",
+      "value": "用于将课表课程和考试导出至手机日历"
     }
   ]
 }

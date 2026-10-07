@@ -1,0 +1,186 @@
+import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
+import { calendarManager } from '@kit.CalendarKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+import { RdbHelper } from '../../../common/db/RdbHelper';
+import { EasEventItem, EasEventType, EasTimetable } from '../../../common/model/timetable/TimetableModels';
+
+const CALENDAR_PERMISSIONS: Permissions[] = ['ohos.permission.READ_CALENDAR', 'ohos.permission.WRITE_CALENDAR'];
+const EVENT_PREFIX: string = 'hita-course:';
+
+export class CalendarExportResult {
+  success: boolean = false;
+  written: number = 0;
+  total: number = 0;
+  message: string = '';
+}
+
+export class TimetableCalendarExporter {
+  // Serialize exports across pages, including while the permission dialog is open.
+  private static exporting: boolean = false;
+
+  static async exportTimetable(context: common.UIAbilityContext,
+    timetable: EasTimetable | undefined): Promise<CalendarExportResult> {
+    const result: CalendarExportResult = new CalendarExportResult();
+    if (timetable === undefined) {
+      result.message = '请先新建或导入课表';
+      return result;
+    }
+    if (TimetableCalendarExporter.exporting) {
+      result.message = '正在导出，请稍候';
+      return result;
+    }
+    TimetableCalendarExporter.exporting = true;
+    try {
+      const rdb: RdbHelper = RdbHelper.getInstance();
+      await rdb.init(context);
+      const saved: EasTimetable | undefined = await rdb.getTimetableById(timetable.id);
+      if (saved === undefined) {
+        result.message = '课表不存在或已删除';
+        return result;
+      }
+      const events: calendarManager.Event[] = TimetableCalendarExporter.calendarEvents(
+        saved, await rdb.getEventsOfTimetable(saved.id));
+      result.total = events.length;
+      if (events.length === 0) {
+        result.message = '当前课表没有可导出的课程';
+        return result;
+      }
+      const permission = await abilityAccessCtrl.createAtManager().requestPermissionsFromUser(
+        context, CALENDAR_PERMISSIONS);
+      if (permission.authResults.length !== CALENDAR_PERMISSIONS.length ||
+        permission.authResults.some((status: number): boolean => status !== 0)) {
+        result.message = '未获得日历权限，请在系统设置中允许 HITA 访问日历后重试';
+        return result;
+      }
+      const calendar: calendarManager.Calendar = await TimetableCalendarExporter.getCalendar(context, saved);
+      await TimetableCalendarExporter.writeEvents(calendar, events, result);
+      result.success = true;
+      hilog.info(0x0000, 'TimetableCalendar', 'export complete total=%{public}d', result.total);
+      result.message = '已将 ' + result.total.toString() + ' 条日程导出至手机日历';
+    } catch (e) {
+      const code: number = (e as BusinessError).code;
+      hilog.error(0x0000, 'TimetableCalendar',
+        'export failed code=%{public}d written=%{public}d detail=%{private}s',
+        code, result.written, (e as BusinessError).message);
+      if (code === 201) {
+        result.message = '日历权限不可用，请在系统设置中允许 HITA 访问日历后重试';
+      } else if (e instanceof Error && e.message === 'INVALID_COURSE_TIME') {
+        result.message = '课表中有无效的课程时间，请修正后重试';
+      } else if (result.written > 0) {
+        result.message = '已写入 ' + result.written.toString() + '/' + result.total.toString() +
+          ' 条日程，导出未完成，请重试';
+      } else {
+        result.message = '导出至手机日历失败，请稍后重试';
+      }
+    } finally {
+      TimetableCalendarExporter.exporting = false;
+    }
+    return result;
+  }
+
+  private static async getCalendar(context: common.UIAbilityContext,
+    timetable: EasTimetable): Promise<calendarManager.Calendar> {
+    const manager: calendarManager.CalendarManager = calendarManager.getCalendarManager(context);
+    const account: calendarManager.CalendarAccount = {
+      name: 'hita-timetable-' + timetable.id,
+      type: calendarManager.CalendarType.LOCAL,
+      displayName: ('HITA · ' + timetable.name).slice(0, 64)
+    };
+    const calendars: calendarManager.Calendar[] = await manager.getAllCalendars();
+    for (let i: number = 0; i < calendars.length; i++) {
+      const existing: calendarManager.CalendarAccount = calendars[i].getAccount();
+      if (existing.name === account.name && existing.type === account.type) {
+        return calendars[i];
+      }
+    }
+    const created: calendarManager.Calendar = await manager.createCalendar(account);
+    if (!Number.isFinite(created.id) || created.id <= 0) {
+      throw new Error('CALENDAR_CREATE_FAILED');
+    }
+    return created;
+  }
+
+  private static calendarEvents(timetable: EasTimetable, sources: EasEventItem[]): calendarManager.Event[] {
+    const events: calendarManager.Event[] = [];
+    const identifiers: Set<string> = new Set<string>();
+    for (let i: number = 0; i < sources.length; i++) {
+      const source: EasEventItem = sources[i];
+      if (source.type === EasEventType.TAG || source.timetableId !== timetable.id) {
+        continue;
+      }
+      if (!Number.isFinite(new Date(source.from).getTime()) ||
+        !Number.isFinite(new Date(source.to).getTime()) || source.from <= 0 || source.to <= source.from) {
+        throw new Error('INVALID_COURSE_TIME');
+      }
+      // EAS imports regenerate row IDs; the occurrence identity survives re-imports.
+      const identifier: string = EVENT_PREFIX + JSON.stringify([source.type, source.name,
+        source.from.toString(), source.to.toString()]);
+      if (identifiers.has(identifier)) {
+        continue;
+      }
+      identifiers.add(identifier);
+      const description: string[] = ['课表：' + timetable.name];
+      if (source.teacher.length > 0) {
+        description.push('教师：' + source.teacher);
+      }
+      if (source.fromNumber > 0 && source.lastNumber >= source.fromNumber) {
+        description.push('节次：第 ' + source.fromNumber.toString() + '-' + source.lastNumber.toString() + ' 节');
+      }
+      const event: calendarManager.Event = {
+        type: calendarManager.EventType.NORMAL,
+        title: source.name,
+        startTime: source.from,
+        endTime: source.to,
+        isAllDay: false,
+        timeZone: 'Asia/Shanghai',
+        location: { location: source.place },
+        description: description.join('\n'),
+        identifier: identifier
+      };
+      events.push(event);
+    }
+    return events;
+  }
+
+  private static async writeEvents(calendar: calendarManager.Calendar, events: calendarManager.Event[],
+    result: CalendarExportResult): Promise<void> {
+    // Native overload dispatch rejects an explicit undefined filter (401).
+    // API 20+ includes id and identifier in the no-argument query's default fields.
+    const existing: calendarManager.Event[] = await calendar.getEvents();
+    const byIdentifier: Map<string, number> = new Map<string, number>();
+    for (let i: number = 0; i < existing.length; i++) {
+      const event: calendarManager.Event = existing[i];
+      if (event.identifier !== undefined && event.identifier.startsWith(EVENT_PREFIX) &&
+        event.id !== undefined && event.id > 0) {
+        byIdentifier.set(event.identifier, event.id);
+      }
+    }
+    const keptIds: Set<number> = new Set<number>();
+    for (let i: number = 0; i < events.length; i++) {
+      const event: calendarManager.Event = events[i];
+      const existingId: number | undefined = byIdentifier.get(event.identifier as string);
+      if (existingId !== undefined) {
+        event.id = existingId;
+        await calendar.updateEvent(event);
+        keptIds.add(existingId);
+      } else {
+        const id: number = await calendar.addEvent(event);
+        if (!Number.isFinite(id) || id <= 0) {
+          throw new Error('CALENDAR_EVENT_WRITE_FAILED');
+        }
+        keptIds.add(id);
+      }
+      result.written++;
+    }
+    // Only prune our obsolete exports after every current occurrence was written.
+    // User-created events in this calendar and other calendars are left intact.
+    for (let i: number = 0; i < existing.length; i++) {
+      const event: calendarManager.Event = existing[i];
+      if (event.identifier !== undefined && event.identifier.startsWith(EVENT_PREFIX) &&
+        event.id !== undefined && event.id > 0 && !keptIds.has(event.id)) {
+        await calendar.deleteEvent(event.id);
+      }
+    }
+  }
+}
