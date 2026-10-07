@@ -103,7 +103,7 @@ HitaNEXT/
 ### 环境要求
 
 - DevEco Studio 5.0 或更新版本。
-- HarmonyOS NEXT SDK 5.0.0（API 12）或兼容版本。
+- HarmonyOS NEXT SDK 26.0.0 或兼容版本。
 - 用于运行辅助脚本的 Node.js 环境。
 
 ### 使用 DevEco Studio
