@@ -43,6 +43,10 @@ try {
   $ConfigJson = & $Node -e "process.stdout.write(JSON.stringify(require('json5').parse(require('fs').readFileSync(process.argv[1],'utf8'))))" $ConfigPath
   if ($LASTEXITCODE -ne 0) { throw 'Cannot read build-profile.json5.' }
   $Config = $ConfigJson | ConvertFrom-Json
+  $ProductConfig = @($Config.app.products | Where-Object name -EQ $Product)
+  if ($ProductConfig.Count -ne 1 -or $ProductConfig[0].compatibleSdkVersion -ne '6.1.0(23)') {
+    throw 'This release must keep compatibleSdkVersion at 6.1.0(23).'
+  }
   $Signing = @($Config.app.signingConfigs | Where-Object name -EQ $SigningConfig)
   if ($Signing.Count -ne 1) { throw "Missing local signing configuration: $SigningConfig" }
   $App = Get-Content -LiteralPath (Join-Path $Root 'AppScope\app.json5') -Raw | ConvertFrom-Json
@@ -81,12 +85,39 @@ try {
       $Info.summary.app.version.name -ne $App.app.versionName) {
       throw 'Built package identity/version does not match AppScope/app.json5.'
     }
+    foreach ($Module in $Info.summary.modules) {
+      if ($Module.apiVersion.compatible -ne 23) {
+        throw 'An app module does not declare API 23 compatibility.'
+      }
+    }
     $Haps = @($Zip.Entries | Where-Object { $_.Name.EndsWith('.hap') })
     if ($Haps.Count -eq 0) { throw 'No HAP module inside the app package.' }
     for ($i = 0; $i -lt $Haps.Count; $i++) {
       [IO.Compression.ZipFileExtensions]::ExtractToFile($Haps[$i], (Join-Path $VerifyDir "module-$i.hap"))
     }
   } finally { $Zip.Dispose() }
+  foreach ($Hap in @(Get-ChildItem -LiteralPath $VerifyDir -Filter '*.hap')) {
+    $ModuleZip = [IO.Compression.ZipFile]::OpenRead($Hap.FullName)
+    try {
+      $ManifestEntry = $ModuleZip.GetEntry('module.json')
+      if ($null -eq $ManifestEntry) { throw 'Missing embedded HAP manifest.' }
+      $Reader = [IO.StreamReader]::new($ManifestEntry.Open())
+      try { $Manifest = $Reader.ReadToEnd() | ConvertFrom-Json } finally { $Reader.Dispose() }
+      if ($Manifest.app.bundleName -ne $App.app.bundleName -or
+        $Manifest.app.versionCode -ne $App.app.versionCode -or
+        $Manifest.app.versionName -ne $App.app.versionName) {
+        throw 'Embedded HAP identity/version does not match the app package.'
+      }
+      # HarmonyOS 6.1.0 / API 23 is encoded as 60100023 in the HAP manifest.
+      if ($Manifest.app.minAPIVersion -ne 60100023 -or
+        $Manifest.app.minMinorAPIVersion -ne 0 -or $Manifest.app.minPatchAPIVersion -ne 0) {
+        throw 'Embedded HAP does not declare HarmonyOS 6.1.0 (API 23) compatibility.'
+      }
+      if ($Manifest.app.debug -ne $false -or $Manifest.app.buildMode -ne 'release') {
+        throw 'Embedded HAP is not a non-debug release build.'
+      }
+    } finally { $ModuleZip.Dispose() }
+  }
   $VerifyFiles = @($Package) + @(Get-ChildItem -LiteralPath $VerifyDir -Filter '*.hap' | Select-Object -ExpandProperty FullName)
   for ($i = 0; $i -lt $VerifyFiles.Count; $i++) {
     $VerifiedProfile = Join-Path $VerifyDir "verified-$i.p7b"
@@ -98,6 +129,7 @@ try {
   $Destination = Join-Path $OutDir ("HITA-NEXT-" + $App.app.versionName + '-AGC-signed.app')
   Copy-Item -LiteralPath $Package -Destination $Destination -Force
   Write-Host "Verified AGC release: $Destination"
+  Write-Host 'Minimum system: HarmonyOS 6.1.0 (API 23)'
   Write-Host ("SHA256: " + (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash)
 } finally {
   [IO.File]::WriteAllBytes($ConfigPath, $OriginalConfig)

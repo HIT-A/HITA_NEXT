@@ -1109,7 +1109,7 @@ export class EasWebLoginController {
     return new Promise<string>((resolve) => {
       const timer: number = setTimeout(() => resolve(''), 3000);
       try {
-        const result: Promise<string> = partitioned ?
+        const result: Promise<string> = partitioned && deviceInfo.sdkApiVersion >= 26 ?
           webview.WebCookieManager.fetchCookie(url, false, true) :
           webview.WebCookieManager.fetchCookie(url);
         result.then((value: string) => {
@@ -1126,10 +1126,7 @@ export class EasWebLoginController {
     });
   }
   static async tryFetchCookieWithPartitioned(url: string): Promise<string> {
-    let includePartitioned: boolean = false;
-    try {
-      includePartitioned = deviceInfo.apiAvailable('26.0.0');
-    } catch (e) {}
+    const includePartitioned: boolean = deviceInfo.sdkApiVersion >= 26;
     const values: string[] = await Promise.all([
       EasWebLoginController.tryFetchCookie(url),
       includePartitioned ? EasWebLoginController.tryFetchCookie(url, true) : Promise.resolve('')

@@ -7,7 +7,7 @@ const ts = require('typescript');
 const root = path.resolve(__dirname, '../entry/src/main/ets');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
-function material(overrides = {}) {
+function materialModule(overrides = {}, sdkApiVersion = 26) {
   const uiMaterial = {
     MaterialLevel: { EXQUISITE: 'exquisite', GENTLE: 'gentle' },
     ImmersiveStyle: { ULTRA_THIN: 'ultra-thin', THIN: 'thin' },
@@ -21,13 +21,19 @@ function material(overrides = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
   }).outputText;
   const platform = name => {
+    if (name === '@kit.BasicServicesKit') return { deviceInfo: { sdkApiVersion } };
     assert.equal(name, '@kit.ArkUI');
-    return { uiMaterial };
+    return { get uiMaterial() {
+      assert.ok(sdkApiVersion >= 26, 'API 23 must never access the API 26 material module');
+      return uiMaterial;
+    } };
   };
   new Function('require', 'module', 'exports', 'Color', output)(
     platform, mod, mod.exports, { Transparent: 'transparent', White: 'white' });
-  return mod.exports.DockBarMaterial;
+  return mod.exports;
 }
+
+const material = overrides => materialModule(overrides).DockBarMaterial;
 
 test('native dock retains fixed dimensions, safe-area margin and default mask', () => {
   const style = material().floatingStyle(36);
@@ -47,7 +53,7 @@ test('timetable wallpaper hides only the background mask, not the dock material'
   assert.equal(style.maskHeight, 0);
   assert.ok(style.systemMaterial);
   const home = read('pages/Home.ets');
-  assert.match(home, /barFloatingStyle\(DockBarMaterial\.floatingStyle\(12 \+ this\.navBarInset,\s*this\.selectedNav === TAB_TIMETABLE && this\.hasTimetableBackground\(\), this\.darkMode\)\)/);
+  assert.match(home, /attributeModifier\(new DockBarModifier\(12 \+ this\.navBarInset,\s*this\.selectedNav === TAB_TIMETABLE && this\.hasTimetableBackground\(\), this\.darkMode\)\)/);
 });
 
 test('the dark dock changes only its mask color and keeps wallpaper unobscured', () => {
@@ -81,7 +87,7 @@ test('unsupported materials never prevent rendering the fallback dock', () => {
   }
 });
 
-test('one native tab bar owns only Today, Timetable and More', () => {
+test('one Tabs controller owns Today, Timetable and More on both navigation implementations', () => {
   const home = read('pages/Home.ets');
   const shell = home.slice(home.indexOf('  build() {'), home.indexOf('  activeSheet()'));
   assert.match(shell, /Tabs\(\{ barPosition: BarPosition\.End, controller: this\.tabsController \}\)/);
@@ -91,12 +97,54 @@ test('one native tab bar owns only Today, Timetable and More', () => {
   assert.match(home, /const NAV_TAB_COUNT: number = 3/);
   assert.doesNotMatch(home, /AssistantTab|NewsTab|assistantMounted|newsMounted|mountTabsNear/);
   assert.match(shell, /\.barOverlap\(true\)/);
-  assert.match(shell, /\.barHeight\(56\)/);
+  assert.match(shell, /\.barHeight\(this\.nativeFloatingDock \? 56 : 0\)/);
   assert.match(shell, /\.barBackgroundColor\(Color\.Transparent\)/);
   assert.match(home, /normal\.fontColor\(\[\$r\('sys\.color\.ohos_id_color_text_secondary'\)\]\)/);
   assert.match(home, /selected\.fontColor\(\[\$r\('sys\.color\.ohos_id_color_text_primary'\)\]\)/);
   assert.ok(!fs.existsSync(path.join(root, 'common/theme/DockGlass.ets')));
   assert.doesNotMatch(home, /DockGlass|pillNavigation|navDroplet|tabSwiper/);
+});
+
+test('API 23 and 24 neither load new materials nor call barFloatingStyle', () => {
+  for (const version of [23, 24]) {
+    const { DockBarMaterial, DockBarModifier } = materialModule({}, version);
+    assert.equal(DockBarMaterial.supportsFloatingBar(), false);
+    const tabs = { get barFloatingStyle() { throw new Error('Unavailable API'); } };
+    new DockBarModifier(36, false, false).applyNormalAttribute(tabs);
+    assert.equal(DockBarMaterial.floatingStyle(36).systemMaterial, undefined);
+  }
+  assert.match(read('common/theme/ImmersiveDockModifier.ets'),
+    /import lazy \{ uiMaterial \} from '@kit.ArkUI'/);
+});
+
+test('API 26 retains the native floating dock and immersive material', () => {
+  const { DockBarMaterial, DockBarModifier } = materialModule();
+  assert.equal(DockBarMaterial.supportsFloatingBar(), true);
+  const calls = [];
+  new DockBarModifier(36, true, true).applyNormalAttribute({
+    barFloatingStyle: style => calls.push(style)
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].barBottomMargin, 36);
+  assert.equal(calls[0].maskHeight, 0);
+  assert.ok(calls[0].systemMaterial);
+});
+
+test('the API 23 dock has equal hit targets, an animated selection and no page-wide background', () => {
+  const home = read('pages/Home.ets');
+  const dock = home.slice(home.indexOf('  compatibilityDock()'), home.indexOf('  activeSheet()'));
+  assert.match(home, /if \(!this\.nativeFloatingDock\) \{\s*this\.compatibilityDock\(\)/);
+  assert.match(dock, /\.width\(212\)\s*\.height\(56\)/);
+  assert.match(dock, /\.width\(204\)\s*\.height\(48\)/);
+  assert.match(dock, /\.width\(68\)\s*\.height\(48\)/);
+  assert.match(dock, /translate\(\{ x: this\.selectedNav \* 68 \}\)/);
+  assert.match(dock, /animation\(\{ duration: TAB_SWIPE_MS/);
+  assert.match(dock, /margin\(\{ bottom: 12 \+ this\.navBarInset \}\)/);
+  assert.match(dock, /backgroundColor\(COLOR_CARD\)/);
+  assert.match(dock, /this\.tabsController\.changeIndex\(index\)/);
+  assert.match(dock, /accessibilitySelected\(this\.selectedNav === index\)/);
+  assert.deepEqual([...dock.matchAll(/compatibilityDockItem\(\$r\('[^']+'\), '([^']+)'/g)].map(x => x[1]),
+    ['今日', '时间表', '更多']);
 });
 
 test('standalone news fills the screen and keeps the final rows above the system gesture bar', () => {

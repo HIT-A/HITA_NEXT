@@ -4,6 +4,7 @@
 
 在 DevEco Studio 中打开仓库根目录，完成工程同步，并为本机配置签名。
 SDK 版本以根目录 `build-profile.json5` 为准。
+当前编译 / 目标 SDK 为 26.0.0，最低运行系统为 HarmonyOS 6.1.0（API 23）。
 
 以下命令在仓库根目录执行，工具路径按本机安装位置调整：
 
@@ -21,14 +22,13 @@ $env:DEVECO_SDK_HOME = 'C:\Program Files\Huawei\DevEco Studio\sdk'
 entry/build/default/outputs/default/entry-default-signed.hap
 ```
 
-发布构建使用 `store` 产品及发布签名，与本地调试签名分开：
+发布构建使用本机正式签名配置，与本地调试签名分开。下例的 `online` 为本机正式签名名称：
 
 ```powershell
-& 'C:\Program Files\Huawei\DevEco Studio\tools\hvigor\bin\hvigorw.bat' `
-  --mode project -p product=store -p buildMode=release assembleApp --no-daemon
+.\scripts\build-agc-store-app.ps1 -SigningConfig online
 ```
 
-发布产物在 `build/outputs/store/`。不要提交本机签名材料、密码或构建产物。
+上传文件为 `build/outputs/default/HITA-NEXT-0.2.0-AGC-signed.app`。脚本会核验内外签名和最低系统版本，不要误用只签外层的 `*-signed.app`。不要提交本机签名材料、密码或构建产物。
 
 ## 自动检查
 
@@ -43,7 +43,9 @@ node --test scripts/*.test.cjs
 
 ## 设备回归
 
-- 今日、时间表、助手、资讯、更多可以正常切换。
+- 分别在 HarmonyOS 6.1（API 23）与 API 26 及以上系统执行以下项目；模拟测试不能代替这一步。
+- 今日、时间表、更多可以正常切换，助手和资讯可从更多进入。
+- API 23 使用紧凑胶囊导航栏，API 26 及以上使用原生悬浮栏；选中指示、左右切换、深色模式正常，导航周围及系统手势栏区域不截断课表。
 - 未登录且无课表时，今日不显示登录和课表管理按钮。
 - 更多保留正常业务入口，不显示本地搜索和开发样例入口。
 - 教务登录弹窗可以关闭；登录后会话状态正确更新。

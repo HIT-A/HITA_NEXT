@@ -6,11 +6,17 @@
  *
  * @see https://developer.huawei.com/consumer/cn/doc/doccenter-capabilities/arkts-immersive-light-sense-component-adaptation
  */
-import { uiMaterial } from '@kit.ArkUI';
+import { deviceInfo } from '@kit.BasicServicesKit';
+// Do not load the API 26 native module on HarmonyOS 6.1.
+import lazy { uiMaterial } from '@kit.ArkUI';
 
 const DOCK_BAR_WIDTH: number = 212;
 
 export class DockBarMaterial {
+  static supportsFloatingBar(): boolean {
+    return deviceInfo.sdkApiVersion >= 26;
+  }
+
   static floatingStyle(bottomMargin: number, hideMask: boolean = false,
     darkMode: boolean = false): FloatingTabBarStyle {
     const style: FloatingTabBarStyle = {
@@ -24,7 +30,7 @@ export class DockBarMaterial {
       maskHeight: hideMask ? 0 : 92
     };
     try {
-      if (uiMaterial.isImmersiveMaterialSupported()) {
+      if (DockBarMaterial.supportsFloatingBar() && uiMaterial.isImmersiveMaterialSupported()) {
         style.systemMaterial = new uiMaterial.ImmersiveMaterial({
           style: DockBarMaterial.styleForDevice(),
           applyShadow: true,
@@ -53,5 +59,23 @@ export class DockBarMaterial {
       // 回落到薄材质。
     }
     return uiMaterial.ImmersiveStyle.THIN;
+  }
+}
+
+export class DockBarModifier implements AttributeModifier<TabsAttribute> {
+  private bottomMargin: number;
+  private hideMask: boolean;
+  private darkMode: boolean;
+
+  constructor(bottomMargin: number, hideMask: boolean, darkMode: boolean) {
+    this.bottomMargin = bottomMargin;
+    this.hideMask = hideMask;
+    this.darkMode = darkMode;
+  }
+
+  applyNormalAttribute(instance: TabsAttribute): void {
+    if (DockBarMaterial.supportsFloatingBar()) {
+      instance.barFloatingStyle(DockBarMaterial.floatingStyle(this.bottomMargin, this.hideMask, this.darkMode));
+    }
   }
 }

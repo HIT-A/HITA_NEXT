@@ -7,7 +7,7 @@ global.$r = name => ({ id: -1, type: 10001, params: [name] });
 
 const root = path.resolve(__dirname, '../entry/src/main/ets');
 const flush = async () => { for (let i = 0; i < 60; i++) await Promise.resolve(); };
-function setup() {
+function setup(sdkApiVersion = 26) {
   const timers = new Map();
   const cache = new Map();
   const state = { now: 10000, syncReads: 0, reads: 0, cookie: '', navigations: [],
@@ -78,7 +78,7 @@ function setup() {
     const localRequire = name => {
       if (name === '@kit.ArkWeb') return { webview };
       if (name === '@kit.NetworkKit') return { http };
-      if (name === '@kit.BasicServicesKit') return { deviceInfo: { apiAvailable: () => true, sdkApiVersion: 26 } };
+      if (name === '@kit.BasicServicesKit') return { deviceInfo: { sdkApiVersion } };
       if (name === '@kit.PerformanceAnalysisKit') return { hilog: { info() {}, warn() {}, error() {} } };
       if (name.startsWith('@kit.')) return {};
       assert.ok(name.startsWith('.'), name);
@@ -120,6 +120,45 @@ function setup() {
   }
   return { ctrl, state, web, urls, tick, page, load, timers };
 }
+
+test('API 23 cookie probes never call the API 26 partitioned-cookie overload', async () => {
+  const { state, load } = setup(23);
+  const { EasWebLoginController } = load('feature/eas/webLogin/EasWebLoginController.ets');
+  const calls = [];
+  state.fetchCookie = (...args) => {
+    assert.equal(args.length, 1);
+    calls.push(args);
+    return Promise.resolve('JSESSIONID=api23');
+  };
+  assert.equal(await EasWebLoginController.tryFetchCookieWithPartitioned('https://example.invalid'), 'JSESSIONID=api23');
+  assert.equal(await EasWebLoginController.tryFetchCookie('https://example.invalid', true), 'JSESSIONID=api23');
+  assert.equal(calls.length, 2);
+});
+
+test('API 26 still merges regular and partitioned cookies', async () => {
+  const { state, load } = setup(26);
+  const { EasWebLoginController } = load('feature/eas/webLogin/EasWebLoginController.ets');
+  const calls = [];
+  state.fetchCookie = (...args) => {
+    calls.push(args);
+    return Promise.resolve(args[2] ? 'partitioned=value' : 'JSESSIONID=api26');
+  };
+  assert.equal(await EasWebLoginController.tryFetchCookieWithPartitioned('https://example.invalid'),
+    'JSESSIONID=api26; partitioned=value');
+  assert.deepEqual(calls.map(args => args.length), [1, 3]);
+});
+
+test('Weihai authentication can complete using the API 23 cookie path', async () => {
+  const { ctrl, state, urls, page } = setup(23);
+  state.fetchCookie = (...args) => {
+    assert.equal(args.length, 1);
+    return Promise.resolve('wengine_vpn_ticket_test=ticket');
+  };
+  ctrl.start('WEIHAI', '1');
+  await page(urls.WEIHAI_JWTS);
+  assert.equal(state.finished.length, 1);
+  assert.equal(state.finished[0].webCookies.get('JSESSIONID'), 'inner-session');
+});
 
 test('returning from authentication to the portal opens EAS again instead of keeping the old navigation latch', async () => {
   const { ctrl, state, urls, page } = setup();

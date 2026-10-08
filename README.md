@@ -51,7 +51,10 @@ HITA NEXT 是基于开源项目 [HITA Android](https://github.com/HIT-A/HITA_And
 - 本地课表：RelationalStore 关系型数据库。
 - 会话与轻量配置：Preferences。
 - 目标平台：HarmonyOS NEXT，模块声明支持 phone、tablet 和 2in1 设备。
-- 当前兼容 SDK：26.0.0。
+- 最低运行系统：HarmonyOS 6.1.0（API 23），不支持 Android、iOS 或 HarmonyOS 4.x。
+- 编译 / 目标 SDK：26.0.0；最低兼容 SDK：6.1.0(23)。编译 SDK 不等于最低安装版本。
+- 导航兼容：API 23–25 使用紧凑胶囊导航栏，API 26 及以上保留系统悬浮材质；两者均支持三个主页切换和深色模式。
+- 手机为主要适配设备；平板、二合一设备虽已声明支持，仍需分别进行实机验证。
 
 教务数据流：
 
@@ -102,8 +105,8 @@ HitaNEXT/
 
 ### 环境要求
 
-- DevEco Studio 5.0 或更新版本。
-- HarmonyOS NEXT SDK 26.0.0 或兼容版本。
+- 能使用 HarmonyOS SDK 26.0.0 的 DevEco Studio（本次构建使用 DevEco Studio 26.0）。
+- HarmonyOS SDK 26.0.0，用于编译；安装应用的设备最低为 HarmonyOS 6.1.0（API 23）。
 - 用于运行辅助脚本的 Node.js 环境。
 
 ### 使用 DevEco Studio
@@ -148,11 +151,13 @@ entry/build/default/outputs/default/
 .\scripts\build-agc-store-app.ps1 -SigningConfig online
 ```
 
-将 `online` 替换为本机的正式签名配置名称。脚本使用 release 模式构建，验证 `.app` 和内部 HAP 的签名及 Profile，并恢复原有构建配置。验证成功后生成：
+将 `online` 替换为本机的正式签名配置名称。脚本使用 release 模式构建，验证 `.app` 和内部 HAP 的签名及 Profile，核对包名、版本、非调试状态和 HarmonyOS 6.1 最低兼容要求，并恢复原有构建配置。验证成功后生成：
 
 ```text
 build/outputs/default/HITA-NEXT-0.2.0-AGC-signed.app
 ```
+
+当前兼容性修订仍为 `0.2.0`，内部版本号为 `2000001`，用于区分此前最低要求为 API 26 的构建。自动测试及编译检查不替代 HarmonyOS 6.1 实机上的登录、导入、导航和日历导出验证。
 
 ### 静态检查
 

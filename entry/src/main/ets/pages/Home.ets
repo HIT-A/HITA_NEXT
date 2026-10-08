@@ -13,7 +13,7 @@ import { HeaderFade } from '../common/theme/HeaderFade';
 import { TimetableTheme } from '../common/theme/TimetableTheme';
 import { AppearanceMode, AppearanceStore } from '../common/theme/AppearanceStore';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
-import { DockBarMaterial } from '../common/theme/ImmersiveDockModifier';
+import { DockBarMaterial, DockBarModifier } from '../common/theme/ImmersiveDockModifier';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTermSubject, EasTimetable } from '../common/model/timetable/TimetableModels';
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
@@ -161,6 +161,7 @@ struct Home {
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
   @StorageProp('hita_nav_bar_vp') navBarInset: number = NAV_BAR_INSET_FALLBACK;
   private tabsController: TabsController = new TabsController();
+  private nativeFloatingDock: boolean = DockBarMaterial.supportsFloatingBar();
   private tabPageWidth: number = 0;
   private moreScroller: Scroller = new Scroller();
   private timetableScroller: Scroller = new Scroller();
@@ -1077,60 +1078,68 @@ struct Home {
   }
 
   build() {
-    Tabs({ barPosition: BarPosition.End, controller: this.tabsController }) {
-      TabContent() {
-        Column() {
-          this.tabToday();
+    Stack({ alignContent: Alignment.Bottom }) {
+      Tabs({ barPosition: BarPosition.End, controller: this.tabsController }) {
+        TabContent() {
+          Column() {
+            this.tabToday();
+          }
+          .tabPage(this.dockPageInset(), COLOR_SURFACE)
         }
-        .tabPage(this.dockPageInset(), COLOR_SURFACE)
-      }
-      .clip(false)
-      .tabBar(this.dockTab($r('sys.symbol.calendar'), '今日'))
+        .clip(false)
+        .tabBar(this.dockTab($r('sys.symbol.calendar'), '今日'))
 
-      TabContent() {
-        Column() {
-          this.tabTimetable();
+        TabContent() {
+          Column() {
+            this.tabTimetable();
+          }
+          .tabPage(0, Color.Transparent)
         }
-        .tabPage(0, Color.Transparent)
-      }
-      .clip(false)
-      .tabBar(this.dockTab($r('sys.symbol.doc_plaintext'), '时间表'))
+        .clip(false)
+        .tabBar(this.dockTab($r('sys.symbol.doc_plaintext'), '时间表'))
 
-      TabContent() {
-        Column() {
-          this.tabMine();
+        TabContent() {
+          Column() {
+            this.tabMine();
+          }
+          .tabPage(0, COLOR_SURFACE)
         }
-        .tabPage(0, COLOR_SURFACE)
+        .clip(false)
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+        .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.BOTTOM])
+        .tabBar(this.dockTab($r('sys.symbol.more'), '更多'))
       }
-      .clip(false)
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
-      .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.BOTTOM])
-      .tabBar(this.dockTab($r('sys.symbol.more'), '更多'))
+      .width('100%')
+      .height('100%')
+      .vertical(false)
+      .barOverlap(true)
+      .barMode(BarMode.Fixed)
+      .barHeight(this.nativeFloatingDock ? 56 : 0)
+      .barBackgroundColor(Color.Transparent)
+      .divider(null)
+      .scrollable(!this.tabSwipeLocked())
+      .animationDuration(TAB_SWIPE_MS)
+      .attributeModifier(new DockBarModifier(12 + this.navBarInset,
+        this.selectedNav === TAB_TIMETABLE && this.hasTimetableBackground(), this.darkMode))
+      .backgroundColor(this.currentTab === 1 ? Color.Transparent : COLOR_SURFACE)
+      .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.KEYBOARD], [SafeAreaEdge.BOTTOM])
+      .onAreaChange((oldValue: Area, newValue: Area) => {
+        this.tabPageWidth = newValue.width as number;
+      })
+      .onAnimationStart((index: number, targetIndex: number, extraInfo: TabsAnimationEvent) => {
+        this.selectedNav = targetIndex;
+      })
+      .onChange((index: number) => {
+        this.selectTab(index);
+        this.selectedNav = index;
+      })
+      if (!this.nativeFloatingDock) {
+        this.compatibilityDock();
+      }
     }
     .width('100%')
     .height('100%')
-    .vertical(false)
-    .barOverlap(true)
-    .barMode(BarMode.Fixed)
-    .barHeight(56)
-    .barBackgroundColor(Color.Transparent)
-    .divider(null)
-    .scrollable(!this.tabSwipeLocked())
-    .animationDuration(TAB_SWIPE_MS)
-    .barFloatingStyle(DockBarMaterial.floatingStyle(12 + this.navBarInset,
-      this.selectedNav === TAB_TIMETABLE && this.hasTimetableBackground(), this.darkMode))
-    .backgroundColor(this.currentTab === 1 ? Color.Transparent : COLOR_SURFACE)
     .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.KEYBOARD], [SafeAreaEdge.BOTTOM])
-    .onAreaChange((oldValue: Area, newValue: Area) => {
-      this.tabPageWidth = newValue.width as number;
-    })
-    .onAnimationStart((index: number, targetIndex: number, extraInfo: TabsAnimationEvent) => {
-      this.selectedNav = targetIndex;
-    })
-    .onChange((index: number) => {
-      this.selectTab(index);
-      this.selectedNav = index;
-    })
     .bindSheet(this.activeSheetVisible, this.activeSheet(), {
       height: this.loginSheetOpen ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
       dragBar: true,
@@ -1150,6 +1159,64 @@ struct Home {
         this.finishCalendarExportSheet();
       }
     });
+  }
+
+  @Builder
+  compatibilityDock() {
+    Stack({ alignContent: Alignment.Start }) {
+      Row()
+        .width(68)
+        .height(48)
+        .borderRadius(24)
+        .backgroundColor(COLOR_NAV_ACTIVE)
+        .translate({ x: this.selectedNav * 68 })
+        .animation({ duration: TAB_SWIPE_MS, curve: Curve.EaseOut })
+        .hitTestBehavior(HitTestMode.None)
+      Row() {
+        this.compatibilityDockItem($r('sys.symbol.calendar'), '今日', TAB_TODAY);
+        this.compatibilityDockItem($r('sys.symbol.doc_plaintext'), '时间表', TAB_TIMETABLE);
+        this.compatibilityDockItem($r('sys.symbol.more'), '更多', 2);
+      }
+      .width(204)
+      .height(48)
+    }
+    .width(212)
+    .height(56)
+    .padding(4)
+    .borderRadius(28)
+    .backgroundColor(COLOR_CARD)
+    .border({ width: 1, color: $r('app.color.hita_divider') })
+    .shadow({ radius: 8, color: this.darkMode ? '#33000000' : '#14000000', offsetY: 2 })
+    .margin({ bottom: 12 + this.navBarInset })
+  }
+
+  @Builder
+  compatibilityDockItem(icon: Resource, label: string, index: number) {
+    Button({ type: ButtonType.Normal }) {
+      Column({ space: 3 }) {
+        SymbolGlyph(icon)
+          .fontSize(20)
+          .fontColor([this.selectedNav === index ? COLOR_PRIMARY : COLOR_TEXT_SECONDARY])
+        Text(label)
+          .fontSize(11)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.selectedNav === index ? COLOR_PRIMARY : COLOR_TEXT_SECONDARY)
+          .maxLines(1)
+      }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.Center)
+    }
+    .width(68)
+    .height(48)
+    .padding(0)
+    .borderRadius(24)
+    .backgroundColor(Color.Transparent)
+    .accessibilityText(label)
+    .accessibilitySelected(this.selectedNav === index)
+    .onClick(() => {
+      this.tabsController.changeIndex(index);
+    })
   }
 
   @Builder
