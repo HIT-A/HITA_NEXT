@@ -21,6 +21,7 @@ function material(overrides = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
   }).outputText;
   const platform = name => {
+    if (name === '@kit.BasicServicesKit') return { Available: () => value => value };
     assert.equal(name, '@kit.ArkUI');
     return { uiMaterial };
   };
@@ -47,7 +48,7 @@ test('timetable wallpaper hides only the background mask, not the dock material'
   assert.equal(style.maskHeight, 0);
   assert.ok(style.systemMaterial);
   const home = read('pages/Home.ets');
-  assert.match(home, /barFloatingStyle\(DockBarMaterial\.floatingStyle\(12 \+ this\.navBarInset,\s*this\.selectedNav === TAB_TIMETABLE && this\.hasTimetableBackground\(\), this\.darkMode\)\)/);
+  assert.match(home, /new CompatibleDockModifier\(12 \+ this\.navBarInset,\s*this\.selectedNav === TAB_TIMETABLE && this\.hasTimetableBackground\(\), this\.darkMode\)/);
 });
 
 test('the dark dock changes only its mask color and keeps wallpaper unobscured', () => {

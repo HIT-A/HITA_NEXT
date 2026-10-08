@@ -1,5 +1,6 @@
 /** Android HITA-style timetable library. */
 import { common } from '@kit.AbilityKit';
+import { CirclePaintModifier } from '../common/theme/CirclePaintModifier';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
@@ -231,17 +232,17 @@ struct TimetableManagerPage {
           Circle()
             .width(120)
             .height(120)
-            .fill(TimetableManagerPage.seasonLight(timetable.startTime))
+            .attributeModifier(new CirclePaintModifier(TimetableManagerPage.seasonLight(timetable.startTime)))
             .translate({ x: 48, y: -20 })
           Circle()
             .width(84)
             .height(84)
-            .fill(TimetableManagerPage.seasonMain(timetable.startTime))
+            .attributeModifier(new CirclePaintModifier(TimetableManagerPage.seasonMain(timetable.startTime)))
             .translate({ x: 6, y: 28 })
           Circle()
             .width(28)
             .height(28)
-            .fill('#66FFFFFF')
+            .attributeModifier(new CirclePaintModifier('#66FFFFFF'))
             .translate({ x: 50, y: 13 })
         }
         .width('100%')

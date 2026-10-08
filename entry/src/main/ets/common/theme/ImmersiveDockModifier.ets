@@ -7,9 +7,11 @@
  * @see https://developer.huawei.com/consumer/cn/doc/doccenter-capabilities/arkts-immersive-light-sense-component-adaptation
  */
 import { uiMaterial } from '@kit.ArkUI';
+import { Available } from '@kit.BasicServicesKit';
 
 const DOCK_BAR_WIDTH: number = 212;
 
+@Available({ minApiVersion: 'HarmonyOS 26.0.0' })
 export class DockBarMaterial {
   static floatingStyle(bottomMargin: number, hideMask: boolean = false,
     darkMode: boolean = false): FloatingTabBarStyle {

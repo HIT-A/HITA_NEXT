@@ -6,6 +6,7 @@
  * timetable/session data layer already used by the app.
  */
 import { common } from '@kit.AbilityKit';
+import { deviceInfo } from '@kit.BasicServicesKit';
 import { FrameCallback, KeyboardAvoidMode, SymbolGlyphModifier } from '@kit.ArkUI';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
@@ -13,7 +14,9 @@ import { HeaderFade } from '../common/theme/HeaderFade';
 import { TimetableTheme } from '../common/theme/TimetableTheme';
 import { AppearanceMode, AppearanceStore } from '../common/theme/AppearanceStore';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
-import { DockBarMaterial } from '../common/theme/ImmersiveDockModifier';
+import { CompatibleDockModifier } from '../common/theme/CompatibleDockModifier';
+import { CirclePaintModifier } from '../common/theme/CirclePaintModifier';
+import { FrostedDock } from '../common/components/FrostedDock';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTermSubject, EasTimetable } from '../common/model/timetable/TimetableModels';
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
@@ -1075,7 +1078,7 @@ struct Home {
     .divider(null)
     .scrollable(!this.tabSwipeLocked())
     .animationDuration(TAB_SWIPE_MS)
-    .barFloatingStyle(DockBarMaterial.floatingStyle(12 + this.navBarInset,
+    .attributeModifier(new CompatibleDockModifier(12 + this.navBarInset,
       this.selectedNav === TAB_TIMETABLE && this.hasTimetableBackground(), this.darkMode))
     .backgroundColor(this.currentTab === 1 ? Color.Transparent : COLOR_SURFACE)
     .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.KEYBOARD], [SafeAreaEdge.BOTTOM])
@@ -1089,6 +1092,7 @@ struct Home {
       this.selectTab(index);
       this.selectedNav = index;
     })
+    .overlay(this.compatibleDock(), { align: Alignment.Bottom })
     .bindSheet(this.activeSheetVisible, this.activeSheet(), {
       height: this.loginSheetOpen ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
       dragBar: true,
@@ -1107,6 +1111,21 @@ struct Home {
         this.selectedCourse = undefined;
       }
     });
+  }
+
+  @Builder
+  compatibleDock() {
+    if (!deviceInfo.apiAvailable('26.0.0')) {
+      FrostedDock({
+        selectedIndex: this.selectedNav,
+        bottomInset: this.navBarInset,
+        darkMode: this.darkMode,
+        hideMask: this.selectedNav === TAB_TIMETABLE && this.hasTimetableBackground(),
+        onSelect: (index: number) => {
+          this.tabsController.changeIndex(index);
+        }
+      })
+    }
   }
 
   @Builder
@@ -1366,16 +1385,17 @@ struct Home {
               Circle()
                 .width(22)
                 .height(22)
-                .fill($r('app.color.hita_selected_cfe3fa'));
+                .attributeModifier(new CirclePaintModifier($r('app.color.hita_selected_cfe3fa')));
               Circle()
                 .width(14)
                 .height(14)
-                .fill(COLOR_PRIMARY);
+                .attributeModifier(new CirclePaintModifier(COLOR_PRIMARY));
             } else {
               Circle()
                 .width(event.to <= this.nowTick ? 18 : 12)
                 .height(event.to <= this.nowTick ? 18 : 12)
-                .fill(event.to <= this.nowTick ? $r('app.color.hita_divider_c9d1dd') : Home.eventColor(event.type));
+                .attributeModifier(new CirclePaintModifier(
+                  event.to <= this.nowTick ? $r('app.color.hita_divider_c9d1dd') : Home.eventColor(event.type)));
             }
             if (event.to <= this.nowTick && !event.containsTimestamp(this.nowTick)) {
               SymbolGlyph($r('sys.symbol.checkmark'))
@@ -2393,8 +2413,8 @@ struct Home {
       Circle()
         .width(9)
         .height(9)
-        .fill(this.sessionSheetCampus === code ? COLOR_PRIMARY : 'transparent')
-        .stroke(this.sessionSheetCampus === code ? COLOR_PRIMARY : $r('app.color.hita_text_hint_a9b4c2'))
+        .attributeModifier(new CirclePaintModifier(this.sessionSheetCampus === code ? COLOR_PRIMARY : 'transparent',
+          this.sessionSheetCampus === code ? COLOR_PRIMARY : $r('app.color.hita_text_hint_a9b4c2')))
         .strokeWidth(1.5);
       Text(label)
         .fontSize(15)

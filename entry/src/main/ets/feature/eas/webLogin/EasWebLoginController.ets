@@ -14,6 +14,7 @@ import { webview } from '@kit.ArkWeb';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { http } from '@kit.NetworkKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
+import { LegacyCookieReader } from './LegacyCookieReader';
 import { EasCampus, EasSession } from '../EasSession';
 import {
   EasCampusConfig,
@@ -798,7 +799,7 @@ export class EasWebLoginController {
     ];
     for (let i = 0; i < urls.length; i++) {
       EasWebLoginController.mergePutIfAbsent(cookies,
-        parseCookiesHeader(await EasWebLoginController.tryFetchCookieWithPartitioned(urls[i])));
+        parseCookiesHeader(await EasWebLoginController.tryFetchCookieWithPartitioned(urls[i], this.lastUrl)));
     }
     hilog.info(DOMAIN, TAG, 'Weihai browser cookie merge keys=%{public}s',
       EasWebLoginController.cookieKeys(cookies));
@@ -817,7 +818,7 @@ export class EasWebLoginController {
       }
     }
     const headers: string[] = await Promise.all(urls.map((probe: string): Promise<string> =>
-      EasWebLoginController.tryFetchCookieWithPartitioned(probe)));
+      EasWebLoginController.tryFetchCookieWithPartitioned(probe, url)));
     for (let i = 0; i < urls.length; i++) {
       EasWebLoginController.mergePutIfAbsent(out, parseCookiesHeader(headers[i]));
     }
@@ -1109,7 +1110,7 @@ export class EasWebLoginController {
     return new Promise<string>((resolve) => {
       const timer: number = setTimeout(() => resolve(''), 3000);
       try {
-        const result: Promise<string> = partitioned ?
+        const result: Promise<string> = partitioned && deviceInfo.apiAvailable('26.0.0') ?
           webview.WebCookieManager.fetchCookie(url, false, true) :
           webview.WebCookieManager.fetchCookie(url);
         result.then((value: string) => {
@@ -1125,11 +1126,18 @@ export class EasWebLoginController {
       }
     });
   }
-  static async tryFetchCookieWithPartitioned(url: string): Promise<string> {
+  static async tryFetchCookieWithPartitioned(url: string, topLevelUrl: string = url): Promise<string> {
     let includePartitioned: boolean = false;
     try {
       includePartitioned = deviceInfo.apiAvailable('26.0.0');
     } catch (e) {}
+    if (!includePartitioned) {
+      const legacy: string[] = await Promise.all([
+        EasWebLoginController.tryFetchCookie(url),
+        LegacyCookieReader.read(url, topLevelUrl)
+      ]);
+      return LegacyCookieReader.merge(legacy[0], legacy[1]);
+    }
     const values: string[] = await Promise.all([
       EasWebLoginController.tryFetchCookie(url),
       includePartitioned ? EasWebLoginController.tryFetchCookie(url, true) : Promise.resolve('')

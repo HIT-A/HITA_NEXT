@@ -33,7 +33,7 @@
         "name": "default",
         "signingConfig": "now",
         "compileSdkVersion": "26.0.0",
-        "compatibleSdkVersion": "26.0.0",
+        "compatibleSdkVersion": "6.1.0(23)",
         "targetSdkVersion": "26.0.0",
         "runtimeOS": "HarmonyOS",
         "buildOption": {
@@ -47,7 +47,7 @@
         "name": "store",
         "signingConfig": "hitanext",
         "compileSdkVersion": "26.0.0",
-        "compatibleSdkVersion": "26.0.0",
+        "compatibleSdkVersion": "6.1.0(23)",
         "targetSdkVersion": "26.0.0",
         "runtimeOS": "HarmonyOS",
         "buildOption": {

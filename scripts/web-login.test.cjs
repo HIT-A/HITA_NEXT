@@ -7,11 +7,11 @@ global.$r = name => ({ id: -1, type: 10001, params: [name] });
 
 const root = path.resolve(__dirname, '../entry/src/main/ets');
 const flush = async () => { for (let i = 0; i < 60; i++) await Promise.resolve(); };
-function setup() {
+function setup(apiVersion = 26) {
   const timers = new Map();
   const cache = new Map();
   const state = { now: 10000, syncReads: 0, reads: 0, cookie: '', navigations: [],
-    finished: [], errors: [], mfa: [], requests: 0, exchanges: 0, resetCookies: 0, resetStorage: 0 };
+    finished: [], errors: [], mfa: [], requests: 0, exchanges: 0, resetCookies: 0, resetStorage: 0, allReads: 0 };
   let timerId = 0;
   const setTimer = (callback, delay) => {
     const id = ++timerId;
@@ -31,6 +31,10 @@ function setup() {
       static addIntelligentTrackingPreventionBypassingList() {}
     },
     WebCookieManager: {
+      fetchAllCookies: () => {
+        state.allReads++;
+        return state.fetchAllCookies ? state.fetchAllCookies() : Promise.resolve([]);
+      },
       fetchCookieSync: () => { state.syncReads++; return state.cookie; },
       fetchCookie: (...args) => {
         state.reads++;
@@ -78,7 +82,7 @@ function setup() {
     const localRequire = name => {
       if (name === '@kit.ArkWeb') return { webview };
       if (name === '@kit.NetworkKit') return { http };
-      if (name === '@kit.BasicServicesKit') return { deviceInfo: { apiAvailable: () => true, sdkApiVersion: 26 } };
+      if (name === '@kit.BasicServicesKit') return { deviceInfo: { apiAvailable: () => apiVersion >= 26, sdkApiVersion: apiVersion } };
       if (name === '@kit.PerformanceAnalysisKit') return { hilog: { info() {}, warn() {}, error() {} } };
       if (name.startsWith('@kit.')) return {};
       assert.ok(name.startsWith('.'), name);
@@ -387,4 +391,69 @@ test('a hung reset times out without leaving the login window busy forever', asy
   assert.equal(page.webReady, true);
   assert.match(page.errorText, /超时/);
   page.aboutToDisappear();
+});
+
+function storedCookie(overrides = {}) {
+  return { name: 'JSESSIONID', value: 'session', domain: 'jwts.hit.edu.cn', path: '/',
+    isSessionCookie: true, isSecure: true, isHttpOnly: true, expiresDate: '', samesitePolicy: 0, ...overrides };
+}
+
+test('API 23 supplements URL-scoped cookies without replacing the authoritative session', async () => {
+  const h = setup(23);
+  const { EasWebLoginController } = h.load('feature/eas/webLogin/EasWebLoginController.ets');
+  const calls = [];
+  h.state.fetchCookie = (...args) => { calls.push(args); return Promise.resolve('JSESSIONID=current'); };
+  h.state.fetchAllCookies = async () => [storedCookie({ value: 'stale' }), storedCookie({ name: 'ticket', value: 'extra' })];
+  assert.equal(await EasWebLoginController.tryFetchCookieWithPartitioned('https://jwts.hit.edu.cn/index'),
+    'JSESSIONID=current; ticket=extra');
+  assert.deepEqual(calls, [['https://jwts.hit.edu.cn/index']]);
+  assert.equal(h.state.allReads, 1);
+  assert.equal(h.state.syncReads, 0);
+  assert.equal(h.timers.size, 0);
+});
+
+test('API 26 keeps partition-aware native reads and never enumerates the old cookie store', async () => {
+  const h = setup(26);
+  const { EasWebLoginController } = h.load('feature/eas/webLogin/EasWebLoginController.ets');
+  const calls = [];
+  h.state.fetchCookie = (...args) => { calls.push(args); return Promise.resolve(args.length === 3 ? 'ticket=partitioned' : 'sid=normal'); };
+  assert.equal(await EasWebLoginController.tryFetchCookieWithPartitioned('https://jwts.hit.edu.cn/'), 'sid=normal; ticket=partitioned');
+  assert.deepEqual(calls, [['https://jwts.hit.edu.cn/'], ['https://jwts.hit.edu.cn/', false, true]]);
+  assert.equal(h.state.allReads, 0);
+});
+
+test('legacy cookie selection respects domain, path case, Secure, expiry and ambiguous partition values', () => {
+  const { LegacyCookieReader } = setup(23).load('feature/eas/webLogin/LegacyCookieReader.ets');
+  const cookies = [
+    storedCookie({ name: 'good', path: '/EAS' }),
+    storedCookie({ name: 'httpOnly' }),
+    storedCookie({ name: 'parent', domain: '.hit.edu.cn' }),
+    storedCookie({ name: 'other', domain: 'evilhit.edu.cn' }),
+    storedCookie({ name: 'hostOnly', domain: 'hit.edu.cn' }),
+    storedCookie({ name: 'wrongCase', path: '/eas' }),
+    storedCookie({ name: 'prefix', path: '/EA' }),
+    storedCookie({ name: 'expired', isSessionCookie: false, expiresDate: '1970-01-01T00:00:01Z' }),
+    storedCookie({ name: 'badExpiry', isSessionCookie: false, expiresDate: 'bad' }),
+    storedCookie({ name: 'conflict', value: 'partition-a' }),
+    storedCookie({ name: 'conflict', value: 'partition-b' }),
+    storedCookie({ name: 'injected', value: 'value; another=bad' })
+  ];
+  assert.equal(LegacyCookieReader.select(cookies, 'https://jwts.hit.edu.cn/EAS/index', 10000),
+    'good=session; httpOnly=session; parent=session');
+  assert.equal(LegacyCookieReader.select(cookies, 'http://jwts.hit.edu.cn/EAS/index', 10000), '');
+});
+
+test('API 23 supplement stays on the active first-party host and times out without losing normal cookies', async () => {
+  const h = setup(23);
+  const { EasWebLoginController } = h.load('feature/eas/webLogin/EasWebLoginController.ets');
+  h.state.cookie = 'sid=normal';
+  assert.equal(await EasWebLoginController.tryFetchCookieWithPartitioned('https://jwts.hit.edu.cn/', 'https://ids.hit.edu.cn/'), 'sid=normal');
+  assert.equal(h.state.allReads, 0);
+  h.state.fetchAllCookies = () => new Promise(() => {});
+  const pending = EasWebLoginController.tryFetchCookieWithPartitioned('https://jwts.hit.edu.cn/');
+  await h.tick(3000);
+  assert.equal(await pending, 'sid=normal');
+  assert.equal(h.timers.size, 0);
+  h.state.fetchAllCookies = async () => [storedCookie()];
+  assert.equal(await EasWebLoginController.tryFetchCookieWithPartitioned('https://jwts.hit.edu.cn/'), 'sid=normal; JSESSIONID=session');
 });

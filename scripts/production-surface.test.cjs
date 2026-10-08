@@ -244,7 +244,7 @@ test('the window fills the status bar instead of leaving a white top inset', () 
   assert.doesNotMatch(tabPage, /SafeAreaEdge\.TOP/);
   const tab = home.slice(home.indexOf('  tabTimetable()'), home.indexOf('  statusBanner('));
   assert.match(tab, /Image\(this\.timetableBgUri\)[\s\S]*SafeAreaEdge\.TOP, SafeAreaEdge\.BOTTOM/);
-  assert.match(home, /barFloatingStyle\(DockBarMaterial\.floatingStyle\(12 \+ this\.navBarInset,/);
+  assert.match(home, /new CompatibleDockModifier\(12 \+ this\.navBarInset,/);
   assert.match(ability, /captureSystemInsets/);
   assert.match(ability, /TYPE_NAVIGATION_INDICATOR/);
   assert.match(ability, /TYPE_KEYBOARD/);
