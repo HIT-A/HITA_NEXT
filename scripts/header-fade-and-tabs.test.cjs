@@ -135,3 +135,20 @@ test('function-centre secondary pages use the same transparent header', () => {
     assert.doesNotMatch(build, /\.border\(\{ width: \{ bottom: 1 \}/, page);
   }
 });
+
+test('empty scores are centered without a decorative circle or trailing empty button space', () => {
+  const source = read('pages/ScorePage.ets');
+  const start = source.indexOf('} else if (this.scores.length === 0)');
+  const end = source.indexOf('List({ space: 10, scroller: this.pageScroller })', start);
+  assert.ok(start >= 0 && end > start);
+  const empty = source.slice(start, end);
+  assert.doesNotMatch(empty, /Text\('◉'\)|Circle\(|LoadingProgress\(/);
+  assert.match(empty, /Text\('暂无成绩数据'\)[\s\S]*?\.width\('100%'\)\s*\.textAlign\(TextAlign\.Center\)/);
+  assert.match(empty, /Text\(this\.msg\.length > 0 \? this\.msg :[\s\S]*?this\.hasSession[\s\S]*?\.width\('100%'\)\s*\.textAlign\(TextAlign\.Center\)/);
+  assert.match(empty, /\.margin\(\{ bottom: this\.hasSession \? 0 : 24 \}\)/);
+  assert.match(empty, /\.width\('100%'\)\s*\.height\('100%'\)\s*\.padding\(\{ left: 32, right: 32, top: HEADER_HEIGHT \}\)/);
+  assert.match(empty, /\.justifyContent\(FlexAlign\.Center\)\s*\.alignItems\(HorizontalAlign\.Center\)/);
+  assert.match(empty, /if \(!this\.hasSession\)[\s\S]*?Text\('去登录'\)/);
+  const loading = source.slice(source.indexOf('if (this.loading)'), start);
+  assert.match(loading, /LoadingProgress\(\)/);
+});

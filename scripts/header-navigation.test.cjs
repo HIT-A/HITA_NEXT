@@ -17,7 +17,7 @@ test('all more pages use the shared navigation button, not text glyphs', () => {
     assert.doesNotMatch(source, /Text\(['"][<‹×]['"]\)/, page);
   }
   const home = read('pages/Home.ets');
-  assert.equal((home.match(/HeaderBackButton\(\{/g) || []).length, 2);
+  assert.equal((home.match(/HeaderBackButton\(\{/g) || []).length, 1);
   assert.doesNotMatch(home, /sheetCloseButton/);
 });
 
@@ -41,12 +41,29 @@ test('page and sheet header back buttons stay on the leading side', () => {
     assert.match(header, /Row\(\) \{\s*HeaderBackButton\(\{/, page);
   }
   const home = read('pages/Home.ets');
-  for (const name of ['courseDetailSheet(event: EasEventItem)', 'sessionSheet()']) {
-    const header = home.slice(home.indexOf('  ' + name));
-    assert.match(header, /Column\(\) \{\s*Row\(\) \{\s*HeaderBackButton\(\{/);
-  }
+  const sessionHeader = home.slice(home.indexOf('  sessionSheet()'));
+  assert.match(sessionHeader, /Column\(\) \{\s*Row\(\) \{\s*HeaderBackButton\(\{/);
   const login = read('feature/eas/webLogin/EasLoginPage.ets');
   assert.match(login, /Row\(\{ space: 8 \}\) \{\s*HeaderBackButton\(\{/);
+});
+
+test('timetable detail header aligns its colored circle and title with the information rows', () => {
+  const home = read('pages/Home.ets');
+  const sheet = home.slice(home.indexOf('  courseDetailSheet('), home.indexOf('  courseDetailRow('));
+  const row = home.slice(home.indexOf('  courseDetailRow('), home.indexOf('  sessionSheet()'));
+  assert.doesNotMatch(sheet, /HeaderBackButton|\.width\(7\)|\.height\(50\)/);
+  assert.match(sheet, /Circle\(\)[\s\S]*?\.width\(38\)\s*\.height\(38\)\s*\.flexShrink\(0\)/);
+  assert.match(sheet, /\.fill\(argbToCss\(timetableBlockColor\(event\.color\), 1\)\)/);
+  assert.match(sheet, /\.constraintSize\(\{ minHeight: 56 \}\)/);
+  assert.match(sheet, /\.width\('100%'\)\s*\.maxLines\(2\)/);
+  for (const style of ['.width(38)', '.height(38)', '.flexShrink(0)',
+    '.layoutWeight(1)', '.alignItems(HorizontalAlign.Start)', '.margin({ left: 12 })']) {
+    assert.ok(sheet.includes(style), `Detail header: ${style}`);
+    assert.ok(row.includes(style), `Detail row: ${style}`);
+  }
+  assert.match(home, /dragBar: true/);
+  assert.match(home, /showClose: false/);
+  assert.doesNotMatch(home, /shouldDismiss: false/);
 });
 
 test('login uses one app-return button and no overlapping system close control', () => {

@@ -115,7 +115,8 @@ test('all existing authentication forms and student types keep their serialized 
 
 test('home and timetable import share session selection; active timetable actions remain wired', () => {
   const read = file => fs.readFileSync(path.join(root, file), 'utf8');
-  for (const file of ['pages/Home.ets', 'feature/eas/EasTimetableImporter.ets']) {
+  for (const file of ['pages/Home.ets', 'pages/ScorePage.ets', 'pages/ExamPage.ets',
+    'feature/eas/EasTimetableImporter.ets']) {
     const source = read(file);
     assert.match(source, /await EasSessionStore\.getInstance\(\)\.loadPreferred\(\)/);
     assert.doesNotMatch(source, /const order: EasCampus\[\]/);

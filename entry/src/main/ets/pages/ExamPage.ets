@@ -67,17 +67,10 @@ struct ExamPage {
     try {
       const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
       await EasSessionStore.getInstance().init(ctx);
-      const order: EasCampus[] = [EasCampus.SHENZHEN, EasCampus.BENBU, EasCampus.WEIHAI];
-      this.session = undefined;
-      for (let i = 0; i < order.length; i++) {
-        const s: EasSession | undefined = await EasSessionStore.getInstance().load(order[i]);
-        if (s !== undefined && s.isLogin()) {
-          this.session = s;
-          break;
-        }
-      }
+      this.session = await EasSessionStore.getInstance().loadPreferred();
       this.hasSession = this.session !== undefined;
     } catch (_) {
+      this.session = undefined;
       this.hasSession = false;
     }
   }
@@ -344,9 +337,12 @@ struct ExamPage {
             .fontSize(16)
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.hita_text_1a1a1a'))
+            .width('100%')
+            .textAlign(TextAlign.Center)
           Text(this.hasSession ? '点击右上角“查询”从教务同步，或手动添加考试' : '登录教务后可查询考试，也可手动添加')
             .fontSize(13)
             .fontColor($r('app.color.hita_text_secondary_808080'))
+            .width('100%')
             .textAlign(TextAlign.Center)
             .lineHeight(20)
             .margin({ top: 8, bottom: 20 })
@@ -354,6 +350,8 @@ struct ExamPage {
             Text(this.queryMsg)
               .fontSize(12)
               .fontColor($r('app.color.hita_error'))
+              .width('100%')
+              .textAlign(TextAlign.Center)
               .margin({ bottom: 12 })
           }
           Text('添加考试')
@@ -370,8 +368,9 @@ struct ExamPage {
             })
         }
         .width('100%')
-        .margin({ top: HEADER_HEIGHT + 40 })
-        .padding({ left: 32, right: 32 })
+        .height('100%')
+        .padding({ left: 32, right: 32, top: HEADER_HEIGHT })
+        .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
       } else {
         List({ space: 8, scroller: this.pageScroller }) {

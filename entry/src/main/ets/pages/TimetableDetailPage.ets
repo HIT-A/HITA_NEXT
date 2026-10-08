@@ -57,6 +57,7 @@ struct TimetableDetailPage {
   // not change the gesture/measurement path used by the parent container.
   private detailScroller: Scroller = new Scroller();
   private timetableId: string = '';
+  private subjectTypeChanging: boolean = false;
 
   async aboutToAppear(): Promise<void> {
     const params: Object | undefined = this.getUIContext().getRouter().getParams();
@@ -336,6 +337,10 @@ struct TimetableDetailPage {
 
   /** 教务数据未提供考核方式时，允许手动纠正课程类型。 */
   private chooseSubjectType(row: TimetableSubjectRow): void {
+    if (this.subjectTypeChanging) {
+      return;
+    }
+    this.subjectTypeChanging = true;
     const types: EasSubjectType[] = [EasSubjectType.COM_A, EasSubjectType.COM_B, EasSubjectType.OPT_A,
       EasSubjectType.OPT_B, EasSubjectType.MOOC, EasSubjectType.TAG];
     const button = (type: EasSubjectType): promptAction.Button => {
@@ -354,11 +359,16 @@ struct TimetableDetailPage {
       if (next === undefined || next === row.subject.type) {
         return;
       }
-      const subject: EasTermSubject = row.subject;
-      subject.type = next;
-      await RdbHelper.getInstance().saveSubject(subject);
-      await this.load();
+      try {
+        await RdbHelper.getInstance().updateSubjectType(row.subject.id, next);
+        await this.load();
+      } catch (_) {
+        this.getUIContext().getPromptAction().showToast({ message: '课程类型未更新，请重试' });
+      }
     }).catch(() => {
+      // Dismissing the selection menu leaves the saved type unchanged.
+    }).finally(() => {
+      this.subjectTypeChanging = false;
     });
   }
 
@@ -818,7 +828,8 @@ struct TimetableDetailPage {
               Column({ space: 8 }) {
                 ForEach(this.subjectRows, (row: TimetableSubjectRow) => {
                   this.courseGroupCard(row)
-                }, (row: TimetableSubjectRow) => row.subject.id)
+                // Builder rows need a new key when their unobserved content changes.
+                }, (row: TimetableSubjectRow) => JSON.stringify(row))
               }
               .width('100%')
             }

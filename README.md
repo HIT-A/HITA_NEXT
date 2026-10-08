@@ -39,7 +39,7 @@ HITA NEXT 是基于开源项目 [HITA Android](https://github.com/HIT-A/HITA_And
 - 查看当前账号、校区和会话状态。
 - 按校区管理会话并退出登录。
 - 管理课表、手动添加课程，以及导入和导出 ICS 课表。
-- 一键将当前课表导出至手机系统日历，重复导出更新已有日程。
+- 确认后将当前课表导出至手机系统日历，重复导出更新已有日程。
 - 查看版本更新、服务与故障公告。
 
 ## 技术基线
@@ -139,6 +139,20 @@ entry/build/default/outputs/default/
 ```
 
 配置签名后通常生成 `entry-default-signed.hap`。仓库中的 `install_and_run.bat` 可用于构建、检测 HDC 设备并安装已签名 HAP。
+
+### 发布签名
+
+在本机 DevEco 中配置 `release` 类型、`app_gallery` 分发方式的签名配置，包名必须为 `cn.berry.hitanext`。证书、密钥和密码仅保留在本地，不提交仓库。
+
+```powershell
+.\scripts\build-agc-store-app.ps1 -SigningConfig online
+```
+
+将 `online` 替换为本机的正式签名配置名称。脚本使用 release 模式构建，验证 `.app` 和内部 HAP 的签名及 Profile，并恢复原有构建配置。验证成功后生成：
+
+```text
+build/outputs/default/HITA-NEXT-0.2.0-AGC-signed.app
+```
 
 ### 静态检查
 

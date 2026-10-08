@@ -1,111 +1,108 @@
-# Build AGC upload package: unsigned store assemble, then hap-sign-tool with AGC release Profile.
-$ErrorActionPreference = 'Stop'
-$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$ProfilePath = Join-Path $Root 'signing\agc\release.p7b'
-$CerPath = Join-Path $Root 'signing\agc\release.cer'
-$P12Path = Join-Path $Root 'signing\agc\release.p12'
-$PwdPath = Join-Path $Root 'signing\agc\store.pwd'
-
-if (-not ((Test-Path $ProfilePath) -and (Test-Path $CerPath) -and (Test-Path $P12Path))) {
-  Write-Host 'Missing signing/agc/release.{p7b,cer,p12}' -ForegroundColor Red
-  exit 1
-}
-
-$text = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($ProfilePath))
-if ($text -notmatch '"type":"release"') {
-  Write-Host 'signing/agc/release.p7b is not RELEASE type.' -ForegroundColor Red
-  exit 1
-}
-if ($text -notmatch '"bundle-name":"cn\.berry\.hitanext"') {
-  Write-Host 'release.p7b bundle-name must be cn.berry.hitanext.' -ForegroundColor Red
-  exit 1
-}
-
-$pw = $env:HITANEXT_STORE_PWD
-if ([string]::IsNullOrWhiteSpace($pw) -and (Test-Path $PwdPath)) {
-  $pw = (Get-Content -Path $PwdPath -Raw).Trim()
-}
-if ([string]::IsNullOrWhiteSpace($pw)) {
-  Write-Host 'Set HITANEXT_STORE_PWD or create signing/agc/store.pwd' -ForegroundColor Red
-  exit 1
-}
-
-$env:NODE_HOME = 'D:\deveco studio\Deveco studio\tools\node'
-$env:DEVECO_SDK_HOME = 'D:\deveco studio\Deveco studio\sdk'
-$env:JAVA_HOME = 'D:\deveco studio\Deveco studio\jbr'
-$env:PATH = "$env:JAVA_HOME\bin;$env:NODE_HOME;$env:PATH"
-Set-Location $Root
-
-& 'D:\deveco studio\Deveco studio\tools\hvigor\bin\hvigorw.bat' `
-    --mode project assembleApp -p product=store -p buildMode=release --no-daemon
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-$outDir = Join-Path $Root 'build\outputs\store'
-$unsigned = Join-Path $outDir 'HITA_NEXT0.1.1-store-unsigned.app'
-$signed = Join-Path $outDir 'HITA_NEXT0.1.1-store-signed.app'
-$hapIn = Join-Path $Root 'entry\build\store\outputs\default\entry-default-unsigned.hap'
-$hapOut = Join-Path $Root 'entry\build\store\outputs\default\entry-default-signed.hap'
-$jar = Join-Path $env:DEVECO_SDK_HOME 'default\openharmony\toolchains\lib\hap-sign-tool.jar'
-$java = Join-Path $env:JAVA_HOME 'bin\java.exe'
-
-if (-not (Test-Path $unsigned)) {
-  Write-Host 'No store unsigned .app' -ForegroundColor Red
-  exit 1
-}
-
-$signArgs = @(
-  '-jar', $jar, 'sign-app',
-  '-mode', 'localSign',
-  '-keyAlias', 'berry',
-  '-appCertFile', $CerPath,
-  '-profileFile', $ProfilePath,
-  '-signAlg', 'SHA256withECDSA',
-  '-keystoreFile', $P12Path,
-  '-keystorePwd', $pw,
-  '-keyPwd', $pw,
-  '-compatibleVersion', '26',
-  '-signCode', '1'
+# Build and verify an AppGallery release using an existing local signing configuration.
+param(
+  [string]$DevEcoHome = (Join-Path $env:ProgramFiles 'Huawei\DevEco Studio'),
+  [string]$SigningConfig = 'online',
+  [string]$Product = 'default'
 )
+$ErrorActionPreference = 'Stop'
+$Root = Split-Path -Parent $PSScriptRoot
+$ConfigPath = Join-Path $Root 'build-profile.json5'
+$OriginalConfig = [IO.File]::ReadAllBytes($ConfigPath)
+$Node = (Get-Command node -ErrorAction Stop).Source
+$Java = Join-Path $DevEcoHome 'jbr\bin\java.exe'
+if (-not (Test-Path -LiteralPath $Java)) { $Java = (Get-Command java -ErrorAction Stop).Source }
+$Hvigor = Join-Path $DevEcoHome 'tools\hvigor\bin\hvigorw.bat'
+$Jar = Join-Path $DevEcoHome 'sdk\default\openharmony\toolchains\lib\hap-sign-tool.jar'
+$OldNodePath = $env:NODE_PATH
+$OldNodeHome = $env:NODE_HOME
+$OldSdkHome = $env:DEVECO_SDK_HOME
+$OldJavaHome = $env:JAVA_HOME
+$env:NODE_PATH = Join-Path $DevEcoHome 'sdk\default\openharmony\ets\build-tools\ets-loader\node_modules'
 
-& $java @signArgs -inFile $hapIn -outFile $hapOut
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-# AGC checks the HAP inside the .app. Signing only the outer zip leaves an unsigned HAP (993).
-Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.Security.Cryptography.Pkcs
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$packDir = Join-Path $Root 'build\_pack_store'
-$packed = Join-Path $outDir 'HITA_NEXT0.1.1-store-packed.app'
-if (Test-Path $packDir) { Remove-Item $packDir -Recurse -Force }
-New-Item $packDir -ItemType Directory | Out-Null
-[IO.Compression.ZipFile]::ExtractToDirectory($unsigned, $packDir)
-Copy-Item $hapOut (Join-Path $packDir 'entry-default.hap') -Force
-if (Test-Path $packed) { Remove-Item $packed -Force }
-$zip = [IO.Compression.ZipFile]::Open($packed, [IO.Compression.ZipArchiveMode]::Create)
-foreach ($f in Get-ChildItem $packDir -File) {
-  $entry = $zip.CreateEntry($f.Name, [IO.Compression.CompressionLevel]::NoCompression)
-  $es = $entry.Open()
-  $fs = [IO.File]::OpenRead($f.FullName)
-  $fs.CopyTo($es)
-  $fs.Dispose()
-  $es.Dispose()
+function Read-Profile([string]$Path) {
+  $Cms = [System.Security.Cryptography.Pkcs.SignedCms]::new()
+  $Cms.Decode([IO.File]::ReadAllBytes($Path))
+  $Cms.CheckSignature($true)
+  return [Text.Encoding]::UTF8.GetString($Cms.ContentInfo.Content) | ConvertFrom-Json
 }
-$zip.Dispose()
-
-& $java @signArgs -inFile $packed -inForm zip -outFile $signed
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-$dest = Join-Path $outDir 'AGC_UPLOAD.app'
-Copy-Item -Path $signed -Destination $dest -Force
-
-$blob = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($dest))
-if ($blob.Contains('"type":"debug"')) {
-  Write-Host ('Reject: debug Profile in ' + $dest) -ForegroundColor Red
-  exit 1
+function Assert-ReleaseProfile($Profile, [string]$BundleName) {
+  if ($Profile.type -ne 'release' -or $Profile.'app-distribution-type' -ne 'app_gallery') {
+    throw 'A RELEASE app_gallery profile is required. Debug/ad-hoc profiles cannot be uploaded.'
+  }
+  if ($Profile.'bundle-info'.'bundle-name' -ne $BundleName) {
+    throw 'Signing profile does not match the application bundle name.'
+  }
+  $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+  if ($Now -lt $Profile.validity.'not-before' -or $Now -gt $Profile.validity.'not-after') {
+    throw 'Signing profile is not currently valid.'
+  }
 }
-if ($blob -notmatch '"type":"release"') {
-  Write-Host ('Reject: no release Profile in ' + $dest) -ForegroundColor Red
-  exit 1
-}
+try {
+  $ConfigJson = & $Node -e "process.stdout.write(JSON.stringify(require('json5').parse(require('fs').readFileSync(process.argv[1],'utf8'))))" $ConfigPath
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot read build-profile.json5.' }
+  $Config = $ConfigJson | ConvertFrom-Json
+  $Signing = @($Config.app.signingConfigs | Where-Object name -EQ $SigningConfig)
+  if ($Signing.Count -ne 1) { throw "Missing local signing configuration: $SigningConfig" }
+  $App = Get-Content -LiteralPath (Join-Path $Root 'AppScope\app.json5') -Raw | ConvertFrom-Json
+  $Profile = Read-Profile $Signing[0].material.profile
+  Assert-ReleaseProfile $Profile $App.app.bundleName
+  $env:NODE_HOME = Split-Path -Parent $Node
+  $env:DEVECO_SDK_HOME = Join-Path $DevEcoHome 'sdk'
+  $env:JAVA_HOME = Split-Path -Parent (Split-Path -Parent $Java)
 
-Write-Host ('Upload to AGC: ' + $dest) -ForegroundColor Green
-Write-Host ('Signed app: ' + $signed) -ForegroundColor Green
+  # Change only the selected product for this build; restore the exact original bytes below.
+  & $Node -e "const fs=require('fs'),j=require('json5'),p=process.argv[1],c=j.parse(fs.readFileSync(p,'utf8'));const product=c.app.products.find(x=>x.name===process.argv[2]);if(!product)throw Error('Unknown product');product.signingConfig=process.argv[3];product.buildOption??={};product.buildOption.packOptions={...product.buildOption.packOptions,buildAppSkipSignHap:false,appWithSignedPkg:true};fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n')" $ConfigPath $Product $SigningConfig
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot select the release signing configuration.' }
+  Push-Location $Root
+  try {
+    $BuildStarted = [DateTime]::UtcNow
+    & $Hvigor --mode project -p "product=$Product" -p buildMode=release clean assembleApp --no-daemon
+    if ($LASTEXITCODE -ne 0) { throw 'Release build failed.' }
+  } finally { Pop-Location }
+
+  $OutDir = Join-Path $Root "build\outputs\$Product"
+  $Packages = @(Get-ChildItem -LiteralPath $OutDir -Filter '*-all-signed.app' | Where-Object {
+    $_.LastWriteTimeUtc -ge $BuildStarted
+  })
+  if ($Packages.Count -ne 1) { throw 'Expected exactly one freshly built signed app package.' }
+  $Package = $Packages[0].FullName
+  $VerifyDir = Join-Path $OutDir ('verification-' + [Guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Path $VerifyDir | Out-Null
+  $Zip = [IO.Compression.ZipFile]::OpenRead($Package)
+  try {
+    $InfoEntry = $Zip.GetEntry('pack.info')
+    if ($null -eq $InfoEntry) { throw 'Missing app package identity.' }
+    $Reader = [IO.StreamReader]::new($InfoEntry.Open())
+    try { $Info = $Reader.ReadToEnd() | ConvertFrom-Json } finally { $Reader.Dispose() }
+    if ($Info.summary.app.bundleName -ne $App.app.bundleName -or
+      $Info.summary.app.version.code -ne $App.app.versionCode -or
+      $Info.summary.app.version.name -ne $App.app.versionName) {
+      throw 'Built package identity/version does not match AppScope/app.json5.'
+    }
+    $Haps = @($Zip.Entries | Where-Object { $_.Name.EndsWith('.hap') })
+    if ($Haps.Count -eq 0) { throw 'No HAP module inside the app package.' }
+    for ($i = 0; $i -lt $Haps.Count; $i++) {
+      [IO.Compression.ZipFileExtensions]::ExtractToFile($Haps[$i], (Join-Path $VerifyDir "module-$i.hap"))
+    }
+  } finally { $Zip.Dispose() }
+  $VerifyFiles = @($Package) + @(Get-ChildItem -LiteralPath $VerifyDir -Filter '*.hap' | Select-Object -ExpandProperty FullName)
+  for ($i = 0; $i -lt $VerifyFiles.Count; $i++) {
+    $VerifiedProfile = Join-Path $VerifyDir "verified-$i.p7b"
+    & $Java -jar $Jar verify-app -inFile $VerifyFiles[$i] -inForm zip `
+      -outCertChain (Join-Path $VerifyDir "verified-$i.cer") -outProfile $VerifiedProfile
+    if ($LASTEXITCODE -ne 0) { throw "Signature verification failed: $($VerifyFiles[$i])" }
+    Assert-ReleaseProfile (Read-Profile $VerifiedProfile) $App.app.bundleName
+  }
+  $Destination = Join-Path $OutDir ("HITA-NEXT-" + $App.app.versionName + '-AGC-signed.app')
+  Copy-Item -LiteralPath $Package -Destination $Destination -Force
+  Write-Host "Verified AGC release: $Destination"
+  Write-Host ("SHA256: " + (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash)
+} finally {
+  [IO.File]::WriteAllBytes($ConfigPath, $OriginalConfig)
+  $env:NODE_PATH = $OldNodePath
+  $env:NODE_HOME = $OldNodeHome
+  $env:DEVECO_SDK_HOME = $OldSdkHome
+  $env:JAVA_HOME = $OldJavaHome
+}

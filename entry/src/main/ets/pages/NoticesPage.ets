@@ -20,6 +20,8 @@ const PAGE_BG_RGB: string = '246,247,250';
 struct NoticesPage {
   @State notices: AppNotice[] = [];
   @State loading: boolean = true;
+  @State refreshing: boolean = false;
+  @State errorMessage: string = '';
   @State fadeOpacity: number = 0;
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
   private listScroller: Scroller = new Scroller();
@@ -33,13 +35,25 @@ struct NoticesPage {
     }
     // 有缓存时立即显示；没有缓存时保留加载态，避免把网络等待误报成空公告。
     this.loading = this.notices.length === 0;
+    await this.refreshNotices();
+  }
+
+  private async refreshNotices(): Promise<void> {
+    if (this.refreshing) {
+      return;
+    }
+    this.refreshing = true;
+    this.errorMessage = '';
+    const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     try {
       const fetched: AppNotice[] = await AppNoticeCenter.fetch(ctx);
       this.notices = AppNoticeCenter.activeNotices(fetched);
     } catch (e) {
-      // fetch 内部会回落缓存；这里只兜底处理页面生命周期中的异常。
+      this.errorMessage = this.notices.length > 0 ?
+        '公告更新失败，当前显示上次保存的内容' : '公告暂时无法加载';
     } finally {
       this.loading = false;
+      this.refreshing = false;
     }
   }
 
@@ -52,7 +66,7 @@ struct NoticesPage {
           .color($r('app.color.hita_primary_3390ec'))
           .margin({ top: HEADER_HEIGHT + 80 })
       } else if (this.notices.length === 0) {
-        Text('暂无公告')
+        Text(this.errorMessage.length > 0 ? this.errorMessage : '暂无公告')
           .fontSize(14)
           .fontColor($r('app.color.hita_text_secondary_5a6880'))
           .margin({ top: HEADER_HEIGHT + 60 })
@@ -75,6 +89,20 @@ struct NoticesPage {
           .layoutWeight(1)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Button({ type: ButtonType.Circle }) {
+          SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+            .fontSize(20)
+            .fontColor([$r('app.color.hita_text_secondary_566276')])
+        }
+        .width(44)
+        .height(44)
+        .padding(0)
+        .backgroundColor($r('app.color.hita_control'))
+        .enabled(!this.refreshing)
+        .accessibilityText('刷新公告')
+        .onClick(() => {
+          this.refreshNotices();
+        })
       }
       .width('100%')
       .height(HEADER_HEIGHT)
@@ -96,6 +124,16 @@ struct NoticesPage {
         Column()
           .width('100%')
           .height(HEADER_HEIGHT)
+      }
+
+      if (this.errorMessage.length > 0) {
+        ListItem() {
+          Text(this.errorMessage)
+            .fontSize(13)
+            .fontColor($r('app.color.hita_error_8c3a3a'))
+            .width('100%')
+            .padding(12)
+        }
       }
 
       ForEach(this.notices, (notice: AppNotice) => {
@@ -133,7 +171,7 @@ struct NoticesPage {
           .backgroundColor(notice.isCritical() ? $r('app.color.hita_error_surface_fdecec') : $r('app.color.hita_surface'))
           .borderRadius(16)
         }
-      }, (notice: AppNotice) => notice.id)
+      }, (notice: AppNotice) => notice.renderKey())
     }
     .width('100%')
     .height('100%')

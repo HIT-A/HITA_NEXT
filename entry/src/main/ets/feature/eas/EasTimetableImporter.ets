@@ -133,7 +133,8 @@ export class EasTimetableImporter {
       const timetable: EasTimetable = await EasTimetableImporter.saveCourses(rdb, session, term, courses, schedule,
         start.startTime);
       result.timetable = timetable;
-      const readback: EasEventItem[] = await rdb.getEventsOfTimetable(timetable.id);
+      const readback: EasEventItem[] = (await rdb.getEventsOfTimetable(timetable.id))
+        .filter((event: EasEventItem): boolean => event.type === EasEventType.CLASS);
       result.eventCount = readback.length;
       hilog.info(DOMAIN, TAG, 'RDB readback timetable=%{public}s subjects/events=%{public}d',
         timetable.id, readback.length);
@@ -168,26 +169,25 @@ export class EasTimetableImporter {
     let maxWeek: number = 25;
     for (let i = 0; i < courses.length; i++) {
       for (let j = 0; j < courses[i].weekNumbers.length; j++) {
-        maxWeek = Math.max(maxWeek, courses[i].weekNumbers[j]);
+        const week: number = courses[i].weekNumbers[j];
+        if (Number.isInteger(week) && week > 0 && week <= 60) {
+          maxWeek = Math.max(maxWeek, week);
+        }
       }
     }
     timetable.endTime = timetable.startTime + maxWeek * 7 * 24 * 60 * 60 * 1000;
-    timetable.createdAt = Date.now();
     timetable.scheduleStructure = schedule.length > 0 ? schedule : EasTimetableImporter.scheduleStructure(session.campus);
-    await rdb.saveTimetable(timetable);
-    const savedTimetable: EasTimetable | undefined = await rdb.getTimetableById(timetable.id);
-    if (savedTimetable === undefined) {
-      throw new Error('本地课表数据库写入失败，请重试');
-    }
-    await rdb.deleteCourseFromTimetable(timetable.id);
     const subjects: EasTermSubject[] = await rdb.getSubjectsOfTimetable(timetable.id);
+    const changedSubjects: EasTermSubject[] = [];
+    const events: EasEventItem[] = [];
     let validCourseCount: number = 0;
-    let savedEventCount: number = 0;
     // 教务会把多位教师/多个教室同时段授课的同一门课拆成多条，同名同时段只保留一个课次。
     const eventByKey: Map<string, EasEventItem> = new Map<string, EasEventItem>();
     for (let i: number = 0; i < courses.length; i++) {
       const course: EasCourseItem = courses[i];
-      if (course.dayOfWeek < 1 || course.dayOfWeek > 7 || course.beginSection < 1 ||
+      if (!Number.isInteger(course.dayOfWeek) || !Number.isInteger(course.beginSection) ||
+        !Number.isInteger(course.sectionCount) ||
+        course.dayOfWeek < 1 || course.dayOfWeek > 7 || course.beginSection < 1 ||
         course.sectionCount < 1 || course.beginSection + course.sectionCount - 1 > timetable.scheduleStructure.length) {
         hilog.warn(DOMAIN, TAG, 'skip invalid course name=%{public}s day=%{public}d section=%{public}d count=%{public}d',
           course.name, course.dayOfWeek, course.beginSection, course.sectionCount);
@@ -209,7 +209,7 @@ export class EasTimetableImporter {
         subject.type = EasTimetableImporter.subjectTypeForCourse(course);
         subject.credit = course.credit > 0 ? course.credit : 0;
         subjects.push(subject);
-        await rdb.saveSubject(subject);
+        changedSubjects.push(subject);
       } else if (EasTimetableImporter.hasSubjectTypeHint(course)) {
         // 旧版本导入器曾把所有新科目默认写成 COM_A（必修·考试）。
         // 重新导入时，仅在教务返回了明确分类时修正已有科目，避免用不完整
@@ -219,21 +219,26 @@ export class EasTimetableImporter {
         if (subject.type !== inferredType || subject.credit !== nextCredit) {
           subject.type = inferredType;
           subject.credit = nextCredit;
-          await rdb.saveSubject(subject);
+          if (!changedSubjects.includes(subject)) {
+            changedSubjects.push(subject);
+          }
         }
       }
       const weeks: number[] = course.weekNumbers;
       for (let w: number = 0; w < weeks.length; w++) {
         const week: number = weeks[w];
-        if (week < 1 || week > maxWeek) continue;
+        if (!Number.isInteger(week) || week < 1 || week > maxWeek) continue;
         const timestamps: number[] = timetable.getTimestamps(week, course.dayOfWeek,
           course.beginSection, course.beginSection + course.sectionCount - 1);
+        if (!Number.isFinite(timestamps[0]) || !Number.isFinite(timestamps[1]) ||
+          timestamps[1] <= timestamps[0]) {
+          throw new Error('课程时间无效，原课表已保留，请检查节次设置');
+        }
         const key: string = course.name + '|' + timestamps[0].toString() + '|' + timestamps[1].toString();
         const duplicate: EasEventItem | undefined = eventByKey.get(key);
         if (duplicate !== undefined) {
           duplicate.teacher = EasTimetableImporter.joinDistinct(duplicate.teacher, course.teacher);
           duplicate.place = EasTimetableImporter.joinDistinct(duplicate.place, course.classroom);
-          await rdb.saveEvent(duplicate);
           continue;
         }
         const event: EasEventItem = new EasEventItem();
@@ -248,19 +253,19 @@ export class EasTimetableImporter {
         event.to = timestamps[1];
         event.fromNumber = course.beginSection;
         event.lastNumber = course.beginSection + course.sectionCount - 1;
-        await rdb.saveEvent(event);
+        events.push(event);
         eventByKey.set(key, event);
-        savedEventCount++;
       }
     }
     hilog.info(DOMAIN, TAG, 'local save courses=%{public}d valid=%{public}d events=%{public}d',
-      courses.length, validCourseCount, savedEventCount);
+      courses.length, validCourseCount, events.length);
     if (courses.length > 0 && validCourseCount === 0) {
       throw new Error('课表已获取，但课程节次无法解析');
     }
-    if (validCourseCount > 0 && savedEventCount === 0) {
-      throw new Error('课表已解析，但本地没有写入任何课次');
+    if (events.length === 0) {
+      throw new Error('未解析到有效课次，原课表已保留');
     }
+    await rdb.replaceImportedCourses(timetable, changedSubjects, events);
     return timetable;
   }
 

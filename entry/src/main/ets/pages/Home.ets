@@ -37,9 +37,11 @@ import {
   TIMETABLE_HOUR_HEIGHT,
   TimetablePlaceLabel,
   DOW_NAMES,
+  argbToCss,
   drawTimetablePlaces,
   drawTimetableWeek,
   eventsOfWeek,
+  timetableBlockColor,
   timetableEventSpan
 } from '../feature/timetable/views/TimetableWeekDraw';
 
@@ -103,6 +105,9 @@ struct Home {
   @State hasTimetable: boolean = false;
   @State timetableCount: number = 0;
   @State calendarExporting: boolean = false;
+  @State calendarExportSheetOpen: boolean = false;
+  @State calendarExportTimetable: EasTimetable | undefined = undefined;
+  private calendarExportConfirmed: boolean = false;
   @State currentTimetable: EasTimetable | undefined = undefined;
   @State recentTimetable: EasTimetable | undefined = undefined;
   @State importing: boolean = false;
@@ -810,15 +815,52 @@ struct Home {
     this.drawTimetableNow();
   }
 
-  private async exportToCalendar(): Promise<void> {
+  private openCalendarExportSheet(): void {
+    if (this.calendarExporting || this.activeSheetVisible || this.calendarExportSheetOpen) {
+      return;
+    }
+    if (this.currentTimetable === undefined) {
+      this.getUIContext().getPromptAction().showToast({ message: '请先新建或导入课表' });
+      return;
+    }
+    this.calendarExportTimetable = this.currentTimetable;
+    this.calendarExportConfirmed = false;
+    this.calendarExportSheetOpen = true;
+    this.activeSheetVisible = true;
+  }
+
+  private confirmCalendarExport(): void {
+    if (!this.activeSheetVisible || !this.calendarExportSheetOpen ||
+      this.calendarExportTimetable === undefined || this.calendarExporting) {
+      return;
+    }
+    this.calendarExportConfirmed = true;
+    this.activeSheetVisible = false;
+  }
+
+  private finishCalendarExportSheet(): void {
+    const timetable: EasTimetable | undefined = this.calendarExportTimetable;
+    const confirmed: boolean = this.calendarExportSheetOpen && this.calendarExportConfirmed;
+    this.calendarExportSheetOpen = false;
+    this.calendarExportTimetable = undefined;
+    this.calendarExportConfirmed = false;
+    // Wait for the sheet to close before requesting system calendar permissions.
+    if (confirmed && timetable !== undefined) {
+      void this.exportToCalendar(timetable);
+    }
+  }
+
+  private async exportToCalendar(timetable: EasTimetable): Promise<void> {
     if (this.calendarExporting) {
       return;
     }
     this.calendarExporting = true;
     try {
       const ctx: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const result: CalendarExportResult = await TimetableCalendarExporter.exportTimetable(ctx, this.currentTimetable);
+      const result: CalendarExportResult = await TimetableCalendarExporter.exportTimetable(ctx, timetable);
       this.getUIContext().getPromptAction().showToast({ message: result.message, duration: 3500 });
+    } catch (_) {
+      this.getUIContext().getPromptAction().showToast({ message: '导出至手机日历失败，请稍后重试' });
     } finally {
       this.calendarExporting = false;
     }
@@ -1092,8 +1134,8 @@ struct Home {
     .bindSheet(this.activeSheetVisible, this.activeSheet(), {
       height: this.loginSheetOpen ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
       dragBar: true,
-      // Every sheet owns its header control; the system close bubble overlaps
-      // the web login toolbar's trailing actions.
+      // Login/session sheets own their back buttons; timetable details use
+      // sheet gestures. Keep the system close bubble off the login toolbar.
       showClose: false,
       preferType: SheetType.BOTTOM,
       backgroundColor: COLOR_SURFACE,
@@ -1105,6 +1147,7 @@ struct Home {
         this.loginSheetOpen = false;
         this.courseSheetOpen = false;
         this.selectedCourse = undefined;
+        this.finishCalendarExportSheet();
       }
     });
   }
@@ -1128,6 +1171,8 @@ struct Home {
         .height('100%');
     } else if (this.courseSheetOpen && this.selectedCourse !== undefined) {
       this.courseDetailSheet(this.selectedCourse as EasEventItem);
+    } else if (this.calendarExportSheetOpen && this.calendarExportTimetable !== undefined) {
+      this.calendarExportSheet(this.calendarExportTimetable as EasTimetable);
     } else {
       this.sessionSheet();
     }
@@ -1852,7 +1897,7 @@ struct Home {
             this.moreNavigationRow($r('sys.symbol.calendar'),
               this.calendarExporting ? '正在导出至手机日历…' : '导出至手机日历',
               this.currentTimetable === undefined ? '暂无课表' : this.currentTimetable.name, () => {
-                this.exportToCalendar();
+                this.openCalendarExportSheet();
               });
           }
           .width('100%')
@@ -2103,26 +2148,87 @@ struct Home {
   }
 
   @Builder
+  calendarExportSheet(timetable: EasTimetable) {
+    Column() {
+      Row({ space: 12 }) {
+        Stack() {
+          SymbolGlyph($r('sys.symbol.calendar'))
+            .fontSize(22)
+            .fontColor([COLOR_PRIMARY]);
+        }
+        .width(44)
+        .height(44)
+        .flexShrink(0)
+        .borderRadius(22)
+        .backgroundColor(COLOR_NAV_ACTIVE);
+        Text('导出至手机日历')
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(COLOR_TEXT_PRIMARY)
+          .layoutWeight(1);
+      }
+      .width('100%');
+
+      Text(timetable.name.length > 0 ? timetable.name : '未命名课表')
+        .fontSize(16)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(COLOR_TEXT_PRIMARY)
+        .width('100%')
+        .margin({ top: 20 });
+      Text('将此课表中的课程、考试及其他日程写入手机日历。再次导出会更新此课表已导出的日程。')
+        .fontSize(14)
+        .fontColor(COLOR_TEXT_SECONDARY)
+        .lineHeight(22)
+        .width('100%')
+        .margin({ top: 8 });
+
+      Row({ space: 12 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(46)
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(COLOR_TEXT_PRIMARY)
+          .backgroundColor($r('app.color.hita_control'))
+          .borderRadius(17)
+          .onClick(() => {
+            this.activeSheetVisible = false;
+          });
+        Button('确认导出')
+          .layoutWeight(1)
+          .height(46)
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#FFFFFF')
+          .backgroundColor($r('app.color.hita_primary_fill'))
+          .borderRadius(17)
+          .onClick(() => {
+            this.confirmCalendarExport();
+          });
+      }
+      .width('100%')
+      .margin({ top: 24 });
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding({ left: 20, right: 20, top: 4, bottom: 22 });
+  }
+
+  @Builder
   courseDetailSheet(event: EasEventItem) {
     Column() {
       Row() {
-        HeaderBackButton({
-          onBack: () => {
-            this.activeSheetVisible = false;
-          }
-        })
-          .margin({ right: 12 });
-        Row()
-          .width(7)
-          .height(50)
-          .borderRadius(4)
-          .backgroundColor(Home.canvasColorCss(event.color === 0 ?
-            Home.defaultCanvasColor(event.type) : event.color));
+        Circle()
+          .width(38)
+          .height(38)
+          .flexShrink(0)
+          .fill(argbToCss(timetableBlockColor(event.color), 1));
         Column() {
           Text(event.name === 'NULL' || event.name.length === 0 ? '未命名课程' : event.name)
-            .fontSize(21)
+            .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .fontColor(COLOR_TEXT_PRIMARY)
+            .width('100%')
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis });
           Text(event.type === EasEventType.EXAM ? '考试详情' : '课程详情')
@@ -2132,10 +2238,10 @@ struct Home {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-        .margin({ left: 12, right: 10 });
-
+        .margin({ left: 12 });
       }
       .width('100%')
+      .constraintSize({ minHeight: 56 })
       .alignItems(VerticalAlign.Center)
       .margin({ bottom: 14 });
 
@@ -2169,6 +2275,7 @@ struct Home {
       }
       .width(38)
       .height(38)
+      .flexShrink(0)
       .borderRadius(19)
       .backgroundColor(COLOR_NAV_ACTIVE)
       .alignContent(Alignment.Center);
@@ -2191,13 +2298,6 @@ struct Home {
     .width('100%')
     .padding({ top: 8, bottom: 8 })
     .alignItems(VerticalAlign.Center);
-  }
-
-  private static canvasColorCss(argb: number): string {
-    const r: number = (argb >> 16) & 0xFF;
-    const g: number = (argb >> 8) & 0xFF;
-    const b: number = argb & 0xFF;
-    return 'rgb(' + r.toString() + ',' + g.toString() + ',' + b.toString() + ')';
   }
 
   @Builder

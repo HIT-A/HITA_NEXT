@@ -41,8 +41,12 @@ struct ImportTimetablePage {
   private session: EasSession | undefined = undefined;
   private pageScroller: Scroller = new Scroller();
   private detailsGeneration: number = 0;
+  private pageActive: boolean = false;
+  private returnTimer: number = -1;
+  private importCompleted: boolean = false;
 
   async aboutToAppear(): Promise<void> {
+    this.pageActive = true;
     await this.load();
   }
 
@@ -83,7 +87,12 @@ struct ImportTimetablePage {
   }
 
   aboutToDisappear(): void {
+    this.pageActive = false;
     this.detailsGeneration++;
+    if (this.returnTimer >= 0) {
+      clearTimeout(this.returnTimer);
+      this.returnTimer = -1;
+    }
   }
 
   private async loadTermDetails(): Promise<void> {
@@ -234,7 +243,7 @@ struct ImportTimetablePage {
   }
 
   private async import(): Promise<void> {
-    if (this.importing || this.detailsLoading || this.startTime <= 0 ||
+    if (this.importing || this.importCompleted || this.detailsLoading || this.startTime <= 0 ||
       this.selectedTerm() === undefined || this.session === undefined) {
       return;
     }
@@ -248,10 +257,17 @@ struct ImportTimetablePage {
       if (result.success && result.timetable !== undefined) {
         await TimetableSelectionStore.getInstance().init(ctx);
         await TimetableSelectionStore.getInstance().save(result.timetable.id);
+        this.importCompleted = true;
+        if (!this.pageActive) {
+          return;
+        }
         this.message = result.message;
         this.getUIContext().getPromptAction().showToast({ message: result.message });
-        setTimeout(() => {
-          this.getUIContext().getRouter().back();
+        this.returnTimer = setTimeout(() => {
+          this.returnTimer = -1;
+          if (this.pageActive) {
+            this.getUIContext().getRouter().back();
+          }
         }, 500);
       } else {
         this.error = result.message.length > 0 ? result.message : '导入课表失败';

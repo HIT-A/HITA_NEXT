@@ -77,7 +77,7 @@ function harness() {
           return { authResults: state.permissions };
         }
       }) } };
-      if (name === '@kit.PerformanceAnalysisKit') return { hilog: { error() {} } };
+      if (name === '@kit.PerformanceAnalysisKit') return { hilog: { error() {}, info() {} } };
       if (name.startsWith('@kit.')) return {};
       return load(path.resolve(path.dirname(file), name + '.ets'));
     };
@@ -257,4 +257,123 @@ test('simultaneous exports share a lock that is released after completion', asyn
   assert.equal((await first).success, true);
   assert.equal((await h.run()).success, true);
   assert.equal(h.state.calendars[0].rows.length, 1);
+});
+
+function confirmationHarness() {
+  const h = harness();
+  h.state.events = [h.course()];
+  const source = fs.readFileSync(path.join(root, 'pages/Home.ets'), 'utf8');
+  const start = source.indexOf('  private openCalendarExportSheet()');
+  const end = source.indexOf('  private async importIcsTimetable()', start);
+  assert.ok(start >= 0 && end > start);
+  const compiled = ts.transpileModule(`class Confirmation {
+    ${source.slice(start, end)}
+  }`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+  const Page = new Function('TimetableCalendarExporter', compiled + '\nreturn Confirmation;')(h.exporter);
+  const page = new Page();
+  const toasts = [];
+  Object.assign(page, {
+    currentTimetable: h.timetable, calendarExporting: false, calendarExportSheetOpen: false,
+    activeSheetVisible: false, calendarExportConfirmed: false
+  });
+  page.getUIContext = () => ({
+    getHostContext: () => ({}), getPromptAction: () => ({ showToast: item => toasts.push(item.message) })
+  });
+  const dismiss = async () => {
+    page.activeSheetVisible = false;
+    page.finishCalendarExportSheet();
+    await new Promise(setImmediate);
+  };
+  return { ...h, page, toasts, dismiss, source };
+}
+
+test('export entry opens a bottom sheet; only explicit confirmation can start a calendar export', async () => {
+  const h = confirmationHarness();
+  const { page } = h;
+  assert.match(h.source, /this\.currentTimetable\.name, \(\) => \{\s*this\.openCalendarExportSheet\(\);/);
+  assert.match(h.source, /onDisappear: \(\) => \{[\s\S]*?this\.finishCalendarExportSheet\(\);/);
+  assert.match(h.source, /else if \(this\.calendarExportSheetOpen[\s\S]*?this\.calendarExportSheet\(/);
+  assert.match(h.source, /Button\('取消'\)[\s\S]*?this\.activeSheetVisible = false;/);
+  assert.match(h.source, /Button\('确认导出'\)[\s\S]*?this\.confirmCalendarExport\(\);/);
+  page.openCalendarExportSheet();
+  assert.equal(page.activeSheetVisible, true);
+  assert.equal(page.calendarExportTimetable, h.timetable);
+  assert.equal(h.state.permissionCalls, 0);
+  assert.equal(h.state.calendarCalls, 0);
+  page.confirmCalendarExport();
+  assert.equal(page.activeSheetVisible, false);
+  assert.equal(page.calendarExportSheetOpen, true, 'content remains during dismissal animation');
+  assert.equal(h.state.permissionCalls, 0, 'permission UI waits for sheet dismissal');
+  await h.dismiss();
+  assert.equal(h.state.permissionCalls, 1);
+  assert.equal(h.state.calendars[0].rows.length, 1);
+  assert.equal(page.calendarExportSheetOpen, false);
+  assert.equal(page.calendarExportTimetable, undefined);
+  assert.equal(page.calendarExportConfirmed, false);
+  assert.match(h.toasts.at(-1), /已将 1 条日程导出/);
+});
+
+test('cancel, swipe dismissal and reopening never carry over consent', async () => {
+  const h = confirmationHarness();
+  for (let i = 0; i < 2; i++) {
+    h.page.openCalendarExportSheet();
+    await h.dismiss();
+    h.page.confirmCalendarExport();
+    assert.equal(h.state.permissionCalls, 0);
+    assert.equal(h.state.calendarCalls, 0);
+  }
+  h.page.openCalendarExportSheet();
+  h.page.confirmCalendarExport();
+  await h.dismiss();
+  h.page.openCalendarExportSheet();
+  assert.equal(h.page.calendarExportConfirmed, false);
+  await h.dismiss();
+  assert.equal(h.state.permissionCalls, 1);
+});
+
+test('confirmation exports the displayed timetable, not a subsequently changed selection', async () => {
+  const h = confirmationHarness();
+  h.page.openCalendarExportSheet();
+  h.page.currentTimetable = { ...h.timetable, id: 'different' };
+  h.page.confirmCalendarExport();
+  await h.dismiss();
+  assert.equal(h.state.calendars[0].getAccount().name, 'hita-timetable-term-a');
+});
+
+test('rapid taps and repeated dismissal callbacks cannot duplicate a confirmed export', async () => {
+  const h = confirmationHarness();
+  let release;
+  h.state.permissionGate = new Promise(resolve => { release = resolve; });
+  h.page.openCalendarExportSheet();
+  h.page.confirmCalendarExport();
+  h.page.confirmCalendarExport();
+  h.page.openCalendarExportSheet();
+  assert.equal(h.page.activeSheetVisible, false);
+  await h.dismiss();
+  assert.equal(h.page.calendarExporting, true);
+  h.page.openCalendarExportSheet();
+  h.page.confirmCalendarExport();
+  await h.dismiss();
+  assert.equal(h.page.activeSheetVisible, false);
+  assert.equal(h.state.permissionCalls, 1);
+  release();
+  await new Promise(setImmediate);
+  assert.equal(h.page.calendarExporting, false);
+  assert.equal(h.state.calendars[0].rows.length, 1);
+});
+
+test('missing or deleted timetables do not request calendar permissions', async () => {
+  const h = confirmationHarness();
+  h.page.currentTimetable = undefined;
+  h.page.openCalendarExportSheet();
+  assert.equal(h.page.activeSheetVisible, false);
+  assert.match(h.toasts.at(-1), /请先新建或导入/);
+  h.page.currentTimetable = h.timetable;
+  h.page.openCalendarExportSheet();
+  h.state.timetables.clear();
+  h.page.confirmCalendarExport();
+  await h.dismiss();
+  assert.equal(h.state.permissionCalls, 0);
+  assert.equal(h.page.calendarExporting, false);
+  assert.match(h.toasts.at(-1), /已删除/);
 });

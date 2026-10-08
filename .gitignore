@@ -20,3 +20,16 @@
 /scratch/
 /.analysis/
 /HITA_Android_src/
+
+# Local legal drafts, publishing notes, and signing material
+/docs/legal/
+/docs/agc/
+*AGC*填写*
+*agc*填写*
+*.p12
+*.p7b
+*.csr
+*.pwd
+*.cer
+*.hap
+/signing/

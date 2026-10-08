@@ -243,6 +243,11 @@ function importSetup({ remote = date(2026, 8, 24), savedDate, selectedTerms = [t
     getSubjectsOfTimetable: async () => [],
     saveSubject: async () => { calls.writes++; },
     saveEvent: async event => { calls.writes++; events.push(event); },
+    replaceImportedCourses: async (item, subjects, nextEvents) => {
+      calls.writes++;
+      timetable = item;
+      events.splice(0, events.length, ...nextEvents);
+    },
     getEventsOfTimetable: async () => events
   };
   const session = Object.assign(new EasSession(), { campus: EasCampus.WEIHAI });

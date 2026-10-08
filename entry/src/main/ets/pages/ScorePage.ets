@@ -31,19 +31,13 @@ struct ScorePage {
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
   private session: EasSession | undefined = undefined;
   private pageScroller: Scroller = new Scroller();
+  private requestGeneration: number = 0;
 
   async aboutToAppear(): Promise<void> {
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     await EasSessionStore.getInstance().init(ctx);
-    // 依次找深圳/本部/威海的可用会话
-    const order: EasCampus[] = [EasCampus.SHENZHEN, EasCampus.BENBU, EasCampus.WEIHAI];
-    for (let i = 0; i < order.length; i++) {
-      const s: EasSession | undefined = await EasSessionStore.getInstance().load(order[i]);
-      if (s !== undefined && s.isLogin()) {
-        this.session = s;
-        break;
-      }
-    }
+    this.session = await EasSessionStore.getInstance().loadPreferred();
+    this.hasSession = this.session !== undefined;
     if (this.session !== undefined) {
       this.hasSession = true;
       this.modeText = '当前会话：' + ScorePage.campusText(this.session.campus);
@@ -52,35 +46,59 @@ struct ScorePage {
     }
   }
 
+  onPageHide(): void {
+    this.requestGeneration++;
+    this.loading = false;
+  }
+
+  aboutToDisappear(): void {
+    this.onPageHide();
+  }
+
   /** 拉取当前学期成绩：需要网页登录会话。 */
   async queryReal(): Promise<void> {
+    if (this.loading) {
+      return;
+    }
     if (this.session === undefined) {
       this.msg = '请先登录教务';
       return;
     }
     this.loading = true;
     this.msg = '正在查询…';
+    const generation: number = ++this.requestGeneration;
+    const session: EasSession = this.session;
     try {
       const provider: EasDataProvider = new EasDataProvider(new EasApiClient());
-      const terms: EasTermItem[] = await provider.getAllTerms(this.session);
+      const terms: EasTermItem[] = await provider.getAllTerms(session);
+      if (generation !== this.requestGeneration) {
+        return;
+      }
       if (terms.length === 0) {
         this.msg = '未获取到学期信息，请稍后重试';
         return;
       }
-      const term: EasTermItem = terms[0];
-      const result = await provider.getPersonalScores(this.session, term);
+      const term: EasTermItem = terms.find((item: EasTermItem): boolean => item.isCurrent) ?? terms[0];
+      const result = await provider.getPersonalScores(session, term);
+      if (generation !== this.requestGeneration) {
+        return;
+      }
       if (result.ok) {
         this.scores = result.items;
-        this.modeText = ScorePage.campusText(this.session.campus) + ' · ' + term.name;
+        this.modeText = ScorePage.campusText(session.campus) + ' · ' + term.name;
         this.msg = result.items.length > 0 ? '共 ' + result.items.length.toString() + ' 条成绩' : '本学期暂无成绩';
       } else {
         this.msg = EasUserMessages.fromError(result.msg, '成绩查询失败，请稍后重试');
       }
     } catch (e) {
-      this.msg = EasUserMessages.fromError(e instanceof Error ? e.message : String(e),
-        '成绩查询失败，请稍后重试');
+      if (generation === this.requestGeneration) {
+        this.msg = EasUserMessages.fromError(e instanceof Error ? e.message : String(e),
+          '成绩查询失败，请稍后重试');
+      }
     } finally {
-      this.loading = false;
+      if (generation === this.requestGeneration) {
+        this.loading = false;
+      }
     }
   }
 
@@ -104,21 +122,21 @@ struct ScorePage {
         .alignItems(HorizontalAlign.Center)
       } else if (this.scores.length === 0) {
         Column() {
-          Text('◉')
-            .fontSize(48)
-            .fontColor($r('app.color.hita_text_hint_b7c7d9'))
-            .margin({ bottom: 12 })
           Text('暂无成绩数据')
             .fontSize(16)
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.hita_text_1a1a1a'))
+            .width('100%')
+            .textAlign(TextAlign.Center)
             .margin({ bottom: 8 })
-          Text(this.hasSession ? '点击右上角“查询”获取成绩' : '登录教务后即可查询成绩')
+          Text(this.msg.length > 0 ? this.msg :
+            (this.hasSession ? '点击右上角“查询”获取成绩' : '登录教务后即可查询成绩'))
             .fontSize(13)
             .fontColor($r('app.color.hita_text_secondary_808080'))
+            .width('100%')
             .textAlign(TextAlign.Center)
             .lineHeight(20)
-            .margin({ bottom: 24 })
+            .margin({ bottom: this.hasSession ? 0 : 24 })
           if (!this.hasSession) {
             Text('去登录')
               .fontSize(15)
@@ -139,9 +157,9 @@ struct ScorePage {
         }
         .width('100%')
         .height('100%')
+        .padding({ left: 32, right: 32, top: HEADER_HEIGHT })
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
-        .padding({ left: 32, right: 32, top: HEADER_HEIGHT })
       } else {
         List({ space: 10, scroller: this.pageScroller }) {
           ListItem() {
@@ -260,7 +278,7 @@ struct ScorePage {
               .borderRadius(12)
               .shadow({ radius: 8, color: '#14000000', offsetY: 2 })
             }
-          }, (it: EasCourseScoreItem) => it.courseCode + it.termName)
+          }, (it: EasCourseScoreItem, index: number) => index.toString() + ':' + JSON.stringify(it))
         }
         .width('100%')
         .height('100%')
@@ -299,6 +317,7 @@ struct ScorePage {
           .borderRadius(16)
           .backgroundColor($r('app.color.hita_selected_ebf4fc'))
           .textAlign(TextAlign.Center)
+          .enabled(!this.loading)
           .onClick(() => {
             this.queryReal();
           })

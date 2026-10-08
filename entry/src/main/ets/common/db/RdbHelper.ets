@@ -48,6 +48,8 @@ const CREATE_EVENTS: string =
 export class RdbHelper {
   private static instance: RdbHelper | undefined = undefined;
   private store: relationalStore.RdbStore | undefined = undefined;
+  private initializing: Promise<void> | undefined = undefined;
+  private pending: Promise<void> = Promise.resolve();
 
   static getInstance(): RdbHelper {
     if (RdbHelper.instance === undefined) {
@@ -57,9 +59,20 @@ export class RdbHelper {
   }
 
   async init(context: common.Context): Promise<void> {
-    if (this.store !== undefined) {
-      return;
+    if (this.initializing !== undefined) {
+      return this.initializing;
     }
+    this.initializing = this.initialize(context);
+    try {
+      await this.initializing;
+    } catch (e) {
+      this.initializing = undefined;
+      this.store = undefined;
+      throw new Error(String(e));
+    }
+  }
+
+  private async initialize(context: common.Context): Promise<void> {
     const config: relationalStore.StoreConfig = {
       name: DB_NAME,
       securityLevel: relationalStore.SecurityLevel.S1
@@ -75,6 +88,13 @@ export class RdbHelper {
     await this.repairLegacyWeihaiTimetables();
   }
 
+  // Keep other reads and writes outside an in-flight import transaction.
+  private async serial<T>(operation: () => Promise<T>): Promise<T> {
+    const current: Promise<T> = this.pending.then(operation);
+    this.pending = current.then(() => {}, () => {});
+    return current;
+  }
+
   private s(): relationalStore.RdbStore {
     if (this.store === undefined) {
       throw new Error('RdbHelper 未初始化：请先 init(context)');
@@ -85,7 +105,7 @@ export class RdbHelper {
   // —— 异常安全助手（函数 may throw → 就地吞掉/返回 null）——
   private async del(pred: relationalStore.RdbPredicates): Promise<void> {
     try {
-      await this.s().delete(pred);
+      await this.serial(() => this.s().delete(pred));
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'delete failed %{public}s', String(e));
       throw new Error(String(e));
@@ -94,7 +114,8 @@ export class RdbHelper {
 
   private async ins(table: string, bucket: relationalStore.ValuesBucket): Promise<void> {
     try {
-      const rowId: number = await this.s().insert(table, bucket);
+      const rowId: number = await this.s().insert(table, bucket,
+        relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
       if (rowId < 0) {
         throw new Error('insert returned ' + rowId.toString());
       }
@@ -106,7 +127,7 @@ export class RdbHelper {
 
   private async upd(values: relationalStore.ValuesBucket, pred: relationalStore.RdbPredicates): Promise<void> {
     try {
-      await this.s().update(values, pred);
+      await this.serial(() => this.s().update(values, pred));
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'update failed %{public}s', String(e));
       throw new Error(String(e));
@@ -117,9 +138,9 @@ export class RdbHelper {
     columns?: string[]): Promise<relationalStore.ResultSet | null> {
     try {
       if (columns === undefined || columns === null) {
-        return await this.s().query(pred);
+        return await this.serial(() => this.s().query(pred));
       }
-      return await this.s().query(pred, columns);
+      return await this.serial(() => this.s().query(pred, columns));
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'query failed %{public}s', String(e));
       return null;
@@ -143,10 +164,8 @@ export class RdbHelper {
     await this.del(new relationalStore.RdbPredicates(table));
   }
 
-  private async replaceRow(table: string, bucket: relationalStore.ValuesBucket, pkColumn: string,
-    pkValue: string): Promise<void> {
-    await this.del(new relationalStore.RdbPredicates(table).equalTo(pkColumn, pkValue));
-    await this.ins(table, bucket);
+  private async replaceRow(table: string, bucket: relationalStore.ValuesBucket): Promise<void> {
+    await this.serial(() => this.ins(table, bucket));
   }
 
   /** 修复早期版本把威海误存为本部作息的本地课表。 */
@@ -196,7 +215,11 @@ export class RdbHelper {
   // ------------------------------------------------------------------
 
   async saveTimetable(t: EasTimetable): Promise<void> {
-    const b: relationalStore.ValuesBucket = {
+    await this.replaceRow('timetable', RdbHelper.timetableValues(t));
+  }
+
+  private static timetableValues(t: EasTimetable): relationalStore.ValuesBucket {
+    return {
       'id': t.id,
       'name': t.name,
       'code': t.code,
@@ -205,7 +228,6 @@ export class RdbHelper {
       'createdAt': t.createdAt,
       'scheduleStructure': EasTimetable.encodeStructure(t.scheduleStructure)
     };
-    await this.replaceRow('timetable', b, 'id', t.id);
   }
 
   /** 按 -startTime 排序的全量课表。 */
@@ -282,7 +304,11 @@ export class RdbHelper {
   // ------------------------------------------------------------------
 
   async saveSubject(s: EasTermSubject): Promise<void> {
-    const b: relationalStore.ValuesBucket = {
+    await this.replaceRow('subject', RdbHelper.subjectValues(s));
+  }
+
+  private static subjectValues(s: EasTermSubject): relationalStore.ValuesBucket {
+    return {
       'id': s.id,
       'timetableId': s.timetableId,
       'name': s.name,
@@ -296,7 +322,14 @@ export class RdbHelper {
       'createdAt': s.createdAt,
       'color': s.color
     };
-    await this.replaceRow('subject', b, 'id', s.id);
+  }
+
+  async updateSubjectType(id: string, type: EasSubjectType): Promise<void> {
+    const count: number = await this.serial(() => this.s().update({ 'type': type.toString() },
+      new relationalStore.RdbPredicates('subject').equalTo('id', id)));
+    if (count !== 1) {
+      throw new Error('Subject no longer exists');
+    }
   }
 
   /** 某课表科目，按 credit 降序（对应 SubjectDao.getSubjects）。 */
@@ -346,14 +379,14 @@ export class RdbHelper {
   // ------------------------------------------------------------------
 
   async saveEvent(e: EasEventItem): Promise<void> {
-    await this.replaceRow('events', RdbHelper.eventValues(e), 'id', e.id);
+    await this.replaceRow('events', RdbHelper.eventValues(e));
   }
 
   /** Edit in place: failed writes must not remove or recreate an existing event. */
   async updateEvent(e: EasEventItem): Promise<void> {
     try {
-      const count: number = await this.s().update(RdbHelper.eventValues(e),
-        new relationalStore.RdbPredicates('events').equalTo('id', e.id));
+      const count: number = await this.serial(() => this.s().update(RdbHelper.eventValues(e),
+        new relationalStore.RdbPredicates('events').equalTo('id', e.id)));
       if (count !== 1) {
         throw new Error('Event no longer exists');
       }
@@ -417,8 +450,42 @@ export class RdbHelper {
   async deleteCourseFromTimetable(timetableId: string): Promise<void> {
     const pred: relationalStore.RdbPredicates = new relationalStore.RdbPredicates('events');
     pred.equalTo('timetableId', timetableId);
-    pred.in('type', [EasEventType.CLASS.toString(), EasEventType.EXAM.toString()]);
+    pred.equalTo('type', EasEventType.CLASS.toString());
     await this.del(pred);
+  }
+
+  async replaceImportedCourses(timetable: EasTimetable, subjects: EasTermSubject[],
+    events: EasEventItem[]): Promise<void> {
+    if (events.length === 0 ||
+      events.some((event: EasEventItem): boolean =>
+        event.timetableId !== timetable.id || event.type !== EasEventType.CLASS ||
+        !Number.isFinite(event.from) || !Number.isFinite(event.to) || event.to <= event.from) ||
+      subjects.some((subject: EasTermSubject): boolean => subject.timetableId !== timetable.id)) {
+      throw new Error('导入的课程数据不完整，原课表已保留');
+    }
+    await this.serial(async () => {
+      const store: relationalStore.RdbStore = this.s();
+      store.beginTransaction();
+      try {
+        await this.ins('timetable', RdbHelper.timetableValues(timetable));
+        for (let i: number = 0; i < subjects.length; i++) {
+          await this.ins('subject', RdbHelper.subjectValues(subjects[i]));
+        }
+        await store.delete(new relationalStore.RdbPredicates('events')
+          .equalTo('timetableId', timetable.id).equalTo('type', EasEventType.CLASS.toString()));
+        for (let i: number = 0; i < events.length; i++) {
+          await this.ins('events', RdbHelper.eventValues(events[i]));
+        }
+        store.commit();
+      } catch (e) {
+        try {
+          store.rollBack();
+        } catch (rollbackError) {
+          hilog.error(DOMAIN, TAG, 'import rollback failed %{public}s', String(rollbackError));
+        }
+        throw new Error(String(e));
+      }
+    });
   }
 
   /** 单条事件读取。 */

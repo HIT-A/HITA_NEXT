@@ -1,37 +1,9 @@
-﻿{
+{
   "app": {
-    "signingConfigs": [
-      {
-        "name": "now",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "C:\\Users\\lzy\\.ohos\\config\\now_HITA_NEXT0.1.1_NQtOoTwlrS6wakDjSq9ShjdSdLHq0LJAhBc8DB9WWSs=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001BDB1BA49DDE4B80E43F2D289B44EDE734FDFCAA8C0243E552D915A22A570ADD54EE52543BB4D626",
-          "profile": "C:\\Users\\lzy\\.ohos\\config\\now_HITA_NEXT0.1.1_NQtOoTwlrS6wakDjSq9ShjdSdLHq0LJAhBc8DB9WWSs=.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\lzy\\.ohos\\config\\now_HITA_NEXT0.1.1_NQtOoTwlrS6wakDjSq9ShjdSdLHq0LJAhBc8DB9WWSs=.p12",
-          "storePassword": "0000001BB41C79D2A12E2EAD30B7733A84A6641D6DCCA82B03760C6E96E07D6A0A0C705B99EDF42D8BF797"
-        }
-      },
-      {
-        "name": "hitanext",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "C:/Users/lzy/.ohos/config/hitanext_HITA_NEXT0.1.1.cer",
-          "keyAlias": "berry",
-          "keyPassword": "000000195DBB7981F5EF287CABD5BA94D8E0E31312736FDAE0DE71BCDEC51FEAAEB023069EE9D41CBC",
-          "profile": "C:/Users/lzy/.ohos/config/hitanext_HITA_NEXT0.1.1.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "C:/Users/lzy/.ohos/config/hitanext_HITA_NEXT0.1.1.p12",
-          "storePassword": "000000199DE49A2AF6F89B8E7B8C0CB71CB4ED65B2B2B6DEC84F1E33AA8936A4485FCE0126F931BE12"
-        }
-      }
-    ],
+    "signingConfigs": [],
     "products": [
       {
         "name": "default",
-        "signingConfig": "now",
         "compileSdkVersion": "26.0.0",
         "compatibleSdkVersion": "26.0.0",
         "targetSdkVersion": "26.0.0",
@@ -45,7 +17,6 @@
       },
       {
         "name": "store",
-        "signingConfig": "hitanext",
         "compileSdkVersion": "26.0.0",
         "compatibleSdkVersion": "26.0.0",
         "targetSdkVersion": "26.0.0",
@@ -83,4 +54,3 @@
     }
   ]
 }
-

@@ -44,7 +44,7 @@ function load(file, mocks = {}, cache = new Map()) {
     }
     if (name.endsWith('/EasSessionStore')) {
       return { EasSessionStore: { getInstance: () => mocks.sessionStore || {
-        init: async () => {}, load: async () => undefined
+        init: async () => {}, loadPreferred: async () => undefined
       } } };
     }
     if (name.endsWith('/EasApiClient')) {
@@ -140,6 +140,23 @@ test('list keeps event identity, filters courses and sorts by time across timeta
   assert.match(source, /private headerAction\(label: string, enabled: boolean/);
   assert.match(read('pages/TimetableDetailPage.ets'),
     /height: this\.eventSheetMode === 2 \? '78%' : SheetSize\.FIT_CONTENT/);
+});
+
+test('empty exam state centers its content below the header without a fixed top offset', () => {
+  const source = read('pages/ExamPage.ets');
+  const start = source.indexOf('} else if (!this.loadError && this.exams.length === 0 && this.remoteExams.length === 0)');
+  const end = source.indexOf('List({ space: 8, scroller: this.pageScroller })', start);
+  assert.ok(start >= 0 && end > start);
+  const empty = source.slice(start, end);
+  assert.match(empty, /\.width\('100%'\)\s*\.height\('100%'\)/);
+  assert.match(empty, /\.padding\(\{ left: 32, right: 32, top: HEADER_HEIGHT \}\)/);
+  assert.match(empty, /\.justifyContent\(FlexAlign\.Center\)\s*\.alignItems\(HorizontalAlign\.Center\)/);
+  assert.doesNotMatch(empty, /\.margin\(\{ top: HEADER_HEIGHT/);
+  for (const text of ["Text('暂无考试安排')", 'Text(this.hasSession', 'Text(this.queryMsg)']) {
+    const node = empty.slice(empty.indexOf(text));
+    assert.match(node, /^[\s\S]*?\.width\('100%'\)\s*\.textAlign\(TextAlign\.Center\)/);
+  }
+  assert.match(empty, /this\.openAddExam\(\)/);
 });
 
 test('editing targets the original timetable while adding uses current selection', async () => {

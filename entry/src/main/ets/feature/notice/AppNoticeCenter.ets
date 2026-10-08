@@ -11,6 +11,7 @@ import { bundleManager } from '@kit.AbilityKit';
 import { http } from '@kit.NetworkKit';
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /**
  * 公告来源：一个返回 {"notices":[...]} 的 JSON 文件的 URL。
@@ -38,6 +39,10 @@ export class AppNotice {
 
   isVersionKind(): boolean {
     return this.kind === 'version';
+  }
+
+  renderKey(): string {
+    return JSON.stringify([this.id, this.title, this.body, this.severity]);
   }
 }
 
@@ -77,20 +82,11 @@ export class AppNoticeCenter {
     return AppNoticeCenter.cacheStore;
   }
 
-  /** 异步拉取公告并写缓存；失败时返回缓存（都没有则空）。 */
+  /** 页面保留已有缓存；下载失败时抛出错误以显示重试入口。 */
   static async fetch(context: common.Context): Promise<AppNotice[]> {
-    let fetched: AppNotice[] | undefined = undefined;
-    try {
-      fetched = await AppNoticeCenter.requestNotices();
-    } catch (e) {
-      fetched = undefined;
-    }
-    const cached: AppNotice[] = await AppNoticeCenter.cachedNotices(context);
-    if (fetched !== undefined) {
-      await AppNoticeCenter.cacheNotices(context, fetched);
-      return fetched;
-    }
-    return cached;
+    const fetched: AppNotice[] = await AppNoticeCenter.requestNotices();
+    await AppNoticeCenter.cacheNotices(context, fetched);
+    return fetched;
   }
 
   static async cachedNotices(context: common.Context): Promise<AppNotice[]> {
@@ -167,8 +163,11 @@ export class AppNoticeCenter {
         connectTimeout: 10000,
         readTimeout: 15000,
         expectDataType: http.HttpDataType.STRING,
+        usingCache: false,
         header: {
-          'User-Agent': 'HITA-Next/' + versionName
+          'User-Agent': 'HITA-Next/' + versionName,
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache'
         }
       } as http.HttpRequestOptions);
       if (resp.responseCode < 200 || resp.responseCode > 299) {
@@ -189,6 +188,9 @@ export class AppNoticeCenter {
         }
       }
       return out;
+    } catch (e) {
+      hilog.warn(0x0000, 'HitaNotices', 'Notice refresh failed: %{public}s', String(e));
+      throw new Error(String(e));
     } finally {
       httpRequest.destroy();
     }
