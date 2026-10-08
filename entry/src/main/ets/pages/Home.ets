@@ -7,7 +7,7 @@
  */
 import { common } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
-import { FrameCallback, KeyboardAvoidMode, SymbolGlyphModifier } from '@kit.ArkUI';
+import { CommonModifier, FrameCallback, KeyboardAvoidMode, SymbolGlyphModifier } from '@kit.ArkUI';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
@@ -161,6 +161,19 @@ struct Home {
   private tabsController: TabsController = new TabsController();
   private timetableDateBottom: number = TIMETABLE_CHROME_FALLBACK;
   private weekGestureActive: boolean = false;
+  private dockGestureActive: boolean = false;
+  private dockBarModifier: CommonModifier = new CommonModifier()
+    .onTouchIntercept((event: TouchEvent) => {
+      if (event.type === TouchType.Down) {
+        // Tabs is hit-tested first. Keep this origin latched until the next
+        // touch-down even when the finger moves outside the native dock.
+        this.dockGestureActive = true;
+      }
+      return HitTestMode.Default;
+    })
+    .onGestureRecognizerJudgeBegin((event: BaseGestureEvent, current: GestureRecognizer) => {
+      return this.judgePagePan(current, true);
+    }, true);
   private moreScroller: Scroller = new Scroller();
   private timetableScroller: Scroller = new Scroller();
 
@@ -1028,9 +1041,15 @@ struct Home {
     return this.weekGestureActive ? GestureJudgeResult.CONTINUE : GestureJudgeResult.REJECT;
   }
 
-  private judgePagePan(current: GestureRecognizer): GestureJudgeResult {
-    if (this.weekGestureActive && current.isBuiltIn() &&
-      current.getType() === GestureControl.GestureType.PAN_GESTURE) {
+  private judgePagePan(current: GestureRecognizer, fromDock: boolean = false): GestureJudgeResult {
+    const dock: boolean = fromDock || this.dockGestureActive;
+    if (!current.isBuiltIn()) {
+      return GestureJudgeResult.CONTINUE;
+    }
+    if (dock && current.getType() === GestureControl.GestureType.SWIPE_GESTURE) {
+      return GestureJudgeResult.REJECT;
+    }
+    if ((this.weekGestureActive || dock) && current.getType() === GestureControl.GestureType.PAN_GESTURE) {
       const direction: PanDirection = (current as PanRecognizer).getPanGestureOptions().getDirection();
       if (direction === PanDirection.Horizontal || direction === PanDirection.Left ||
         direction === PanDirection.Right || direction === PanDirection.All) {
@@ -1042,7 +1061,7 @@ struct Home {
 
   @Builder
   homeTabs() {
-    Tabs({ barPosition: BarPosition.End, controller: this.tabsController }) {
+    Tabs({ barPosition: BarPosition.End, controller: this.tabsController, barModifier: this.dockBarModifier }) {
       TabContent() {
         Column() {
           this.tabToday();
@@ -1085,6 +1104,7 @@ struct Home {
     .scrollable(true)
     .onTouchIntercept((event: TouchEvent) => {
       if (event.type === TouchType.Down && event.touches.length > 0) {
+        this.dockGestureActive = false;
         // Latch the region at touch-down, before either recognizer starts.
         // Crossing the date row later cannot turn week paging into page paging.
         this.weekGestureActive = this.currentTab === TAB_TIMETABLE && this.currentTimetable !== undefined &&

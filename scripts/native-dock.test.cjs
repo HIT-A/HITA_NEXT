@@ -85,7 +85,7 @@ test('unsupported materials never prevent rendering the fallback dock', () => {
 test('one native tab bar owns only Today, Timetable and More', () => {
   const home = read('pages/Home.ets');
   const shell = home.slice(home.indexOf('  build() {'), home.indexOf('  activeSheet()'));
-  assert.match(shell, /Tabs\(\{ barPosition: BarPosition\.End, controller: this\.tabsController \}\)/);
+  assert.match(shell, /Tabs\(\{ barPosition: BarPosition\.End, controller: this\.tabsController, barModifier: this\.dockBarModifier \}\)/);
   assert.equal((shell.match(/TabContent\(\)/g) || []).length, 3);
   assert.deepEqual([...shell.matchAll(/\.tabBar\(this\.dockTab\(\$r\('[^']+'\), '([^']+)'\)\)/g)]
     .map(match => match[1]), ['今日', '时间表', '更多']);

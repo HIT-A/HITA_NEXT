@@ -56,7 +56,7 @@ test('the shared header mask supplies the existing curve and reverses it for bot
 test('tabs swipe between neighbours except over a timetable grid, whose swipes page weeks', () => {
   const home = read('pages/Home.ets');
   const shell = home.slice(home.indexOf('  build() {'), home.indexOf('  activeSheet()'));
-  assert.match(shell, /Tabs\(\{ barPosition: BarPosition\.End, controller: this\.tabsController \}\)/);
+  assert.match(shell, /Tabs\(\{ barPosition: BarPosition\.End, controller: this\.tabsController, barModifier: this\.dockBarModifier \}\)/);
   assert.match(shell, /\.scrollable\(true\)/);
   assert.doesNotMatch(home, /tabSwipeLocked|handleChromeTabPanEnd/);
   assert.match(shell, /\.onAnimationStart\([\s\S]*?this\.selectedNav = targetIndex/);
@@ -90,11 +90,11 @@ test('week paging commits on a shorter drag or a quick flick', () => {
 test('latched grid drags reject native horizontal page gestures but retain vertical scrolling', () => {
   const home = read('pages/Home.ets');
   const method = home.slice(home.indexOf('  private judgeTimetableWeekPan'), home.indexOf('  @Builder\n  homeTabs()'));
-  const output = ts.transpileModule('class Judge { weekGestureActive = false; ' + method + ' }', {
+  const output = ts.transpileModule('class Judge { weekGestureActive = false; dockGestureActive = false; ' + method + ' }', {
     compilerOptions: { target: ts.ScriptTarget.ES2020 }
   }).outputText;
   const judge = new Function('GestureJudgeResult', 'GestureControl', 'PanDirection', output + '; return new Judge();')(
-    { CONTINUE: 'continue', REJECT: 'reject' }, { GestureType: { PAN_GESTURE: 2 } },
+    { CONTINUE: 'continue', REJECT: 'reject' }, { GestureType: { PAN_GESTURE: 2, SWIPE_GESTURE: 3 } },
     { Left: 1, Right: 2, Horizontal: 3, Vertical: 12, All: 15 });
   const info = { tag: 'timetable-week' };
   const pan = (direction, builtIn = true) => ({ isBuiltIn: () => builtIn, getType: () => 2,
@@ -107,6 +107,19 @@ test('latched grid drags reject native horizontal page gestures but retain verti
   assert.equal(judge.judgePagePan(pan(12)), 'continue');
   assert.equal(judge.judgePagePan(pan(3, false)), 'continue');
   assert.equal(judge.judgeTimetableWeekPan({ tag: 'other' }, {}), 'continue');
+  // Dock-originated dragging must not hand off to native page swiping, even
+  // on Today/More. Taps and long presses retain their native feedback.
+  judge.weekGestureActive = false;
+  judge.dockGestureActive = true;
+  for (const direction of [1, 2, 3, 15]) assert.equal(judge.judgePagePan(pan(direction)), 'reject');
+  for (const type of [0, 1]) {
+    assert.equal(judge.judgePagePan({ isBuiltIn: () => true, getType: () => type }), 'continue');
+  }
+  assert.equal(judge.judgePagePan({ isBuiltIn: () => true, getType: () => 3 }), 'reject');
+  judge.dockGestureActive = false;
+  assert.equal(judge.judgePagePan(pan(3), true), 'reject', 'bar recognizer also handles pointer/trackpad swipes');
+  assert.equal(judge.judgePagePan(pan(3)), 'continue', 'a new content drag still pages normally');
+  assert.match(home, /this\.dockGestureActive = false/);
   assert.match(home, /event\.type === TouchType\.Down[\s\S]*event\.touches\[0\]\.windowY >= this\.timetableDateBottom/);
   assert.match(home, /this\.timetableDateBottom = \(newValue\.globalPosition\.y as number\) \+ \(newValue\.height as number\)/);
 });
