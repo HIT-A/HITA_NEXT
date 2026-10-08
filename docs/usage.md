@@ -1,13 +1,13 @@
-# HitaNEXT 使用手册（离线验收走查）
+# Hi HITA 使用手册（离线验收走查）
 
 > 场景：DevEco 打开工程 → 编译通过（checklist A–E 销项）→ 模拟器/真机走查以下路径。
 > 所有“离线”功能不依赖校园网络；网页登录、深圳课表/成绩真链路需真机回归（见文末）。
 > 进入工程后先跑 `node scripts/static-checks.cjs` 确认静态三层自检 ALL OK。
 
 ## 0. 前置
-1. DevEco Studio 5.0.x 打开 `C:\heyiwei\HitaNEXT`；按 SDK 调整 `compatibleSdkVersion`/`modelVersion` 后 Sync。
+1. DevEco Studio 5.0.x 打开 `C:\heyiwei\HiHITA`；按 SDK 调整 `compatibleSdkVersion`/`modelVersion` 后 Sync。
 2. 签名：Project Structure → Signing Configs → 自动签名。
-3. 工程已内置 HITA NEXT 风格化启动图标（`app_icon`/`startIcon`/`ic_launcher`）。
+3. 工程已内置 Hi HITA 启动图标（`app_icon`/`startIcon`/`ic_launcher`），与 HITA_NEXT-0.2.0 的当前图标一致。
 
 ## 1. 首屏（Home · 3-Tab 主框架）
 启动即 `pages/Home`，底部三 Tab：

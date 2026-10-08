@@ -1,10 +1,12 @@
 <p align="center">
-  <img src="AppScope/resources/base/media/app_icon.png" width="128" alt="HITA NEXT 图标">
+  <img src="AppScope/resources/base/media/app_icon.png" width="128" alt="Hi HITA 图标">
 </p>
 
-# HITA NEXT
+# Hi HITA
 
-HITA NEXT 是基于开源项目 [HITA Android](https://github.com/HIT-A/HITA_Android) 开发的 HarmonyOS NEXT 客户端，采用 ArkTS 与 ArkUI 原生实现，为哈尔滨工业大学一校三区学生提供课表查看、教务登录和本地学习信息管理功能。
+Hi HITA（原名 HITA NEXT）是基于开源项目 [HITA Android](https://github.com/HIT-A/HITA_Android) 开发的鸿蒙原生校园助手，采用 ArkTS 与 ArkUI 原生实现，为哈尔滨工业大学一校三区学生提供课表查看、教务登录和本地学习信息管理功能。
+
+当前版本为 0.1.1，应用与桌面显示名称统一为 **Hi HITA**，工程目录为 `HiHITA`。本次更名同步更新应用图标，包名仍为 `cn.berry.hitanext`。
 
 项目在功能逻辑上参考 HITA Android，在界面结构与交互体验上同时参考 [HITA Aura](https://github.com/HIT-A/HITA-Aura)，尽量保持不同平台之间一致的使用习惯。
 
@@ -68,7 +70,7 @@ ArkUI 页面 -> EasDataProvider -> EasApiClient -> 校区教务系统
 ## 关键结构
 
 ```text
-HitaNEXT/
+HiHITA/
 ├── AppScope/                         # 应用级名称、图标与配置
 ├── entry/
 │   └── src/main/
@@ -107,10 +109,10 @@ HitaNEXT/
 1. 克隆仓库：
 
    ```bash
-   git clone https://github.com/samerberry/HITA_NEXT.git
+   git clone https://github.com/HIT-A/HITA_NEXT.git HiHITA
    ```
 
-2. 使用 DevEco Studio 打开仓库根目录并等待工程同步完成。
+2. 使用 DevEco Studio 打开 `HiHITA` 文件夹并等待工程同步完成。
 3. 在 `File > Project Structure > Signing Configs` 中为本机重新配置自动签名。
 4. 选择 `entry` 模块并执行 Build 或 Run。
 

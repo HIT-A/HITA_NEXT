@@ -2,15 +2,15 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "HitaNEXT entry module"
+      "value": "Hi HITA entry module"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "HITA for HarmonyOS NEXT"
+      "value": "Hi HITA campus assistant"
     },
     {
       "name": "EntryAbility_label",
-      "value": "HITA NEXT"
+      "value": "Hi HITA"
     }
   ]
 }

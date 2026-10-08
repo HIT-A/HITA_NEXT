@@ -1,6 +1,6 @@
 # DEVICE-RUNBOOK — 编译 → 签名 → 装机 → M0 抓包 单一操作手册
 
-> 适用：HitaNEXT（DevEco 26 / SDK API26）。当前 CLI 编译已通过（unsigned HAP）。
+> 适用：Hi HITA（DevEco 26 / SDK API26）。当前 CLI 编译已通过（unsigned HAP）。
 > 环境变量：`NODE_HOME=C:\Program Files\nodejs`；`DEVECO_SDK_HOME=C:\Program Files\Huawei\DevEco Studio\sdk`
 
 ## 1. 命令行编译（已通过，可随时重跑）
@@ -11,7 +11,7 @@
 ```
 
 ## 2. 签名（在 DevEco Studio GUI 完成一次即可，材料会回写 build-profile）
-1. DevEco 打开 `C:\heyiwei\HitaNEXT`；
+1. DevEco 打开 `C:\heyiwei\HiHITA`；
 2. File → Project Structure → Signing Configs → 勾选 **Automatically generate signature**（需登录华为账号/真机调试授权）；
 3. 保存后 `build-profile.json5` 会写入 `signingConfigs` 与产品 `signingConfig`；
 4. 此后命令行 `assembleHap` 会产出 **signed** HAP，或用 GUI Build → Build Hap(s)。

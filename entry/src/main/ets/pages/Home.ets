@@ -1,5 +1,5 @@
 /**
- * HITA NEXT main shell.
+ * Hi HITA main shell.
  *
  * The Android client uses a compact toolbar and a floating pill navigation bar.
  * This page keeps the same information hierarchy while reusing the HarmonyOS
@@ -1882,7 +1882,7 @@ struct Home {
             SymbolGlyph($r('sys.symbol.lock_shield'))
               .fontSize(14)
               .fontColor([COLOR_TEXT_HINT]);
-            Text('HITA 不保存您的教务密码')
+            Text('Hi HITA 不保存您的教务密码')
               .fontSize(12)
               .fontColor(COLOR_TEXT_HINT)
               .margin({ left: 6 });
