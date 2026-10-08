@@ -29,7 +29,7 @@ test('API 23-25 render without loading the API 26 material module or calling its
     const instance = { barHeight: value => calls.push(['height', value]) };
     if (api >= 26) instance.barFloatingStyle = value => calls.push(['native', value]);
     new mod.exports.CompatibleDockModifier(36, true, true).applyNormalAttribute(instance);
-    assert.deepEqual(calls, api >= 26 ? [['material', 36, true, true], ['native', 'native-style']] : [['height', 0]]);
+    assert.deepEqual(calls, api >= 26 ? [['material', 36, true, true], ['native', 'native-style']] : []);
   }
 });
 
@@ -47,7 +47,9 @@ test('older dock keeps three actions, reactive selection, safe-area spacing and 
   const dock = read('common/components/FrostedDock.ets');
   assert.deepEqual([...dock.matchAll(/this\.item\([^\n]+, '([^']+)', (\d)\)/g)]
     .map(m => [m[1], Number(m[2])]), [['今日', 0], ['时间表', 1], ['更多', 2]]);
-  assert.equal((dock.match(/\.invert\(\{/g) || []).length, 2, 'both symbol and label adapt to the backdrop');
+  assert.equal((dock.match(/\.blendMode\(BlendMode\.DIFFERENCE, BlendApplyType\.OFFSCREEN\)/g) || []).length, 2,
+    'both symbol and label invert the backdrop through their painted alpha');
+  assert.doesNotMatch(dock, /\.invert\(|\.shadow\(|\.opacity\(/);
   assert.match(dock, /\.backgroundEffect\(\{/);
   assert.match(dock, /\.margin\(\{ bottom: 12 \+ this\.bottomInset \}\)/);
   assert.match(dock, /\.onClick\(\(\) => this\.onSelect\(index\)\)/);
@@ -55,4 +57,8 @@ test('older dock keeps three actions, reactive selection, safe-area spacing and 
   const home = read('pages/Home.ets');
   assert.match(home, /if \(!deviceInfo\.apiAvailable\('26\.0\.0'\)\) \{\s*FrostedDock/);
   assert.match(home, /onSelect: \(index: number\) => \{\s*this\.tabsController\.changeIndex\(index\)/);
+  assert.match(home, /\.barHeight\(deviceInfo\.apiAvailable\('26\.0\.0'\) \? 56 : 0\)/);
+  assert.match(home, /if \(deviceInfo\.apiAvailable\('26\.0\.0'\)\) \{\s*this\.homeTabs\(\);/);
+  assert.match(home, /Stack\(\{ alignContent: Alignment\.Bottom \}\) \{\s*this\.homeTabs\(\);\s*this\.compatibleDock\(\);/);
+  assert.doesNotMatch(home, /\.overlay\(this\.compatibleDock/);
 });

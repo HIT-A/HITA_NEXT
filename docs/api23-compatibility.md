@@ -1,6 +1,6 @@
 # API 23 兼容说明
 
-`api23` 分支最低支持 HarmonyOS 6.1.0（API 23）。`default`、`store` 两个产品的
+当前 `main` 与 `api23` 版本最低支持 HarmonyOS 6.1.0（API 23）。`default`、`store` 两个产品的
 `compatibleSdkVersion` 均为 `6.1.0(23)`；`compileSdkVersion`、`targetSdkVersion`
 继续使用 `26.0.0`。API 22 及以下不在支持范围内。
 
@@ -9,13 +9,23 @@
 - API 26：保留原生 `BottomTabBarStyle`、`barFloatingStyle`、212vp 宽度、56vp 高度、
   安全区间距、壁纸遮罩规则及原有沉浸光感参数。材质模块通过惰性导入隔离，
   仅在版本判断通过后执行。
+- API 26 的原生 Dock 材质设置 `interactive: true`，启用系统交互形变，同时保留
+  `lightEffect: { color: Color.White }` 的光感反馈。实现遵循官方
+  [内容区域组件适配](https://developer.huawei.com/consumer/cn/doc/doccenter-advanced-features/bpta-spatiality-immersive#section125241657204516)
+  及 [ImmersiveMaterial 的交互形变示例](https://developer.huawei.com/consumer/cn/doc/doccenter-references/api/arkts-apis-uimaterial)。
+  继续通过 `barFloatingStyle.systemMaterial` 应用到原生 TabBar；API 23～25 的雾面 Dock 不使用该效果。
 - API 23～25：复用同一个 `TabsController`、三页内容和切页动画；隐藏原生底栏，
-  以 212×56vp 雾面玻璃底栏覆盖。使用旧版 `backgroundEffect` 模糊、着色、描边和阴影，
+  以 212×56vp 雾面玻璃底栏覆盖。使用旧版 `backgroundEffect` 模糊、着色和描边，
   保留安全区间距、选中状态与无障碍标签。
-- 图标和文字各自使用 API 11 已提供的 `invert(InvertOptions)` 根据背景灰度动态反色，
+- 图标和文字使用 API 11 已提供的 `blendMode(DIFFERENCE, OFFSCREEN)` 按绘制轮廓
+  与背景混合反色，避免 `invert(InvertOptions)` 在 API 23 上将整个文字/图标矩形填黑。
   不是仅随深浅色模式切换固定颜色。该反色算法与 API 26 材质的 `colorInvert` 不同，
   目标是接近其可读性与动态效果；不保证逐像素一致。
-- 旧底栏的背景遮罩不拦截触摸，三个点击区域驱动原有页签控制器。
+- 原生底栏高度直接按版本设置，避免声明式属性与 modifier 中的高度冲突。旧底栏为
+  Tabs 的同级组件，不使用会拦截整页输入的 Tabs overlay。胶囊内消费点击，胶囊外触摸透传。
+- API 23 与 API 26 共用手势分流：日期行底边以实际布局坐标测量，按触摸起点固定归属。
+  日期行上方由原生 Tabs 跟手切换相邻页面；下方仅切周次，明确拒绝原生水平切页手势，
+  保留垂直滚动。手指跨过日期行、快速甩动或周数到达边界，都不会改变这次拖动的归属。
 
 ## 教务 Cookie
 
@@ -35,8 +45,9 @@ API 23 的 `WebHttpCookie` 没有分区键字段，也没有保证枚举接口�
 
 ## 验证
 
-在 DevEco Studio 中打开 `api23` 所在的工作目录（本机为 `D:\HITA_NEXT`）；
-`D:\HITA_NEXT0.2.0` 仍是 `main` 分支。运行时选择 Application / OpenHarmony App
+本机主工程为 `D:\HITA_NEXT0.2.0`（`main`），已用 `D:\HITA_NEXT` 的 `api23` 完整版本更新；
+两个工作目录在此次替换完成时对应同一提交，主工程也已最低兼容 API 23。
+在 DevEco Studio 中打开主工程并同步构建配置。运行时选择 Application / OpenHarmony App
 类型的 `entry` 配置，并选择手机或模拟器。若命令中出现
 `requiredDeviceType=previewerDebug`，说明预览器目标被带入了应用运行或热重载构建；
 重新选择真实设备后普通运行。页面预览使用编辑器的 Previewer。
@@ -48,10 +59,18 @@ Cookie 作用域与冲突过滤、读取超时以及现有教务登录回归。�
 
 2026-10-08 验证记录：
 
-- 175 项自动回归测试全部通过，静态检查通过。
+- 176 项自动回归测试全部通过，静态检查通过，包含手势归属和原生水平/垂直手势分流。
 - `default` 调试 HAP 与 `store` 发布 APP 均构建成功；未报告未处理的 SDK 版本兼容告警。
 - 调试 HAP 已覆盖安装到连接的 API 26 手机并成功启动；用户确认未出现显示破坏。
-- 尚未连接 API 23～25 设备，旧系统视觉与真实教务登录仍待实机验证。
+- API 23 虚拟机已覆盖安装并启动。已验证只保留一个底栏、图标文字恢复轮廓、
+  底栏点击、更多页上下滚动、底栏两侧触摸透传以及页面内设置项点击。
+- API 23 带课表验证：按住顶部拖动未松手时相邻页面已经可见，左右释放后分别进入
+  今日/更多，周数不变；下方左右拖动仅切周次。短滑、快速左右甩动、斜滑、
+  从下方向上跨日期行、日期行紧下方拖动，均未切到相邻页。
+- 用户反馈旧系统 Dock 仍有黑影，已按要求撤回后续分层裁剪、标准模糊与渐变试改，
+  当前保留初次可用的雾面底栏并去除显式投影。黑影的最终视觉验收仍未完成。
+- API 26 手机在本轮手势修复验证时已断开；此前显示确认有效，本轮跟手切页仍需
+  API 26 实机复验。API 24/25、不同壁纸，以及完整教务认证流程未完成设备验收。
 
 后续设备回归检查项（API 26 的基础显示已确认，其余按实际覆盖范围验收）：
 

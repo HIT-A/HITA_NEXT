@@ -16,9 +16,6 @@ export class CompatibleDockModifier implements AttributeModifier<TabsAttribute> 
   applyNormalAttribute(instance: TabsAttribute): void {
     if (deviceInfo.apiAvailable('26.0.0')) {
       instance.barFloatingStyle(DockBarMaterial.floatingStyle(this.bottomMargin, this.hideMask, this.darkMode));
-    } else {
-      // The same TabsController still owns click/swipe navigation.
-      instance.barHeight(0);
     }
   }
 }

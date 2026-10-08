@@ -1,10 +1,11 @@
 /**
  * ImmersiveDockModifier.ets — 底部 dock 沉浸光感（组件适配）。
  *
- * HarmonyOS 7 / targetSdk 26 起，普通组件上的 systemMaterial 只在底部 TabBar 生效。
+ * HarmonyOS 7 / API 26 的 systemMaterial 支持标题栏和底部 TabBar 区域。
  * 因此材质挂在 Tabs.barFloatingStyle.systemMaterial，而不是自定义 Stack。
  *
- * @see https://developer.huawei.com/consumer/cn/doc/doccenter-capabilities/arkts-immersive-light-sense-component-adaptation
+ * @see https://developer.huawei.com/consumer/cn/doc/doccenter-advanced-features/bpta-spatiality-immersive
+ * @see https://developer.huawei.com/consumer/cn/doc/doccenter-references/api/arkts-apis-uimaterial
  */
 import { uiMaterial } from '@kit.ArkUI';
 import { Available } from '@kit.BasicServicesKit';
@@ -32,7 +33,8 @@ export class DockBarMaterial {
           applyShadow: true,
           // 按背景亮度反色，避免深色课表上图标发灰；具体色值走系统文本色，避免纯黑超对比度上限。
           colorInvert: true,
-          interactive: false,
+          // 原生按压形变与触点光感反馈由同一个 TabBar 材质处理。
+          interactive: true,
           lightEffect: { color: Color.White }
         });
       }

@@ -57,15 +57,14 @@ test('tabs swipe between neighbours except over a timetable grid, whose swipes p
   const home = read('pages/Home.ets');
   const shell = home.slice(home.indexOf('  build() {'), home.indexOf('  activeSheet()'));
   assert.match(shell, /Tabs\(\{ barPosition: BarPosition\.End, controller: this\.tabsController \}\)/);
-  assert.match(shell, /\.scrollable\(!this\.tabSwipeLocked\(\)\)/);
-  // The empty timetable state has no week paging, so it keeps switching tabs.
-  assert.match(home, /private tabSwipeLocked\(\): boolean \{\s*return this\.currentTab === TAB_TIMETABLE && this\.currentTimetable !== undefined;/);
+  assert.match(shell, /\.scrollable\(true\)/);
+  assert.doesNotMatch(home, /tabSwipeLocked|handleChromeTabPanEnd/);
   assert.match(shell, /\.onAnimationStart\([\s\S]*?this\.selectedNav = targetIndex/);
   assert.match(shell, /\.onChange\(\(index: number\) => \{\s*this\.selectTab\(index\);\s*this\.selectedNav = index;/);
   assert.match(shell, /\.animationDuration\(TAB_SWIPE_MS\)/);
-  assert.match(home, /PanGesture\(\{ direction: PanDirection\.Horizontal/);
-  assert.match(home, /handleChromeTabPanEnd/);
-  assert.match(home, /this\.tabsController\.changeIndex\(target\)/);
+  assert.match(home, /\.priorityGesture\(\s*PanGesture\(\{ direction: PanDirection\.Horizontal/);
+  assert.match(home, /\.tag\('timetable-week'\)/);
+  assert.match(home, /return this\.judgeTimetableWeekPan\(info, event\)/);
 });
 
 test('header and footer masks use the dark page color without changing the fade curve', () => {
@@ -83,9 +82,33 @@ test('week paging commits on a shorter drag or a quick flick', () => {
   const home = read('pages/Home.ets');
   const ratio = Number(/const TIMETABLE_SWIPE_RATIO: number = ([\d.]+);/.exec(home)[1]);
   assert.ok(ratio > 0 && ratio < 0.15, String(ratio));
-  const panEnd = home.slice(home.indexOf('  private handleTimetablePanEnd'), home.indexOf('  private handleChromeTabPanEnd'));
+  const panEnd = home.slice(home.indexOf('  private handleTimetablePanEnd'), home.indexOf('  private selectTab'));
   assert.match(panEnd, /event\.velocityX/);
   assert.match(panEnd, /width \* TIMETABLE_SWIPE_RATIO/);
+});
+
+test('latched grid drags reject native horizontal page gestures but retain vertical scrolling', () => {
+  const home = read('pages/Home.ets');
+  const method = home.slice(home.indexOf('  private judgeTimetableWeekPan'), home.indexOf('  @Builder\n  homeTabs()'));
+  const output = ts.transpileModule('class Judge { weekGestureActive = false; ' + method + ' }', {
+    compilerOptions: { target: ts.ScriptTarget.ES2020 }
+  }).outputText;
+  const judge = new Function('GestureJudgeResult', 'GestureControl', 'PanDirection', output + '; return new Judge();')(
+    { CONTINUE: 'continue', REJECT: 'reject' }, { GestureType: { PAN_GESTURE: 2 } },
+    { Left: 1, Right: 2, Horizontal: 3, Vertical: 12, All: 15 });
+  const info = { tag: 'timetable-week' };
+  const pan = (direction, builtIn = true) => ({ isBuiltIn: () => builtIn, getType: () => 2,
+    getPanGestureOptions: () => ({ getDirection: () => direction }) });
+  assert.equal(judge.judgeTimetableWeekPan(info, {}), 'reject');
+  assert.equal(judge.judgePagePan(pan(3)), 'continue');
+  judge.weekGestureActive = true;
+  assert.equal(judge.judgeTimetableWeekPan(info, {}), 'continue');
+  for (const direction of [1, 2, 3, 15]) assert.equal(judge.judgePagePan(pan(direction)), 'reject');
+  assert.equal(judge.judgePagePan(pan(12)), 'continue');
+  assert.equal(judge.judgePagePan(pan(3, false)), 'continue');
+  assert.equal(judge.judgeTimetableWeekPan({ tag: 'other' }, {}), 'continue');
+  assert.match(home, /event\.type === TouchType\.Down[\s\S]*event\.touches\[0\]\.windowY >= this\.timetableDateBottom/);
+  assert.match(home, /this\.timetableDateBottom = \(newValue\.globalPosition\.y as number\) \+ \(newValue\.height as number\)/);
 });
 
 test('news, notices and the timetable fade content scrolling under their headers', () => {

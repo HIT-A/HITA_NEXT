@@ -159,7 +159,8 @@ struct Home {
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
   @StorageProp('hita_nav_bar_vp') navBarInset: number = NAV_BAR_INSET_FALLBACK;
   private tabsController: TabsController = new TabsController();
-  private tabPageWidth: number = 0;
+  private timetableDateBottom: number = TIMETABLE_CHROME_FALLBACK;
+  private weekGestureActive: boolean = false;
   private moreScroller: Scroller = new Scroller();
   private timetableScroller: Scroller = new Scroller();
 
@@ -645,23 +646,6 @@ struct Home {
     }
   }
 
-  private handleChromeTabPanEnd(event: GestureEvent): void {
-    const width: number = Math.max(1, this.tabPageWidth);
-    const offset: number = this.clampedChromeOffset(event.offsetX);
-    const fling: boolean = Math.abs(offset) >= TIMETABLE_FLING_MIN_OFFSET &&
-      Math.abs(event.velocityX) >= TIMETABLE_FLING_VELOCITY && event.velocityX * offset > 0;
-    const committed: boolean = fling || Math.abs(offset) >= width * TIMETABLE_SWIPE_RATIO;
-    let target: number = this.currentTab;
-    if (committed && offset < 0 && this.currentTab < NAV_TAB_COUNT - 1) {
-      target = this.currentTab + 1;
-    } else if (committed && offset > 0 && this.currentTab > 0) {
-      target = this.currentTab - 1;
-    }
-    if (target !== this.currentTab) {
-      this.tabsController.changeIndex(target);
-    }
-  }
-
   private selectTab(index: number): void {
     if (index === this.currentTab) {
       return;
@@ -673,22 +657,6 @@ struct Home {
       // 页面常驻于 Tabs 中不会重建，回到时间表时需主动重绘并恢复地点跑马灯。
       this.drawTimetableNow();
     }
-  }
-
-  private clampedChromeOffset(offset: number): number {
-    const width: number = Math.max(1, this.tabPageWidth);
-    if (this.currentTab <= 0 && offset > 0) {
-      return 0;
-    }
-    if (this.currentTab >= NAV_TAB_COUNT - 1 && offset < 0) {
-      return 0;
-    }
-    return Math.max(-width, Math.min(width, offset));
-  }
-
-  // 只有课表网格（带周切换手势）显示时才锁住页签横滑；空课表页照常左右切换。
-  private tabSwipeLocked(): boolean {
-    return this.currentTab === TAB_TIMETABLE && this.currentTimetable !== undefined;
   }
 
   private dockPageInset(): number {
@@ -1038,6 +1006,42 @@ struct Home {
   }
 
   build() {
+    if (deviceInfo.apiAvailable('26.0.0')) {
+      this.homeTabs();
+    } else {
+      // A Tabs overlay captures the page's input on API 23. Keep the dock a
+      // bounded sibling so content gestures and clicks reach the original tabs.
+      Stack({ alignContent: Alignment.Bottom }) {
+        this.homeTabs();
+        this.compatibleDock();
+      }
+      .width('100%')
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.KEYBOARD], [SafeAreaEdge.BOTTOM])
+    }
+  }
+
+  private judgeTimetableWeekPan(info: GestureInfo, event: BaseGestureEvent): GestureJudgeResult {
+    if (info.tag !== 'timetable-week') {
+      return GestureJudgeResult.CONTINUE;
+    }
+    return this.weekGestureActive ? GestureJudgeResult.CONTINUE : GestureJudgeResult.REJECT;
+  }
+
+  private judgePagePan(current: GestureRecognizer): GestureJudgeResult {
+    if (this.weekGestureActive && current.isBuiltIn() &&
+      current.getType() === GestureControl.GestureType.PAN_GESTURE) {
+      const direction: PanDirection = (current as PanRecognizer).getPanGestureOptions().getDirection();
+      if (direction === PanDirection.Horizontal || direction === PanDirection.Left ||
+        direction === PanDirection.Right || direction === PanDirection.All) {
+        return GestureJudgeResult.REJECT;
+      }
+    }
+    return GestureJudgeResult.CONTINUE;
+  }
+
+  @Builder
+  homeTabs() {
     Tabs({ barPosition: BarPosition.End, controller: this.tabsController }) {
       TabContent() {
         Column() {
@@ -1073,18 +1077,29 @@ struct Home {
     .vertical(false)
     .barOverlap(true)
     .barMode(BarMode.Fixed)
-    .barHeight(56)
+    .barHeight(deviceInfo.apiAvailable('26.0.0') ? 56 : 0)
     .barBackgroundColor(Color.Transparent)
     .divider(null)
-    .scrollable(!this.tabSwipeLocked())
+    // Native paging tracks the finger on every system, including over the
+    // timetable header. Only the grid owns a separate week-paging gesture.
+    .scrollable(true)
+    .onTouchIntercept((event: TouchEvent) => {
+      if (event.type === TouchType.Down && event.touches.length > 0) {
+        // Latch the region at touch-down, before either recognizer starts.
+        // Crossing the date row later cannot turn week paging into page paging.
+        this.weekGestureActive = this.currentTab === TAB_TIMETABLE && this.currentTimetable !== undefined &&
+          event.touches[0].windowY >= this.timetableDateBottom;
+      }
+      return HitTestMode.Default;
+    })
+    .onGestureRecognizerJudgeBegin((event: BaseGestureEvent, current: GestureRecognizer) => {
+      return this.judgePagePan(current);
+    }, true)
     .animationDuration(TAB_SWIPE_MS)
     .attributeModifier(new CompatibleDockModifier(12 + this.navBarInset,
       this.selectedNav === TAB_TIMETABLE && this.hasTimetableBackground(), this.darkMode))
     .backgroundColor(this.currentTab === 1 ? Color.Transparent : COLOR_SURFACE)
     .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.KEYBOARD], [SafeAreaEdge.BOTTOM])
-    .onAreaChange((oldValue: Area, newValue: Area) => {
-      this.tabPageWidth = newValue.width as number;
-    })
     .onAnimationStart((index: number, targetIndex: number, extraInfo: TabsAnimationEvent) => {
       this.selectedNav = targetIndex;
     })
@@ -1092,7 +1107,6 @@ struct Home {
       this.selectTab(index);
       this.selectedNav = index;
     })
-    .overlay(this.compatibleDock(), { align: Alignment.Bottom })
     .bindSheet(this.activeSheetVisible, this.activeSheet(), {
       height: this.loginSheetOpen ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
       dragBar: true,
@@ -1584,6 +1598,9 @@ struct Home {
     .height(TIMETABLE_HEADER_HEIGHT)
     .alignItems(VerticalAlign.Center)
     .backgroundColor(Color.Transparent)
+    .onAreaChange((oldValue: Area, newValue: Area) => {
+      this.timetableDateBottom = (newValue.globalPosition.y as number) + (newValue.height as number);
+    })
   }
 
   @Builder
@@ -1686,15 +1703,24 @@ struct Home {
         .translate({ x: this.timetableDragOffset, y: 0 })
         .opacity(this.timetableOpacity())
         .animation({ duration: this.timetableAnimationDuration, curve: Curve.EaseOut })
-        .gesture(
+        .priorityGesture(
           PanGesture({ direction: PanDirection.Horizontal, distance: 10 })
+            .tag('timetable-week')
             .onActionUpdate((event: GestureEvent) => {
               this.handleTimetablePanUpdate(event);
             })
             .onActionEnd((event: GestureEvent) => {
               this.handleTimetablePanEnd(event);
             })
-        );
+            .onActionCancel(() => {
+              if (!this.timetableAnimating) {
+                this.animateTimetableSnapBack();
+              }
+            })
+        )
+        .onGestureJudgeBegin((info: GestureInfo, event: BaseGestureEvent) => {
+          return this.judgeTimetableWeekPan(info, event);
+        });
       }
 
       Column() {
@@ -1787,12 +1813,6 @@ struct Home {
       .width('100%')
       .padding({ top: this.statusBarInset })
       .backgroundColor(Color.Transparent)
-      .gesture(
-        PanGesture({ direction: PanDirection.Horizontal, distance: 16 })
-          .onActionEnd((event: GestureEvent) => {
-            this.handleChromeTabPanEnd(event);
-          })
-      )
       .onAreaChange((oldValue: Area, newValue: Area) => {
         const height: number = newValue.height as number;
         if (height > 0 && height !== this.timetableChromeH) {

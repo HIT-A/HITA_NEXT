@@ -1,4 +1,4 @@
-/** API 23 dock: backdrop blur and background-aware foreground inversion. */
+/** API 23 dock: backdrop blur and alpha-preserving foreground inversion. */
 @Component
 export struct FrostedDock {
   @Prop selectedIndex: number = 0;
@@ -6,24 +6,27 @@ export struct FrostedDock {
   @Prop darkMode: boolean = false;
   @Prop hideMask: boolean = false;
   onSelect: (index: number) => void = () => {};
+  private areaWidth: number = 0;
+  private areaHeight: number = 0;
 
   @Builder
   item(icon: Resource, label: string, index: number) {
     Column({ space: 3 }) {
       SymbolGlyph(icon)
         .fontSize(20)
-        .fontColor([Color.White])
-        .invert({ low: 0.1, high: 0.9, threshold: 0.5, thresholdRange: 0.15 })
+        .fontColor([this.selectedIndex === index ? '#FFFFFFFF' : '#B8FFFFFF'])
+        // InvertOptions filters the rectangular bounds on older renderers.
+        // Difference blending changes only the painted glyph pixels.
+        .blendMode(BlendMode.DIFFERENCE, BlendApplyType.OFFSCREEN)
       Text(label)
         .fontSize(11)
         .fontWeight(FontWeight.Medium)
-        .fontColor(Color.White)
-        .invert({ low: 0.1, high: 0.9, threshold: 0.5, thresholdRange: 0.15 })
+        .fontColor(this.selectedIndex === index ? '#FFFFFFFF' : '#B8FFFFFF')
+        .blendMode(BlendMode.DIFFERENCE, BlendApplyType.OFFSCREEN)
     }
     .layoutWeight(1)
     .height(48)
     .justifyContent(FlexAlign.Center)
-    .opacity(this.selectedIndex === index ? 1 : 0.65)
     .borderRadius(24)
     .backgroundColor(this.selectedIndex === index ? (this.darkMode ? '#18FFFFFF' : '#10000000') : Color.Transparent)
     .accessibilityText(label)
@@ -57,11 +60,25 @@ export struct FrostedDock {
         color: this.darkMode ? '#66101214' : '#44F1F3F5'
       })
       .border({ width: 0.5, color: this.darkMode ? '#33FFFFFF' : '#88FFFFFF' })
-      .shadow({ radius: 12, color: '#20000000', offsetY: 4 })
       .margin({ bottom: 12 + this.bottomInset })
     }
     .width('100%')
     .height(92 + this.bottomInset)
-    .hitTestBehavior(HitTestMode.Transparent)
+    .onAreaChange((oldValue: Area, newValue: Area) => {
+      this.areaWidth = newValue.width as number;
+      this.areaHeight = newValue.height as number;
+    })
+    .onTouchIntercept((event: TouchEvent) => {
+      if (event.touches.length === 0) {
+        return HitTestMode.Transparent;
+      }
+      const touch: TouchObject = event.touches[0];
+      const left: number = (this.areaWidth - 212) / 2;
+      const bottom: number = this.areaHeight - 12 - this.bottomInset;
+      // Consume only capsule hits; never send a dock tap to the course/list
+      // behind it, while the rest of this bottom strip stays touch-transparent.
+      return touch.x >= left && touch.x <= left + 212 && touch.y >= bottom - 56 && touch.y <= bottom
+        ? HitTestMode.Default : HitTestMode.Transparent;
+    })
   }
 }

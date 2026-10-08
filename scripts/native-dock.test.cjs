@@ -38,7 +38,7 @@ test('native dock retains fixed dimensions, safe-area margin and default mask', 
   assert.equal(style.maskHeight, 92);
   assert.deepEqual({ ...style.systemMaterial }, {
     style: 'ultra-thin', applyShadow: true, colorInvert: true,
-    interactive: false, lightEffect: { color: 'white' }
+    interactive: true, lightEffect: { color: 'white' }
   });
 });
 
@@ -92,7 +92,7 @@ test('one native tab bar owns only Today, Timetable and More', () => {
   assert.match(home, /const NAV_TAB_COUNT: number = 3/);
   assert.doesNotMatch(home, /AssistantTab|NewsTab|assistantMounted|newsMounted|mountTabsNear/);
   assert.match(shell, /\.barOverlap\(true\)/);
-  assert.match(shell, /\.barHeight\(56\)/);
+  assert.match(shell, /\.barHeight\(deviceInfo\.apiAvailable\('26\.0\.0'\) \? 56 : 0\)/);
   assert.match(shell, /\.barBackgroundColor\(Color\.Transparent\)/);
   assert.match(home, /normal\.fontColor\(\[\$r\('sys\.color\.ohos_id_color_text_secondary'\)\]\)/);
   assert.match(home, /selected\.fontColor\(\[\$r\('sys\.color\.ohos_id_color_text_primary'\)\]\)/);
