@@ -90,7 +90,7 @@ test('week paging commits on a shorter drag or a quick flick', () => {
 test('latched grid drags reject native horizontal page gestures but retain vertical scrolling', () => {
   const home = read('pages/Home.ets');
   const method = home.slice(home.indexOf('  private judgeTimetableWeekPan'), home.indexOf('  @Builder\n  homeTabs()'));
-  const output = ts.transpileModule('class Judge { weekGestureActive = false; dockGestureActive = false; ' + method + ' }', {
+  const output = ts.transpileModule('class Judge { weekGestureActive = false; dockGestureActive = false; dockNavigation = { isDock: () => this.dockGestureActive }; ' + method + ' }', {
     compilerOptions: { target: ts.ScriptTarget.ES2020 }
   }).outputText;
   const judge = new Function('GestureJudgeResult', 'GestureControl', 'PanDirection', output + '; return new Judge();')(
@@ -119,7 +119,7 @@ test('latched grid drags reject native horizontal page gestures but retain verti
   judge.dockGestureActive = false;
   assert.equal(judge.judgePagePan(pan(3), true), 'reject', 'bar recognizer also handles pointer/trackpad swipes');
   assert.equal(judge.judgePagePan(pan(3)), 'continue', 'a new content drag still pages normally');
-  assert.match(home, /this\.dockGestureActive = false/);
+  assert.match(home, /this\.dockNavigation\.begin\(event, false\)/);
   assert.match(home, /event\.type === TouchType\.Down[\s\S]*event\.touches\[0\]\.windowY >= this\.timetableDateBottom/);
   assert.match(home, /this\.timetableDateBottom = \(newValue\.globalPosition\.y as number\) \+ \(newValue\.height as number\)/);
 });

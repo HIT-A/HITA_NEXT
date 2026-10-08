@@ -17,6 +17,7 @@ import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/the
 import { CompatibleDockModifier } from '../common/theme/CompatibleDockModifier';
 import { CirclePaintModifier } from '../common/theme/CirclePaintModifier';
 import { FrostedDock } from '../common/components/FrostedDock';
+import { DockNavigationGuard } from '../common/util/DockNavigationGuard';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTermSubject, EasTimetable } from '../common/model/timetable/TimetableModels';
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
@@ -161,15 +162,14 @@ struct Home {
   private tabsController: TabsController = new TabsController();
   private timetableDateBottom: number = TIMETABLE_CHROME_FALLBACK;
   private weekGestureActive: boolean = false;
-  private dockGestureActive: boolean = false;
+  private dockNavigation: DockNavigationGuard = new DockNavigationGuard();
   private dockBarModifier: CommonModifier = new CommonModifier()
     .onTouchIntercept((event: TouchEvent) => {
-      if (event.type === TouchType.Down) {
-        // Tabs is hit-tested first. Keep this origin latched until the next
-        // touch-down even when the finger moves outside the native dock.
-        this.dockGestureActive = true;
-      }
+      this.dockNavigation.begin(event, true);
       return HitTestMode.Default;
+    })
+    .onTouch((event: TouchEvent) => {
+      this.dockNavigation.observe(event);
     })
     .onGestureRecognizerJudgeBegin((event: BaseGestureEvent, current: GestureRecognizer) => {
       return this.judgePagePan(current, true);
@@ -1042,7 +1042,7 @@ struct Home {
   }
 
   private judgePagePan(current: GestureRecognizer, fromDock: boolean = false): GestureJudgeResult {
-    const dock: boolean = fromDock || this.dockGestureActive;
+    const dock: boolean = fromDock || this.dockNavigation.isDock();
     if (!current.isBuiltIn()) {
       return GestureJudgeResult.CONTINUE;
     }
@@ -1057,6 +1057,18 @@ struct Home {
       }
     }
     return GestureJudgeResult.CONTINUE;
+  }
+
+  private requestDockClick(index: number): void {
+    const sequence: number = this.dockNavigation.requestClick();
+    // Native click and raw Up callback ordering varies by renderer. Wait until
+    // this input dispatch completes before accepting the tap. No drag callback
+    // is allowed to navigate, either while held or after release.
+    setTimeout(() => {
+      this.dockNavigation.commitClick(sequence, index, (target: number) => {
+        this.tabsController.changeIndex(target);
+      });
+    }, 0);
   }
 
   @Builder
@@ -1104,7 +1116,7 @@ struct Home {
     .scrollable(true)
     .onTouchIntercept((event: TouchEvent) => {
       if (event.type === TouchType.Down && event.touches.length > 0) {
-        this.dockGestureActive = false;
+        this.dockNavigation.begin(event, false);
         // Latch the region at touch-down, before either recognizer starts.
         // Crossing the date row later cannot turn week paging into page paging.
         this.weekGestureActive = this.currentTab === TAB_TIMETABLE && this.currentTimetable !== undefined &&
@@ -1112,9 +1124,18 @@ struct Home {
       }
       return HitTestMode.Default;
     })
+    .onTouch((event: TouchEvent) => {
+      this.dockNavigation.observe(event);
+    })
     .onGestureRecognizerJudgeBegin((event: BaseGestureEvent, current: GestureRecognizer) => {
       return this.judgePagePan(current);
     }, true)
+    .onTabBarClick((index: number) => {
+      this.requestDockClick(index);
+    })
+    .onContentWillChange((currentIndex: number, comingIndex: number) => {
+      return this.dockNavigation.allowsChange(comingIndex);
+    })
     .animationDuration(TAB_SWIPE_MS)
     .attributeModifier(new CompatibleDockModifier(12 + this.navBarInset,
       this.selectedNav === TAB_TIMETABLE && this.hasTimetableBackground(), this.darkMode))
@@ -1155,8 +1176,12 @@ struct Home {
         bottomInset: this.navBarInset,
         darkMode: this.darkMode,
         hideMask: this.selectedNav === TAB_TIMETABLE && this.hasTimetableBackground(),
+        onDockTouch: (event: TouchEvent) => {
+          this.dockNavigation.begin(event, true);
+          this.dockNavigation.observe(event);
+        },
         onSelect: (index: number) => {
-          this.tabsController.changeIndex(index);
+          this.requestDockClick(index);
         }
       })
     }

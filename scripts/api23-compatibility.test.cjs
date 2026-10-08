@@ -56,7 +56,8 @@ test('older dock keeps three actions, reactive selection, safe-area spacing and 
   assert.match(dock, /\.accessibilitySelected\(this\.selectedIndex === index\)/);
   const home = read('pages/Home.ets');
   assert.match(home, /if \(!deviceInfo\.apiAvailable\('26\.0\.0'\)\) \{\s*FrostedDock/);
-  assert.match(home, /onSelect: \(index: number\) => \{\s*this\.tabsController\.changeIndex\(index\)/);
+  assert.match(home, /onSelect: \(index: number\) => \{\s*this\.requestDockClick\(index\)/);
+  assert.match(dock, /\.onTouch\(\(event: TouchEvent\) => this\.onDockTouch\(event\)\)/);
   assert.match(home, /\.barHeight\(deviceInfo\.apiAvailable\('26\.0\.0'\) \? 56 : 0\)/);
   assert.match(home, /if \(deviceInfo\.apiAvailable\('26\.0\.0'\)\) \{\s*this\.homeTabs\(\);/);
   assert.match(home, /Stack\(\{ alignContent: Alignment\.Bottom \}\) \{\s*this\.homeTabs\(\);\s*this\.compatibleDock\(\);/);
