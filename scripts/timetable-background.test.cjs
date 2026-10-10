@@ -20,7 +20,7 @@ test('timetable photo picker copies a gallery image and covers the page without 
   assert.match(tab, /sys\.symbol\.picture/);
   assert.match(tab, /sys\.symbol\.paintpalette/);
   assert.doesNotMatch(tab, /sys\.symbol\.camera|Text\('A'\)/);
-  assert.match(tab, /this\.timetablePaletteOpen = !this\.timetablePaletteOpen/);
+  assert.match(tab, /this\.canOpenSheet\(\)[\s\S]*this\.timetablePaletteOpen = true;[\s\S]*this\.activeSheetVisible = true;/);
   assert.match(tab, /this\.onTimetableBackgroundTap\(\)/);
   assert.match(home, /text: '更换壁纸'/);
   assert.match(home, /text: '移除壁纸'/);
@@ -33,7 +33,7 @@ test('timetable photo picker copies a gallery image and covers the page without 
   assert.match(tab, /expandSafeArea\(\[SafeAreaType\.SYSTEM\], \[SafeAreaEdge\.TOP, SafeAreaEdge\.BOTTOM\]\)/);
   assert.match(tab, /backgroundColor\(Color\.Transparent\)/);
   assert.match(tab, /accessibilityText\('选择时间表字体颜色'\)/);
-  assert.match(tab, /TimetableTheme\.PALETTE/);
+  assert.match(home, /CourseColorEditor\([\s\S]*textMode: true,[\s\S]*TimetableTheme\.PALETTE/);
   assert.match(home, /drawTimetableWeek\([\s\S]*!this\.hasTimetableBackground\(\), this\.timetableInk\(\), this\.darkMode\)/);
   assert.match(tab, /timetableDateHeader\(\)/);
   assert.match(tab, /timetableDateHeader\(\)[\s\S]*backgroundColor\(Color\.Transparent\)/);

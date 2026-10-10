@@ -337,6 +337,18 @@ export class RdbHelper {
     });
   }
 
+  /** Save the subject color; propagate failures so the editor cannot report a false success. */
+  async saveCourseColor(id: string, timetableId: string, color: number): Promise<void> {
+    if (id.length === 0 || timetableId.length === 0) {
+      throw new Error('Missing course identity');
+    }
+    const changed: number = await this.s().update({ 'color': color },
+      new relationalStore.RdbPredicates('subject').equalTo('id', id).equalTo('timetableId', timetableId));
+    if (changed !== 1) {
+      throw new Error('Course no longer exists');
+    }
+  }
+
   async changeSubjectColor(id: string, color: number): Promise<void> {
     await this.upd({ 'color': color },
       new relationalStore.RdbPredicates('subject').equalTo('id', id));

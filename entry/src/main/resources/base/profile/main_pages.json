@@ -6,6 +6,7 @@
     "pages/PortalsPage",
     "pages/NoticesPage",
     "pages/ScorePage",
+    "pages/EmptyClassroomPage",
     "pages/AddEventPage",
     "pages/ExamPage",
     "pages/TimetableManagerPage",

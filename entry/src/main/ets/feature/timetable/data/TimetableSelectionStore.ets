@@ -83,13 +83,10 @@ export class TimetableSelectionStore {
   }
 
   async saveTextColor(color: string): Promise<void> {
-    if (this.store === undefined || color.length === 0) {
-      return;
+    if (this.store === undefined || !/^#[0-9A-Fa-f]{6}$/.test(color)) {
+      throw new Error('Text color store unavailable or invalid color');
     }
-    try {
-      await this.store.put(TEXT_COLOR_KEY, color);
-      await this.store.flush();
-    } catch (e) {
-    }
+    await this.store.put(TEXT_COLOR_KEY, color);
+    await this.store.flush();
   }
 }

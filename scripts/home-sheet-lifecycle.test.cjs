@@ -248,3 +248,16 @@ test('switching campus ignores out-of-order results and recovers from a failed r
   await page.selectSessionCampus('SHENZHEN');
   assert.equal(page.sessionSheetInfo.campus, 'SHENZHEN');
 });
+
+
+test('text palette keeps its close guard until dismissal finishes', () => {
+  const { page } = harness();
+  page.timetablePaletteOpen = true;
+  page.activeSheetVisible = true;
+  page.willDisappear();
+  assert.equal(page.canOpenSheet(), false);
+  assert.equal(page.timetablePaletteOpen, true);
+  page.didDisappear();
+  assert.equal(page.timetablePaletteOpen, false);
+  assert.equal(page.canOpenSheet(), true);
+});

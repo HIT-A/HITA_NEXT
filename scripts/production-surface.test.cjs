@@ -101,10 +101,10 @@ test('local search and its empty section are not reachable or shipped', () => {
   }
 });
 
-test('classroom lookup placeholder remains available as requested', () => {
+test('classroom lookup opens the registered query page', () => {
   const home = fs.readFileSync(path.join(etsRoot, 'pages/Home.ets'), 'utf8');
   assert.match(home, /'空教室'/);
-  assert.match(home, /showToast\(\{ message: '空教室查询将在教务会话完善后开放' \}\)/);
+  assert.match(home, /url:\s*'pages\/EmptyClassroomPage'/);
 });
 
 test('academic errors expose only known user messages, never internal diagnostics', () => {

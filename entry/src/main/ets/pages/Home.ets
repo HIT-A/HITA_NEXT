@@ -18,6 +18,7 @@ import { CompatibleDockModifier } from '../common/theme/CompatibleDockModifier';
 import { CirclePaintModifier } from '../common/theme/CirclePaintModifier';
 import { FrostedDock } from '../common/components/FrostedDock';
 import { DockNavigationGuard } from '../common/util/DockNavigationGuard';
+import { CourseColorEditor } from '../feature/timetable/views/CourseColorEditor';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTermSubject, EasTimetable } from '../common/model/timetable/TimetableModels';
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
@@ -130,6 +131,7 @@ struct Home {
   @State loginSheetOpen: boolean = false;
   @State loginCampusCode: string = 'WEIHAI';
   @State courseSheetOpen: boolean = false;
+  @State courseColorEditing: boolean = false;
   @State selectedCourse: EasEventItem | undefined = undefined;
   @State classReminderEnabled: boolean = false;
   private reminderBusy: boolean = false;
@@ -542,11 +544,28 @@ struct Home {
       const isCourseOrExam: boolean = event.type === EasEventType.CLASS || event.type === EasEventType.EXAM;
       if (isCourseOrExam && event.getDow() === day && span !== undefined &&
         span.from <= tappedTime && span.to >= tappedTime) {
+        this.courseColorEditing = false;
         this.selectedCourse = event;
         this.courseSheetOpen = true;
         this.activeSheetVisible = true;
         return;
       }
+    }
+  }
+
+  private async saveCourseColor(event: EasEventItem, color: number): Promise<void> {
+    await RdbHelper.getInstance().saveCourseColor(event.subjectId, event.timetableId, color);
+    // Update every week without resetting the currently viewed week.
+    for (const item of this.timetableEvents) {
+      if (item.subjectId === event.subjectId && item.timetableId === event.timetableId) {
+        item.color = color;
+      }
+    }
+    this.timetableEvents = this.timetableEvents.slice();
+    this.drawTimetableNow();
+    if (this.selectedCourse?.id === event.id && this.activeSheetVisible) {
+      this.selectedCourse = this.timetableEvents.find((item: EasEventItem) => item.id === event.id);
+      this.courseColorEditing = false;
     }
   }
 
@@ -808,16 +827,15 @@ struct Home {
   }
 
   private async setTimetableTextColor(color: string): Promise<void> {
-    this.timetableTextColor = color;
-    this.timetablePaletteOpen = false;
     await TimetableSelectionStore.getInstance().saveTextColor(color);
+    this.timetableTextColor = color;
     this.drawTimetableNow();
   }
 
   private canOpenSheet(): boolean {
     return this.pageVisible && !this.tabTransitionRunning && !this.activeSheetVisible &&
       !this.sessionSheetOpen && !this.loginSheetOpen && !this.courseSheetOpen &&
-      !this.calendarExportSheetOpen;
+      !this.calendarExportSheetOpen && !this.timetablePaletteOpen;
   }
 
   private closeActiveSheet(): void {
@@ -1274,6 +1292,7 @@ struct Home {
         this.sessionSheetOpen = false;
         this.loginSheetOpen = false;
         this.courseSheetOpen = false;
+        this.timetablePaletteOpen = false;
         this.selectedCourse = undefined;
         this.calendarExportSheetOpen = false;
         this.calendarExportTimetable = undefined;
@@ -1320,6 +1339,25 @@ struct Home {
       })
         .width('100%')
         .height('100%');
+    } else if (this.timetablePaletteOpen) {
+      Column() {
+        CourseColorEditor({
+          initialColor: (0xFF000000 | parseInt(this.timetableTextColor.substring(1), 16)) >>> 0,
+          textMode: true,
+          previewDark: this.darkMode,
+          previewWallpaper: this.hasTimetableBackground(),
+          presets: TimetableTheme.PALETTE.map((color: string): number =>
+            (0xFF000000 | parseInt(color.substring(1), 16)) >>> 0),
+          onSave: async (color: number) => {
+            const generation: number = this.sheetRequestGeneration;
+            await this.setTimetableTextColor('#' + (color & 0xFFFFFF).toString(16).padStart(6, '0').toUpperCase());
+            if (generation === this.sheetRequestGeneration && this.timetablePaletteOpen) {
+              this.closeActiveSheet();
+            }
+          },
+          onCancel: () => { this.closeActiveSheet(); }
+        })
+      }.width('100%').padding({ left: 20, right: 20, top: 4, bottom: 20 });
     } else if (this.courseSheetOpen && this.selectedCourse !== undefined) {
       this.courseDetailSheet(this.selectedCourse as EasEventItem);
     } else if (this.calendarExportSheetOpen && this.calendarExportTimetable !== undefined) {
@@ -1979,7 +2017,10 @@ struct Home {
           .margin({ left: 8 })
           .accessibilityText('选择时间表字体颜色')
           .onClick(() => {
-            this.timetablePaletteOpen = !this.timetablePaletteOpen;
+            if (this.canOpenSheet()) {
+              this.timetablePaletteOpen = true;
+              this.activeSheetVisible = true;
+            }
           })
 
           Button({ type: ButtonType.Circle }) {
@@ -2001,30 +2042,6 @@ struct Home {
         .padding({ left: 20, right: 18, top: 16, bottom: 10 })
         .alignItems(VerticalAlign.Center)
         .backgroundColor(Color.Transparent)
-
-        if (this.timetablePaletteOpen) {
-          Row({ space: 8 }) {
-            ForEach(TimetableTheme.PALETTE, (color: string) => {
-              Button({ type: ButtonType.Circle }) {
-              }
-              .width(24)
-              .height(24)
-              .backgroundColor(color)
-              .border({
-                width: this.timetableTextColor === color ? 2 : 1,
-                color: color === TimetableTheme.WHITE_TEXT ? $r('app.color.hita_divider_c5cdd8') :
-                  (this.timetableTextColor === color ? color : 'rgba(255,255,255,0.85)')
-              })
-              .accessibilityText('字体颜色')
-              .onClick(() => {
-                this.setTimetableTextColor(color);
-              })
-            }, (color: string) => color)
-          }
-          .width('100%')
-          .justifyContent(FlexAlign.End)
-          .padding({ left: 20, right: 18, bottom: 8 })
-        }
 
         if (this.currentTimetable !== undefined) {
           this.timetableDateHeader()
@@ -2132,7 +2149,9 @@ struct Home {
               });
             this.moreNavigationRow($r('sys.symbol.magnifyingglass'), '空教室',
               '查询可用教室与空闲时段', () => {
-                this.getUIContext().getPromptAction().showToast({ message: '空教室查询将在教务会话完善后开放' });
+                this.getUIContext().getRouter().pushUrl({
+                  url: 'pages/EmptyClassroomPage'
+                });
               });
           }
           .width('100%')
@@ -2386,12 +2405,27 @@ struct Home {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
         .margin({ left: COURSE_DETAIL_TEXT_GAP });
-
+        if (event.type === EasEventType.CLASS && event.subjectId.length > 0) {
+          Button({ type: ButtonType.Circle }) {
+            SymbolGlyph($r('sys.symbol.paintpalette')).fontSize(22).fontColor([COLOR_PRIMARY]);
+          }
+          .width(44).height(44).padding(0).flexShrink(0)
+          .backgroundColor(COLOR_NAV_ACTIVE).accessibilityText('修改课程颜色')
+          .onClick(() => { this.courseColorEditing = !this.courseColorEditing; });
+        }
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
       .margin({ bottom: 14 });
 
+      if (this.courseColorEditing) {
+        CourseColorEditor({
+          initialColor: event.color,
+          textColor: this.timetableTextColor,
+          onSave: async (color: number) => { await this.saveCourseColor(event, color); },
+          onCancel: () => { this.courseColorEditing = false; }
+        })
+      } else {
       this.courseDetailRow($r('sys.symbol.person_crop_circle_fill'), '老师',
         event.teacher.trim().length > 0 ? event.teacher : '无');
       this.courseDetailRow($r('sys.symbol.pin'), event.type === EasEventType.EXAM ? '考场' : '教室',
@@ -2406,6 +2440,7 @@ struct Home {
         this.courseDetailRow($r('sys.symbol.checkmark'), '类型', '考试');
       } else {
         this.courseDetailRow($r('sys.symbol.repeat_1'), '课程进度', this.courseProgressText(event));
+      }
       }
     }
     .width('100%')
