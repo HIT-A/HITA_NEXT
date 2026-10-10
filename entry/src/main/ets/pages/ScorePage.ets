@@ -7,7 +7,7 @@ import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
-import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
+import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
 import { EasDataProvider } from '../feature/eas/EasDataProvider';
@@ -29,6 +29,7 @@ struct ScorePage {
   @State hasSession: boolean = false;
   @State fadeOpacity: number = 0;
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
+  @StorageProp('hita_nav_bar_vp') navBarInset: number = NAV_BAR_INSET_FALLBACK;
   private session: EasSession | undefined = undefined;
   private pageScroller: Scroller = new Scroller();
 
@@ -104,21 +105,19 @@ struct ScorePage {
         .alignItems(HorizontalAlign.Center)
       } else if (this.scores.length === 0) {
         Column() {
-          Text('◉')
-            .fontSize(48)
-            .fontColor($r('app.color.hita_text_hint_b7c7d9'))
-            .margin({ bottom: 12 })
           Text('暂无成绩数据')
             .fontSize(16)
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.hita_text_1a1a1a'))
+            .width('100%')
+            .textAlign(TextAlign.Center)
             .margin({ bottom: 8 })
           Text(this.hasSession ? '点击右上角“查询”获取成绩' : '登录教务后即可查询成绩')
             .fontSize(13)
             .fontColor($r('app.color.hita_text_secondary_808080'))
+            .width('100%')
             .textAlign(TextAlign.Center)
             .lineHeight(20)
-            .margin({ bottom: 24 })
           if (!this.hasSession) {
             Text('去登录')
               .fontSize(15)
@@ -129,6 +128,7 @@ struct ScorePage {
               .backgroundColor($r('app.color.hita_primary_fill'))
               .borderRadius(22)
               .textAlign(TextAlign.Center)
+              .margin({ top: 20 })
               .onClick(() => {
                 this.getUIContext().getRouter().pushUrl({
                   url: 'pages/Home',
@@ -139,9 +139,9 @@ struct ScorePage {
         }
         .width('100%')
         .height('100%')
+        .padding({ left: 32, right: 32, top: HEADER_HEIGHT, bottom: this.navBarInset })
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
-        .padding({ left: 32, right: 32, top: HEADER_HEIGHT })
       } else {
         List({ space: 10, scroller: this.pageScroller }) {
           ListItem() {

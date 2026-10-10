@@ -5,7 +5,7 @@
  *  - 顶部标题栏：左侧返回应用，右侧网页回退和刷新，各自占用独立布局空间。
  *  - 线性进度条：3vp 高度，仅在加载中展示。
  *  - Web 组件：直接绑定登录 URL，并在控制器附着后完成登录状态初始化。
- *  - MFA 覆盖层：仅在触发二次认证时浮层提示。
+ *  - 验证码的发送、输入和提交均使用认证网页自身的控件。
  */
 import { webview } from '@kit.ArkWeb';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -13,7 +13,6 @@ import { common } from '@kit.AbilityKit';
 import { EasSession } from '../EasSession';
 import { EasSessionStore } from '../EasSessionStore';
 import { EasWebLoginController } from './EasWebLoginController';
-import { EasMfaOverlayState } from './EasWebMfaBridge';
 import { easWebLoginConfigFor, EasCampusConfig } from './EasWebLoginConfig';
 import { HitaColors } from '../../../common/theme/HitaColors';
 import { HeaderBackButton } from '../../../common/components/HeaderBackButton';
@@ -47,11 +46,6 @@ export struct EasLoginPage {
   @State canGoBack: boolean = false;
   @State recoveryBusy: boolean = false;
 
-  // —— 原生 MFA 覆盖层 ——
-  @State mfaState: EasMfaOverlayState = new EasMfaOverlayState();
-  @State mfaInput: string = '';
-  @State mfaBusy: boolean = false;
-
   aboutToAppear(): void {
     this.pageActive = true;
     this.callbackGeneration++;
@@ -69,10 +63,6 @@ export struct EasLoginPage {
     const ctrl: EasWebLoginController = this.loginController;
     ctrl.onProgress = (p: number) => {
       this.progressValue = p;
-    };
-    ctrl.onMfaStateChanged = (state: EasMfaOverlayState) => {
-      this.mfaState = state;
-      this.mfaInput = '';
     };
     ctrl.onError = (message: string) => {
       this.errorText = message;
@@ -154,6 +144,29 @@ export struct EasLoginPage {
     this.loginController.notifyPageEnd(url);
   }
 
+  private pageLoadFinished(url: string): void {
+    if (this.campusCode !== 'BENBU' || !this.pageActive || this.recoveryBusy || url.length === 0) {
+      return;
+    }
+    // ArkWeb's final main-frame callback also covers redirects and fragment navigation.
+    // Compare against the live URL so a late callback cannot finish an earlier page.
+    try {
+      if (this.webController.getUrl() !== url) {
+        return;
+      }
+    } catch (e) {
+      return;
+    }
+    if (url === this.currentPageUrl && this.webReady) {
+      return;
+    }
+    if (url !== this.currentPageUrl) {
+      this.currentPageUrl = url;
+      this.loginController.notifyPageBegin(url);
+    }
+    this.pageEnded(url);
+  }
+
   private confirmRecovery(): void {
     if (this.recoveryBusy) {
       return;
@@ -178,7 +191,6 @@ export struct EasLoginPage {
     this.recoveryBusy = true;
     this.recoveryPending = true;
     this.errorText = '';
-    this.mfaState = new EasMfaOverlayState();
     try {
       // Leave the authentication document before clearing storage, so its scripts
       // cannot recreate old cookies while the reset is in progress.
@@ -417,6 +429,11 @@ export struct EasLoginPage {
               const u: string = event !== undefined && event !== null ? event.url : '';
               this.pageEnded(u);
             })
+            .onLoadFinished((event) => {
+              if (event) {
+                this.pageLoadFinished(event.url);
+              }
+            })
             .onProgressChange((event) => {
               const p: number = event !== undefined && event !== null ? event.newProgress : 0;
               this.progressValue = p;
@@ -454,7 +471,7 @@ export struct EasLoginPage {
             .height('100%')
         }
 
-        if (!this.webReady && !this.mfaState.visible) {
+        if (!this.webReady) {
           Column() {
             Image($r('app.media.app_icon'))
               .width(54)
@@ -484,103 +501,6 @@ export struct EasLoginPage {
           .shadow({ radius: 18, color: '#18000000', offsetY: 6 });
         }
 
-        // ═══════════════ 原生 MFA 覆盖层 ═══════════════
-        if (this.mfaState.visible) {
-          Column() {
-            Column() {
-              Text(this.mfaState.promptTitle.length > 0 ? this.mfaState.promptTitle : '二次验证')
-                .fontSize(18)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(HitaColors.onSurface)
-                .margin({ bottom: 8 })
-
-              if (this.mfaState.promptText.length > 0) {
-                Text(this.mfaState.promptText)
-                  .fontSize(14)
-                  .fontColor(HitaColors.onSurfaceVariant)
-                  .margin({ bottom: 16 })
-              }
-
-              if (this.mfaState.hasVisibleInput) {
-                TextInput({
-                  placeholder: this.mfaState.inputPlaceholder.length > 0 ?
-                    this.mfaState.inputPlaceholder : '请输入验证码',
-                  text: this.mfaInput
-                })
-                  .type(InputType.Normal)
-                  .fontSize(16)
-                  .height(44)
-                  .backgroundColor($r('app.color.hita_control_f3f4f6'))
-                  .borderRadius(8)
-                  .padding({ left: 12, right: 12 })
-                  .onChange((value: string) => {
-                    this.mfaInput = value;
-                  })
-                  .margin({ bottom: 16 })
-              }
-
-              Row({ space: 10 }) {
-                if (this.mfaState.canSendCode) {
-                  Button('发送验证码')
-                    .fontSize(13)
-                    .height(36)
-                    .borderRadius(18)
-                    .backgroundColor($r('app.color.hita_surface'))
-                    .fontColor(HitaColors.primary)
-                    .border({ width: 1, color: HitaColors.primary })
-                    .onClick(() => {
-                      this.mfaBusy = true;
-                      this.loginController.sendMfaCode().finally(() => {
-                        this.mfaBusy = false;
-                      });
-                    })
-                }
-                if (this.mfaState.verifyMethodType.length > 0 || this.mfaState.switchMethodJs.length > 0) {
-                  Button('切换方式')
-                    .fontSize(13)
-                    .height(36)
-                    .borderRadius(18)
-                    .backgroundColor($r('app.color.hita_surface'))
-                    .fontColor(HitaColors.primary)
-                    .border({ width: 1, color: HitaColors.primary })
-                    .onClick(() => {
-                      this.loginController.switchMfaMethod();
-                    })
-                }
-              }
-              .margin({ bottom: 16 })
-              .justifyContent(FlexAlign.Center)
-
-              Button(this.mfaBusy ? '提交中…' : '提交')
-                .fontSize(15)
-                .fontWeight(FontWeight.Medium)
-                .width('100%')
-                .height(44)
-                .borderRadius(22)
-                .backgroundColor($r('app.color.hita_primary_fill'))
-                .fontColor(HitaColors.onPrimary)
-                .enabled(!this.mfaBusy)
-                .onClick(() => {
-                  if (this.mfaInput.trim().length === 0) {
-                    return;
-                  }
-                  this.mfaBusy = true;
-                  this.loginController.submitMfaInput(this.mfaInput.trim()).finally(() => {
-                    this.mfaBusy = false;
-                  });
-                })
-            }
-            .width('88%')
-            .padding({ left: 22, right: 22, top: 22, bottom: 22 })
-            .borderRadius(20)
-            .backgroundColor($r('app.color.hita_surface'))
-            .shadow({ radius: 22, color: 'rgba(0,0,0,0.18)', offsetY: 8 })
-          }
-          .width('100%')
-          .height('100%')
-          .justifyContent(FlexAlign.Center)
-          .backgroundColor('rgba(15,23,42,0.46)')
-        }
       }
       .width('100%')
       .layoutWeight(1)

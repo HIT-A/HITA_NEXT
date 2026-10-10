@@ -10,9 +10,6 @@ import { EasCampusUrls } from './EasWebLoginConfig';
 /** 威海 webvpn ticket Cookie key 前缀（WEIHAI_TICKET_COOKIE_PREFIX，L234）。 */
 export const WEIHAI_TICKET_COOKIE_PREFIX: string = 'wengine_vpn_ticket';
 
-/** 已认证成功页触发判定用常量：本部数据路径特征段（isSuccessPage BENBU）。 */
-const BENBU_DATA_PATH_HINTS: string[] = ['kbcx', 'cjcx', 'kjscx', 'xswh', 'query', 'index'];
-
 // ---------------------------------------------------------------------------
 // URL 基础工具（ArkTS 无 java.net.URI；手写 host/path 提取）
 // ---------------------------------------------------------------------------
@@ -277,6 +274,14 @@ export function isMfaPage(url: string): boolean {
   return containsIgnoreCase(pathOf(url), '/authserver/reauthcheck/');
 }
 
+/** Only the configured EAS host may supply a Benbu session, not CAS or a portal. */
+export function isBenbuEasPage(url: string, studentType: string): boolean {
+  const base: string = studentType === '2' ? EasCampusUrls.GRADUATE_BASE : EasCampusUrls.JWTS_BASE;
+  const path: string = pathOf(url);
+  return hostOf(url) === hostOf(base) && path.indexOf('authserver') < 0 &&
+    path.indexOf('reauth') < 0 && path.indexOf('logout') < 0;
+}
+
 /** isShenzhenProxyJwPage L2839-2843：host == jw-hitsz-edu-cn.hitsz.edu.cn（忽略大小写）。 */
 export function isShenzhenProxyJwPage(url: string): boolean {
   return equalsIgnoreCase(hostOf(url), hostOf(EasCampusUrls.SHENZHEN_PROXY_BASE));
@@ -400,9 +405,7 @@ export enum EasPageKind {
  * 成功页判定（isSuccessPage L2845-3013）：
  *  - SHENZHEN：isShenzhenAuthenticatedPage(url, cookies)
  *  - WEIHAI：isWeihaiAuthenticatedPage(url, cookies)
- *  - BENBU 研究生：host 含 yjsgl 且 path 含 /xs/index 且 hasRequiredCookiesFor
- *  - BENBU 本科：(host 含 jwts 且 path 不含 login 且 map 含 JSESSIONID 与 HIT) 或
- *              ((host 含 jwts 或含 hit.edu.cn) 且 path 含 数据特征段之一)
+ *  - BENBU：仅接受对应培养层次的教务域名；本科仍需由控制器验证课表接口。
  */
 export function isSuccessPageFor(url: string, cookies: Map<string, string>, campus: EasCampus,
   studentType: string): boolean {
@@ -415,25 +418,15 @@ export function isSuccessPageFor(url: string, cookies: Map<string, string>, camp
   if (campus === EasCampus.WEIHAI) {
     return isWeihaiAuthenticatedPage(url, cookies);
   }
-  const host: string = hostOf(url);
+  if (!isBenbuEasPage(url, studentType)) {
+    return false;
+  }
   const path: string = pathOf(url);
   if (studentType === '2') {
-    return host.indexOf('yjsgl') >= 0 && path.indexOf('/xs/index') >= 0 &&
+    return path.indexOf('/xs/index') >= 0 &&
       hasRequiredCookiesFor(cookies, url, campus, studentType);
   }
-  const condA: boolean = host.indexOf('jwts') >= 0 && path.indexOf('login') < 0 &&
-    cookies.has('JSESSIONID') && cookies.has('HIT');
-  let condB: boolean = host.indexOf('jwts') >= 0 || host.indexOf('hit.edu.cn') >= 0;
-  if (condB) {
-    condB = false;
-    for (let i = 0; i < BENBU_DATA_PATH_HINTS.length; i++) {
-      if (path.indexOf(BENBU_DATA_PATH_HINTS[i]) >= 0) {
-        condB = true;
-        break;
-      }
-    }
-  }
-  return condA || condB;
+  return path.indexOf('login') < 0 && hasRequiredCookiesFor(cookies, url, campus, studentType);
 }
 
 /** 综合页面归类（优先级：MFA > SUCCESS > 门户/中转细类 > UNKNOWN）。 */

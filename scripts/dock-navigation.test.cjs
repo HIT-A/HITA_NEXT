@@ -152,6 +152,36 @@ test('new content gestures restore page swiping and invalidate any deferred Dock
   assert.deepEqual(click(guard), [1]);
 });
 
+test('content scrolling does not copy native touch history for Dock validation', () => {
+  const guard = new Guard();
+  guard.begin(event(TouchType.Down), false);
+  for (let i = 0; i < 120; i++) {
+    const move = event(TouchType.Move, [point(100, 700 - i)]);
+    move.getHistoricalPoints = () => assert.fail('content gesture requested Dock history');
+    guard.observe(move);
+  }
+  guard.observe(event(TouchType.Up));
+  assert.equal(guard.allowsChange(1), true);
+  down(guard);
+  guard.observe(event(TouchType.Up));
+  assert.deepEqual(click(guard, 2), [2], 'the next Dock click remains usable');
+});
+
+test('cancelled Dock drags skip further history work but still process release', () => {
+  const guard = new Guard();
+  down(guard);
+  guard.observe(event(TouchType.Move, [point(500)]));
+  for (const type of [TouchType.Move, TouchType.Up]) {
+    const next = event(type);
+    next.getHistoricalPoints = () => assert.fail('cancelled drag requested history');
+    guard.observe(next);
+  }
+  assert.deepEqual(click(guard), []);
+  down(guard);
+  guard.observe(event(TouchType.Up));
+  assert.deepEqual(click(guard), [1]);
+});
+
 test('Home wires both Dock renderers through the change veto and deferred click guard', () => {
   const home = fs.readFileSync(path.join(root, 'pages/Home.ets'), 'utf8');
   assert.match(home, /onContentWillChange[\s\S]*?return this\.dockNavigation\.allowsChange\(comingIndex\)/);

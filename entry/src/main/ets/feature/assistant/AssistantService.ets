@@ -534,7 +534,7 @@ export class AssistantService {
 
   private static systemPrompt(snapshot: TimetableSnapshot, now: number): string {
     const lines: string[] = [
-      '你是 HITA 助手，服务哈尔滨工业大学（哈尔滨本部、威海、深圳三个校区）的学生。',
+      '你是 HITA 助手，服务哈尔滨工业大学（本部、威海校区、深圳校区）的学生。',
       '请用简洁的中文回答。涉及课表时只依据下面提供的数据，不要编造课程、成绩或考试安排；数据里没有的就如实说明。',
       '当前时间：' + EasTimeTools.printDate(now) + ' ' + DOW_FULL[EasTimeTools.getDow(now)] + ' ' + EasTimeTools.printTime(now)
     ];

@@ -144,7 +144,13 @@ export function easWebLoginConfigFor(campus: EasCampus, studentType: string): Ea
     EasCampus.BENBU,
     EasCampusUrls.BENBU_LOGIN,
     EasCampusUrls.BENBU_JWTS,
-    [EasCampusUrls.BENBU_JWTS, EasCampusUrls.BENBU_BASE + '/', EasCampusUrls.BENBU_LOGIN],
+    [
+      EasCampusUrls.JWTS_BASE + '/kbcx/queryGrkb',
+      EasCampusUrls.BENBU_JWTS,
+      EasCampusUrls.JWTS_BASE + '/',
+      EasCampusUrls.BENBU_BASE + '/',
+      EasCampusUrls.BENBU_LOGIN
+    ],
     '1',
     ['i-hit-edu-cn.ivpn.hit.edu.cn', 'jwts-hit-edu-cn.ivpn.hit.edu.cn'],
     '本部'
@@ -162,34 +168,6 @@ export class EasUserAgent {
   /** 原版 Android 端记录的出厂 Mobile UA 样例（仅参考；鸿蒙侧以 ArkWeb 实际默认 UA 为恢复值）。 */
   static readonly ANDROID_MOBILE_REF: string =
     'Mozilla/5.0 (Linux; Android 16; sdk_gphone64_arm64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.6998.135 Mobile Safari/537.36';
-}
-
-/** 总部 MFA/二次认证类型编号 → 中文文案（对应 detectMfaAndBridge JS 中 methodNames，L1337 区域）。 */
-export class EasMfaMethodNames {
-  static textOf(reAuthType: string | undefined): string {
-    const key: string = reAuthType === undefined || reAuthType === null ? '' : reAuthType.trim();
-    switch (key) {
-      case '2':
-      case '7':
-        return '统一身份认证密码';
-      case '3':
-        return '手机号验证码';
-      case '4':
-        return '企业微信验证码';
-      case '5':
-        return 'HIT APP 验证码';
-      case '10':
-        return '安全令牌C';
-      case '11':
-        return '邮箱验证码';
-      case '12':
-        return '钉钉验证码';
-      case '13':
-        return '哈工大 APP 验证码';
-      default:
-        return '二次验证';
-    }
-  }
 }
 
 /** 学生类型常量（对应 ShenzhenWebAutoLogin.UNDERGRAD/POSTGRAD）。 */

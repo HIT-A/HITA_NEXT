@@ -44,6 +44,7 @@ import {
   drawTimetablePlaces,
   drawTimetableWeek,
   eventsOfWeek,
+  timetableBlockColor,
   timetableEventSpan
 } from '../feature/timetable/views/TimetableWeekDraw';
 
@@ -71,6 +72,8 @@ const TIMETABLE_SWIPE_RATIO: number = 0.08;
 const TIMETABLE_FLING_VELOCITY: number = 400;
 const TIMETABLE_FLING_MIN_OFFSET: number = 12;
 const TAB_SWIPE_MS: number = 280;
+const COURSE_DETAIL_ICON_SIZE: number = 38;
+const COURSE_DETAIL_TEXT_GAP: number = 12;
 
 @Extend(Column)
 function tabPage(bottomInset: number, background: ResourceColor) {
@@ -107,6 +110,8 @@ struct Home {
   @State hasTimetable: boolean = false;
   @State timetableCount: number = 0;
   @State calendarExporting: boolean = false;
+  @State calendarExportSheetOpen: boolean = false;
+  @State calendarExportTimetable: EasTimetable | undefined = undefined;
   @State currentTimetable: EasTimetable | undefined = undefined;
   @State recentTimetable: EasTimetable | undefined = undefined;
   @State importing: boolean = false;
@@ -120,6 +125,8 @@ struct Home {
   @State sessionSheetOpen: boolean = false;
   @State sessionSheetCampus: string = 'WEIHAI';
   @State sessionSheetInfo: EasSession | undefined = undefined;
+  private sheetRequestGeneration: number = 0;
+  private sessionSheetLoading: boolean = false;
   @State loginSheetOpen: boolean = false;
   @State loginCampusCode: string = 'WEIHAI';
   @State courseSheetOpen: boolean = false;
@@ -136,6 +143,7 @@ struct Home {
   private importRequested: boolean = false;
   private clockTimer: number = -1;
   private pageVisible: boolean = false;
+  private tabTransitionRunning: boolean = false;
   private timetablePlaceLabels: TimetablePlaceLabel[] = [];
   private timetableMarqueeCallback: TimetableMarqueeCallback | undefined = undefined;
   private timetableMarqueeGeneration: number = 0;
@@ -206,11 +214,12 @@ struct Home {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
     this.startClock();
     await this.refreshSummaries();
-    this.drawTimetableNow();
   }
 
   onPageHide(): void {
     this.pageVisible = false;
+    this.closeActiveSheet();
+    this.tabTransitionRunning = false;
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.OFFSET);
     this.stopTimetableMarquee();
   }
@@ -239,6 +248,7 @@ struct Home {
 
   aboutToDisappear(): void {
     this.pageVisible = false;
+    this.closeActiveSheet();
     this.stopTimetableMarquee();
     if (this.clockTimer >= 0) {
       clearInterval(this.clockTimer);
@@ -255,7 +265,6 @@ struct Home {
       this.clockTimer = setInterval(() => {
         this.nowTick = Date.now();
         this.updateTodayHighlights();
-        this.drawTimetableNow();
         const nextDayKey: string = EasTimeTools.printDate(this.nowTick);
         if (nextDayKey !== this.dayKey) {
           this.dayKey = nextDayKey;
@@ -277,13 +286,14 @@ struct Home {
   }
 
   private startTimetableMarquee(): void {
-    if (this.timetableMarqueeCallback !== undefined || !this.pageVisible ||
+    if (this.timetableMarqueeCallback !== undefined || !this.pageVisible || this.tabTransitionRunning ||
       this.currentTab !== 1 || this.timetablePlaceLabels.length === 0) {
       return;
     }
     const generation: number = this.timetableMarqueeGeneration;
     const callback: TimetableMarqueeCallback = new TimetableMarqueeCallback((timeMs: number) => {
-      if (generation !== this.timetableMarqueeGeneration || !this.pageVisible || this.currentTab !== 1) {
+      if (generation !== this.timetableMarqueeGeneration || !this.pageVisible ||
+        this.tabTransitionRunning || this.currentTab !== 1) {
         return;
       }
       if (this.timetableMarqueeLastFrameMs >= 0) {
@@ -364,6 +374,7 @@ struct Home {
     this.updateTodayHighlights();
     this.timelineText = today.length === 0 ? (display === undefined ? '暂无课表' : '今日暂无安排') :
       '今日 ' + today.length.toString() + ' 项安排';
+    this.drawTimetableNow();
     if (this.classReminderEnabled) {
       const host: common.UIAbilityContext = ctx as common.UIAbilityContext;
       await ClassReminderScheduler.sync(host, allEvents);
@@ -505,7 +516,8 @@ struct Home {
   }
 
   private openCourseAt(x: number, y: number): void {
-    if (this.currentTimetable === undefined || x <= 0 || y < TIMETABLE_GRID_TOP_PADDING) {
+    if (!this.canOpenSheet() || this.currentTimetable === undefined ||
+      x <= 0 || y < TIMETABLE_GRID_TOP_PADDING) {
       return;
     }
     const gutterWidth: number = Math.max(48, this.timetableAreaW * 0.11);
@@ -663,13 +675,21 @@ struct Home {
     if (index === this.currentTab) {
       return;
     }
+    this.closeActiveSheet();
     this.stopTimetableMarquee();
-    this.timetableMarqueeElapsedMs = 0;
     this.currentTab = index;
     if (index === TAB_TIMETABLE) {
-      // 页面常驻于 Tabs 中不会重建，回到时间表时需主动重绘并恢复地点跑马灯。
-      this.drawTimetableNow();
+      // Tabs keeps the canvas alive. Reuse it until data, date or layout changes.
+      this.startTimetableMarquee();
     }
+  }
+
+  private finishTabAnimation(index: number): void {
+    this.tabTransitionRunning = false;
+    this.selectTab(index);
+    this.selectedNav = index;
+    // Also resume after a cancelled swipe, where onChange may not fire.
+    this.startTimetableMarquee();
   }
 
   private dockPageInset(): number {
@@ -794,15 +814,53 @@ struct Home {
     this.drawTimetableNow();
   }
 
+  private canOpenSheet(): boolean {
+    return this.pageVisible && !this.tabTransitionRunning && !this.activeSheetVisible &&
+      !this.sessionSheetOpen && !this.loginSheetOpen && !this.courseSheetOpen &&
+      !this.calendarExportSheetOpen;
+  }
+
+  private closeActiveSheet(): void {
+    // Invalidate pending reads immediately, but retain content until the exit animation ends.
+    this.sheetRequestGeneration++;
+    this.sessionSheetLoading = false;
+    this.activeSheetVisible = false;
+  }
+
+  private requestCalendarExport(): void {
+    if (this.calendarExporting || !this.canOpenSheet()) {
+      return;
+    }
+    if (this.currentTimetable === undefined) {
+      this.getUIContext().getPromptAction().showToast({ message: '请先新建或导入课表' });
+      return;
+    }
+    // Keep the confirmed target stable if the current selection refreshes.
+    this.calendarExportTimetable = this.currentTimetable;
+    this.calendarExportSheetOpen = true;
+    this.activeSheetVisible = true;
+  }
+
+  private cancelCalendarExport(): void {
+    if (this.calendarExportSheetOpen) {
+      this.closeActiveSheet();
+    }
+  }
+
   private async exportToCalendar(): Promise<void> {
-    if (this.calendarExporting) {
+    const timetable: EasTimetable | undefined = this.calendarExportTimetable;
+    if (this.calendarExporting || !this.calendarExportSheetOpen || !this.activeSheetVisible ||
+      timetable === undefined) {
       return;
     }
     this.calendarExporting = true;
+    this.closeActiveSheet();
     try {
       const ctx: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const result: CalendarExportResult = await TimetableCalendarExporter.exportTimetable(ctx, this.currentTimetable);
+      const result: CalendarExportResult = await TimetableCalendarExporter.exportTimetable(ctx, timetable);
       this.getUIContext().getPromptAction().showToast({ message: result.message, duration: 3500 });
+    } catch (_) {
+      this.getUIContext().getPromptAction().showToast({ message: '导出至手机日历失败，请稍后重试' });
     } finally {
       this.calendarExporting = false;
     }
@@ -972,7 +1030,7 @@ struct Home {
       return '深圳校区';
     }
     if (campus === EasCampus.BENBU) {
-      return '本部校区';
+      return '本部';
     }
     return '威海校区';
   }
@@ -988,21 +1046,60 @@ struct Home {
   }
 
   private async openSessionSheet(): Promise<void> {
-    const storedCampus: EasCampus | undefined = await EasSessionStore.getInstance().loadLastCampus();
-    const campus: EasCampus = this.sessionInfo === undefined ?
-      (storedCampus === undefined ? EasCampus.WEIHAI : storedCampus) : this.sessionInfo.campus;
-    this.sessionSheetCampus = campus.toString();
-    this.sessionSheetInfo = await EasSessionStore.getInstance().load(campus);
-    this.sessionSheetOpen = true;
-    this.activeSheetVisible = true;
+    if (this.sessionSheetLoading || !this.canOpenSheet()) {
+      return;
+    }
+    const generation: number = ++this.sheetRequestGeneration;
+    this.sessionSheetLoading = true;
+    try {
+      const storedCampus: EasCampus | undefined = await EasSessionStore.getInstance().loadLastCampus();
+      if (generation !== this.sheetRequestGeneration || !this.canOpenSheet()) {
+        return;
+      }
+      const campus: EasCampus = this.sessionInfo === undefined ?
+        (storedCampus === undefined ? EasCampus.WEIHAI : storedCampus) : this.sessionInfo.campus;
+      const session: EasSession | undefined = await EasSessionStore.getInstance().load(campus);
+      if (generation !== this.sheetRequestGeneration || !this.canOpenSheet()) {
+        return;
+      }
+      this.sessionSheetCampus = campus.toString();
+      this.sessionSheetInfo = session;
+      this.sessionSheetOpen = true;
+      this.activeSheetVisible = true;
+    } catch (_) {
+      if (generation === this.sheetRequestGeneration && this.canOpenSheet()) {
+        this.getUIContext().getPromptAction().showToast({ message: '教务会话读取失败，请重试' });
+      }
+    } finally {
+      if (generation === this.sheetRequestGeneration) {
+        this.sessionSheetLoading = false;
+      }
+    }
   }
 
   private async selectSessionCampus(code: string): Promise<void> {
+    if (!this.activeSheetVisible || !this.sessionSheetOpen) {
+      return;
+    }
+    const generation: number = ++this.sheetRequestGeneration;
     this.sessionSheetCampus = code;
-    this.sessionSheetInfo = await EasSessionStore.getInstance().load(Home.campusFromCode(code));
+    this.sessionSheetInfo = undefined;
+    try {
+      const session: EasSession | undefined = await EasSessionStore.getInstance().load(Home.campusFromCode(code));
+      if (generation === this.sheetRequestGeneration && this.activeSheetVisible && this.sessionSheetOpen) {
+        this.sessionSheetInfo = session;
+      }
+    } catch (_) {
+      if (generation === this.sheetRequestGeneration && this.activeSheetVisible && this.sessionSheetOpen) {
+        this.getUIContext().getPromptAction().showToast({ message: '教务会话读取失败，请重试' });
+      }
+    }
   }
 
   private beginSessionLogin(): void {
+    if (!this.activeSheetVisible || !this.sessionSheetOpen) {
+      return;
+    }
     this.loginCampusCode = this.sessionSheetCampus;
     this.sessionSheetOpen = false;
     this.loginSheetOpen = true;
@@ -1010,10 +1107,13 @@ struct Home {
   }
 
   private async logoutSession(): Promise<void> {
+    const generation: number = this.sheetRequestGeneration;
     const campus: EasCampus = Home.campusFromCode(this.sessionSheetCampus);
     await EasSessionStore.getInstance().clear(campus);
-    this.sessionSheetInfo = undefined;
-    this.activeSheetVisible = false;
+    if (generation === this.sheetRequestGeneration && this.sessionSheetOpen) {
+      this.sessionSheetInfo = undefined;
+      this.closeActiveSheet();
+    }
     await this.refreshSummaries();
     this.getUIContext().getPromptAction().showToast({ message: '已退出' + Home.campusName(campus) + '教务会话' });
   }
@@ -1142,13 +1242,21 @@ struct Home {
     .backgroundColor(this.currentTab === 1 ? Color.Transparent : COLOR_SURFACE)
     .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.KEYBOARD], [SafeAreaEdge.BOTTOM])
     .onAnimationStart((index: number, targetIndex: number, extraInfo: TabsAnimationEvent) => {
+      if (index !== targetIndex) {
+        this.closeActiveSheet();
+      }
+      this.tabTransitionRunning = true;
+      this.stopTimetableMarquee();
       this.selectedNav = targetIndex;
+    })
+    .onAnimationEnd((index: number, extraInfo: TabsAnimationEvent) => {
+      this.finishTabAnimation(index);
     })
     .onChange((index: number) => {
       this.selectTab(index);
       this.selectedNav = index;
     })
-    .bindSheet(this.activeSheetVisible, this.activeSheet(), {
+    .bindSheet($$this.activeSheetVisible, this.activeSheet(), {
       height: this.loginSheetOpen ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
       dragBar: true,
       // Every sheet owns its header control; the system close bubble overlaps
@@ -1157,6 +1265,9 @@ struct Home {
       preferType: SheetType.BOTTOM,
       backgroundColor: COLOR_SURFACE,
       maskColor: $r('app.color.hita_sheet_mask'),
+      onWillDisappear: () => {
+        this.closeActiveSheet();
+      },
       onDisappear: () => {
         // Keep content and height stable until the dismissal animation finishes.
         this.activeSheetVisible = false;
@@ -1164,6 +1275,8 @@ struct Home {
         this.loginSheetOpen = false;
         this.courseSheetOpen = false;
         this.selectedCourse = undefined;
+        this.calendarExportSheetOpen = false;
+        this.calendarExportTimetable = undefined;
       }
     });
   }
@@ -1194,10 +1307,13 @@ struct Home {
         campusCode: this.loginCampusCode,
         studentType: '1',
         onCancel: () => {
-          this.activeSheetVisible = false;
+          this.closeActiveSheet();
         },
         onLoggedIn: (session: EasSession) => {
-          this.activeSheetVisible = false;
+          if (!this.activeSheetVisible || !this.loginSheetOpen) {
+            return;
+          }
+          this.closeActiveSheet();
           this.sessionSheetInfo = session;
           this.refreshSummaries();
         }
@@ -1206,9 +1322,64 @@ struct Home {
         .height('100%');
     } else if (this.courseSheetOpen && this.selectedCourse !== undefined) {
       this.courseDetailSheet(this.selectedCourse as EasEventItem);
-    } else {
+    } else if (this.calendarExportSheetOpen && this.calendarExportTimetable !== undefined) {
+      this.calendarExportConfirmationSheet(this.calendarExportTimetable as EasTimetable);
+    } else if (this.sessionSheetOpen) {
       this.sessionSheet();
     }
+  }
+
+  @Builder
+  calendarExportConfirmationSheet(timetable: EasTimetable) {
+    Column() {
+      Text('导出至手机日历')
+        .fontSize(21)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(COLOR_TEXT_PRIMARY)
+        .width('100%')
+        .margin({ bottom: 20 });
+
+      Text(timetable.name)
+        .fontSize(17)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(COLOR_TEXT_PRIMARY)
+        .width('100%')
+        .maxLines(3)
+        .textOverflow({ overflow: TextOverflow.Ellipsis });
+      Text('将此课表的日程写入系统日历。再次导出会更新此课表已导出的日程。')
+        .fontSize(14)
+        .fontColor(COLOR_TEXT_SECONDARY)
+        .lineHeight(22)
+        .width('100%')
+        .margin({ top: 8, bottom: 24 });
+
+      Row({ space: 12 }) {
+        Button('取消')
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(COLOR_TEXT_SECONDARY)
+          .backgroundColor($r('app.color.hita_control'))
+          .height(46)
+          .layoutWeight(1)
+          .borderRadius(23)
+          .enabled(!this.calendarExporting)
+          .onClick(() => this.cancelCalendarExport());
+        Button('确认导出')
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#FFFFFF')
+          .backgroundColor($r('app.color.hita_primary_fill'))
+          .height(46)
+          .layoutWeight(1)
+          .borderRadius(23)
+          .enabled(!this.calendarExporting)
+          .onClick(() => this.exportToCalendar());
+      }
+      .width('100%');
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding({ left: 20, right: 20, top: 4, bottom: 20 });
   }
 
   @Builder
@@ -1743,7 +1914,11 @@ struct Home {
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         .clip(false)
         .onAreaChange((oldValue: Area, newValue: Area) => {
-          this.onTimetableArea(newValue.width as number, newValue.height as number);
+          const width: number = newValue.width as number;
+          const height: number = newValue.height as number;
+          if (width !== this.timetableAreaW || height !== this.timetableAreaH) {
+            this.onTimetableArea(width, height);
+          }
         })
         .translate({ x: this.timetableDragOffset, y: 0 })
         .opacity(this.timetableOpacity())
@@ -1937,7 +2112,7 @@ struct Home {
             this.moreNavigationRow($r('sys.symbol.calendar'),
               this.calendarExporting ? '正在导出至手机日历…' : '导出至手机日历',
               this.currentTimetable === undefined ? '暂无课表' : this.currentTimetable.name, () => {
-                this.exportToCalendar();
+                this.requestCalendarExport();
               });
           }
           .width('100%')
@@ -2191,18 +2366,11 @@ struct Home {
   courseDetailSheet(event: EasEventItem) {
     Column() {
       Row() {
-        HeaderBackButton({
-          onBack: () => {
-            this.activeSheetVisible = false;
-          }
-        })
-          .margin({ right: 12 });
-        Row()
-          .width(7)
-          .height(50)
-          .borderRadius(4)
-          .backgroundColor(Home.canvasColorCss(event.color === 0 ?
-            Home.defaultCanvasColor(event.type) : event.color));
+        Circle()
+          .width(COURSE_DETAIL_ICON_SIZE)
+          .height(COURSE_DETAIL_ICON_SIZE)
+          .flexShrink(0)
+          .attributeModifier(new CirclePaintModifier(Home.canvasColorCss(timetableBlockColor(event.color))));
         Column() {
           Text(event.name === 'NULL' || event.name.length === 0 ? '未命名课程' : event.name)
             .fontSize(21)
@@ -2217,7 +2385,7 @@ struct Home {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-        .margin({ left: 12, right: 10 });
+        .margin({ left: COURSE_DETAIL_TEXT_GAP });
 
       }
       .width('100%')
@@ -2252,9 +2420,10 @@ struct Home {
           .fontSize(20)
           .fontColor([COLOR_PRIMARY]);
       }
-      .width(38)
-      .height(38)
-      .borderRadius(19)
+      .width(COURSE_DETAIL_ICON_SIZE)
+      .height(COURSE_DETAIL_ICON_SIZE)
+      .borderRadius(COURSE_DETAIL_ICON_SIZE / 2)
+      .flexShrink(0)
       .backgroundColor(COLOR_NAV_ACTIVE)
       .alignContent(Alignment.Center);
       Column() {
@@ -2271,7 +2440,7 @@ struct Home {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      .margin({ left: 12 });
+      .margin({ left: COURSE_DETAIL_TEXT_GAP });
     }
     .width('100%')
     .padding({ top: 8, bottom: 8 })
@@ -2291,7 +2460,7 @@ struct Home {
       Row() {
         HeaderBackButton({
           onBack: () => {
-            this.activeSheetVisible = false;
+            this.closeActiveSheet();
           }
         })
           .margin({ right: 12 });

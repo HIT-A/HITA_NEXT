@@ -16,20 +16,15 @@ export struct FrostedDock {
       SymbolGlyph(icon)
         .fontSize(20)
         .fontColor([this.selectedIndex === index ? '#FFFFFFFF' : '#B8FFFFFF'])
-        // InvertOptions filters the rectangular bounds on older renderers.
-        // Difference blending changes only the painted glyph pixels.
-        .blendMode(BlendMode.DIFFERENCE, BlendApplyType.OFFSCREEN)
       Text(label)
         .fontSize(11)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.selectedIndex === index ? '#FFFFFFFF' : '#B8FFFFFF')
-        .blendMode(BlendMode.DIFFERENCE, BlendApplyType.OFFSCREEN)
     }
     .layoutWeight(1)
     .height(48)
     .justifyContent(FlexAlign.Center)
     .borderRadius(24)
-    .backgroundColor(this.selectedIndex === index ? (this.darkMode ? '#18FFFFFF' : '#10000000') : Color.Transparent)
     .accessibilityText(label)
     .accessibilitySelected(this.selectedIndex === index)
     .onClick(() => this.onSelect(index))
@@ -47,10 +42,25 @@ export struct FrostedDock {
           })
           .hitTestBehavior(HitTestMode.None)
       }
-      Row() {
-        this.item($r('sys.symbol.calendar'), '今日', 0)
-        this.item($r('sys.symbol.doc_plaintext'), '时间表', 1)
-        this.item($r('sys.symbol.more'), '更多', 2)
+      Stack({ alignContent: Alignment.Start }) {
+        Column()
+          .width(68)
+          .height(48)
+          .borderRadius(24)
+          .backgroundColor(this.darkMode ? '#18FFFFFF' : '#10000000')
+          .translate({ x: this.selectedIndex * 68 })
+          .animation({ duration: 200, curve: Curve.FastOutSlowIn })
+          .hitTestBehavior(HitTestMode.None)
+        Row() {
+          this.item($r('sys.symbol.calendar'), '今日', 0)
+          this.item($r('sys.symbol.doc_plaintext'), '时间表', 1)
+          this.item($r('sys.symbol.more'), '更多', 2)
+        }
+        .width('100%')
+        .height(48)
+        // One alpha-only foreground pass, not six separate offscreen layers.
+        // Keep the selection fill outside it so only glyph pixels invert.
+        .blendMode(BlendMode.DIFFERENCE, BlendApplyType.OFFSCREEN)
       }
       .width(212)
       .height(56)

@@ -22,12 +22,12 @@ import {
   easWebLoginConfigFor,
   EasUserAgent
 } from './EasWebLoginConfig';
-import { EasMfaAction, EasMfaOverlayState, EasWebMfaBridge } from './EasWebMfaBridge';
 import {
   hasRequiredCookiesFor,
   hasWeihaiVpnTicket,
   hostOf,
   isAuthenticationPage,
+  isBenbuEasPage,
   isBlank,
   isJwtsPage,
   isMfaPage,
@@ -39,7 +39,7 @@ import {
   pathOf,
   reauthenticationUrl
 } from './EasWebLoginProbe';
-import { EasApiClient, EasHttpMethod } from '../EasApiClient';
+import { EasApiClient, EasApiResponse, EasHttpMethod } from '../EasApiClient';
 import { EasLegacyTimetableParser } from '../data/EasLegacyTimetableParser';
 
 const TAG: string = 'HitaLogin';
@@ -49,7 +49,6 @@ const DOMAIN: number = 0x0000;
 export enum EasLoginPhase {
   IDLE = 'IDLE',
   LOADING = 'LOADING',
-  MFA_PAGE = 'MFA_PAGE',
   SUCCESS_PROBE = 'SUCCESS_PROBE',
   DONE = 'DONE',
   ERROR = 'ERROR'
@@ -57,7 +56,6 @@ export enum EasLoginPhase {
 
 const COOKIE_RETRY_COUNT_MAX: number = 30;
 const COOKIE_RETRY_DELAY_MS: number = 500;
-const MFA_DETECT_GATE_MS: number = 800;
 const EELAB_NAV_TIMEOUT_MS: number = 10000;
 const EELAB_USER_AGENT: string =
   'Mozilla/5.0 (Linux; Android 16; sdk_gphone64_arm64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.6998.135 Mobile Safari/537.36';
@@ -66,7 +64,6 @@ export class EasWebLoginController {
   // —— UI 回调 ——
   onPhaseChanged: (phase: string, detail: string) => void = () => {};
   onProgress: (percent: number) => void = () => {};
-  onMfaStateChanged: (state: EasMfaOverlayState) => void = () => {};
   onError: (message: string) => void = () => {};
   onFinished: (session: EasSession) => void = () => {};
 
@@ -78,6 +75,7 @@ export class EasWebLoginController {
   private navigationGeneration: number = 0;
   private completing: boolean = false;
   private weihaiExchangeAttempts: number = 0;
+  private benbuVerificationAttempts: number = 0;
 
   // —— 会话状态 ——
   private session: EasSession = new EasSession();
@@ -100,10 +98,6 @@ export class EasWebLoginController {
   private cookiePollingGeneration: number = 0;
   private cookiePollingActive: boolean = false;
 
-  // —— MFA ——
-  private mfaState: EasMfaOverlayState = new EasMfaOverlayState();
-  private lastMfaDetectAt: number = 0;
-
   // —— BENBU 本科 EELAB token 流程 ——
   private navigatingToEelab: boolean = false;
   private eelabTokenFetching: boolean = false;
@@ -122,6 +116,7 @@ export class EasWebLoginController {
     this.finished = false;
     this.cookieRetryCount = 0;
     this.weihaiExchangeAttempts = 0;
+    this.benbuVerificationAttempts = 0;
     this.cookiePollingActive = false;
     this.cookiePollingGeneration++;
     this.shenzhenDesktopUaApplied = false;
@@ -137,11 +132,9 @@ export class EasWebLoginController {
     this.eelabFetchTimer = -1;
     this.collectedEasCookies = new Map<string, string>();
     this.lastUrl = '';
-    this.lastMfaDetectAt = 0;
     this.session = new EasSession();
     this.session.campus = campus;
     this.session.setStudentType(this.cfg.studentType);
-    this.setMfa(new EasMfaOverlayState());
     this.setError('');
     this.setPhase(EasLoginPhase.LOADING, '正在进入 ' + this.cfg.displayName + ' 统一认证…');
     this.setProgress(10);
@@ -211,9 +204,12 @@ export class EasWebLoginController {
     this.navigationGeneration++;
     this.completing = false;
     this.stopCookiePolling();
+    if (this.cfg !== undefined && this.cfg.campus === EasCampus.BENBU) {
+      this.benbuVerificationAttempts = 0;
+    }
     this.shenzhenAutoAdvanceGeneration++;
 
-    if (isAuthenticationPage(url)) {
+    if (isAuthenticationPage(url) || isMfaPage(url)) {
       this.autoOpeningJwts = false;
     }
 
@@ -222,19 +218,16 @@ export class EasWebLoginController {
         return;
       }
     }
-
-    if (this.mfaState.visible) {
-      this.setMfa(new EasMfaOverlayState());
-    }
   }
 
   async notifyPageEnd(url: string): Promise<void> {
-    if (this.finished || this.cfg === undefined) {
+    if (this.finished || this.cfg === undefined || this.completing) {
       return;
     }
     hilog.info(DOMAIN, TAG, 'notifyPageEnd: %{public}s', url);
     this.lastUrl = url;
     const generation: number = this.navigationGeneration;
+    const loginGeneration: number = this.loginGeneration;
     const wc: webview.WebviewController | undefined = this.webController;
     if (wc === undefined) {
       return;
@@ -246,6 +239,15 @@ export class EasWebLoginController {
       return;
     }
 
+    // Authentication, code delivery and verification stay in the school page.
+    // Do not apply desktop EAS helpers or probe old cookies on these forms.
+    if (isAuthenticationPage(url) || isMfaPage(url)) {
+      if (this.cfg.campus === EasCampus.SHENZHEN && isMfaPage(url)) {
+        this.applyMfaViewportFix(wc);
+      }
+      return;
+    }
+
     // 2. 深圳校区专属推进（forceWeb、过期重认证、视口修正、自动点击）
     if (this.cfg.campus === EasCampus.SHENZHEN) {
       // 2.1 aTrust shortcut forceWeb 模式注入（对齐 Android applyShenzhenForceWebMode）
@@ -254,7 +256,7 @@ export class EasWebLoginController {
         pathOf(url).toLowerCase().indexOf('/portal/shortcut.html') >= 0) {
         this.shenzhenForceWebModeApplied = true;
         hilog.info(DOMAIN, TAG, 'Injecting aTrust forceWeb mode...');
-        EasWebMfaBridge.runJs(wc, EasWebLoginController.FORCE_WEB_MODE_SCRIPT).then(() => {
+        EasWebLoginController.runJs(wc, EasWebLoginController.FORCE_WEB_MODE_SCRIPT).then(() => {
           if (!this.finished && generation === this.navigationGeneration) {
             wc.loadUrl(url);
           }
@@ -279,9 +281,7 @@ export class EasWebLoginController {
       }
 
       // 2.3 视口尺寸适配（对齐 Android applyWorkarounds）
-      if (isMfaPage(url)) {
-        this.applyMfaViewportFix(wc);
-      } else if (isTrustPortalPage(url)) {
+      if (isTrustPortalPage(url)) {
         this.applyTrustPortalViewportFix(wc);
       } else if (isShenzhenProxyJwPage(url)) {
         this.applyShenzhenJwDesktopViewportFix(wc);
@@ -300,7 +300,16 @@ export class EasWebLoginController {
     }
 
     const cookies: Map<string, string> = await this.collectCookies(url);
-    if (this.finished || generation !== this.navigationGeneration) {
+    if (this.finished || generation !== this.navigationGeneration || loginGeneration !== this.loginGeneration) {
+      return;
+    }
+    if (this.cfg.campus === EasCampus.BENBU && this.cfg.studentType !== '2' &&
+      isBenbuEasPage(url, this.cfg.studentType)) {
+      if (!isBlank(cookies.get('JSESSIONID'))) {
+        this.verifyBenbuCookies(cookies, url);
+      } else {
+        this.startCookiePolling();
+      }
       return;
     }
     // WebVPN can keep the inner JSESSIONID server-side, outside ArkWeb's cookie jar.
@@ -334,26 +343,16 @@ export class EasWebLoginController {
       this.startCookiePolling();
     } else if (this.cfg.campus === EasCampus.WEIHAI && (url.indexOf('/http/') >= 0 || url.indexOf('jwts') >= 0)) {
       this.startCookiePolling();
-    } else if (isJwtsPage(url, this.cfg.campus, this.cfg.studentType)) {
+    } else if ((this.cfg.campus === EasCampus.BENBU && isBenbuEasPage(url, this.cfg.studentType)) ||
+      isJwtsPage(url, this.cfg.campus, this.cfg.studentType)) {
       hilog.info(DOMAIN, TAG, 'JWTS login page detected, starting cookie polling');
       this.startCookiePolling();
       return;
     }
-
-    // 4. MFA 页面探测
-    const mfaCandidate: boolean =
-      url.toLowerCase().indexOf('authserver') >= 0 ||
-      hostOf(url).indexOf('ids') >= 0 ||
-      isMfaPage(url);
-    if (mfaCandidate) {
-      this.scheduleMfaDetection(wc, url);
-    }
   }
 
   notifyProgress(percent: number): void {
-    if (this.phase !== EasLoginPhase.MFA_PAGE) {
-      this.setProgress(percent);
-    }
+    this.setProgress(percent);
   }
 
   notifyLoadError(message: string): void {
@@ -445,7 +444,7 @@ export class EasWebLoginController {
         allowRole
       );
 
-      EasWebMfaBridge.runJs(wc, script).then((raw: string) => {
+      EasWebLoginController.runJs(wc, script).then((raw: string) => {
         if (this.finished || generation !== this.shenzhenAutoAdvanceGeneration) {
           return;
         }
@@ -507,7 +506,7 @@ export class EasWebLoginController {
         return JSON.stringify({ok:true, height:height});
       })();
     `;
-    EasWebMfaBridge.runJs(wc, script).catch(() => {});
+    EasWebLoginController.runJs(wc, script).catch(() => {});
   }
 
   private applyShenzhenJwDesktopViewportFix(wc: webview.WebviewController): void {
@@ -541,7 +540,7 @@ export class EasWebLoginController {
         return JSON.stringify({ok:true});
       })();
     `;
-    EasWebMfaBridge.runJs(wc, script).catch(() => {});
+    EasWebLoginController.runJs(wc, script).catch(() => {});
   }
 
   private applyMfaViewportFix(wc: webview.WebviewController): void {
@@ -565,7 +564,7 @@ export class EasWebLoginController {
         return JSON.stringify({ok:true, height:height});
       })();
     `;
-    EasWebMfaBridge.runJs(wc, script).catch(() => {});
+    EasWebLoginController.runJs(wc, script).catch(() => {});
   }
 
   // ------------------------------------------------------------------
@@ -624,6 +623,11 @@ export class EasWebLoginController {
       this.handleSuccessPage(url, cookies);
       return;
     }
+    if (this.cfg.campus === EasCampus.BENBU && this.cfg.studentType !== '2' &&
+      isBenbuEasPage(url, this.cfg.studentType) && !isBlank(cookies.get('JSESSIONID'))) {
+      this.verifyBenbuCookies(cookies, url);
+      return;
+    }
 
     // A stale cookie jar is not proof that the current authentication has finished.
     if (hasRequiredCookiesFor(cookies, url, this.cfg.campus, this.cfg.studentType) &&
@@ -670,6 +674,59 @@ export class EasWebLoginController {
 
     this.setPhase(EasLoginPhase.SUCCESS_PROBE, '登录成功，正在采集会话…');
     this.finish(cookies, url, '');
+  }
+
+  private async verifyBenbuCookies(cookies: Map<string, string>, url: string): Promise<void> {
+    if (this.finished || this.completing || this.benbuVerificationAttempts >= 3) {
+      return;
+    }
+    this.completing = true;
+    this.stopCookiePolling();
+    const generation: number = this.loginGeneration;
+    const navigation: number = this.navigationGeneration;
+    const attempt: number = ++this.benbuVerificationAttempts;
+    this.setPhase(EasLoginPhase.SUCCESS_PROBE, '正在验证本部教务会话…');
+    const headers: Map<string, string> = new Map<string, string>();
+    headers.set('Cookie', EasSession.buildCookieHeader(cookies));
+    headers.set('User-Agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15');
+    headers.set('Accept', 'text/html,application/xhtml+xml,*/*');
+    let timer: number = -1;
+    let response: EasApiResponse = new EasApiResponse();
+    try {
+      const timeout: Promise<EasApiResponse> = new Promise<EasApiResponse>((resolve) => {
+        timer = setTimeout(() => resolve(new EasApiResponse()), 10000);
+      });
+      response = await Promise.race([
+        EasApiClient.doHttp(EasCampusUrls.JWTS_BASE + '/kbcx/queryGrkb',
+          EasHttpMethod.GET, headers, '', 10000),
+        timeout
+      ]);
+    } catch (e) {
+      // A failed verification must leave the login page recoverable.
+    } finally {
+      if (timer >= 0) {
+        clearTimeout(timer);
+      }
+    }
+    if (this.finished || generation !== this.loginGeneration || navigation !== this.navigationGeneration) {
+      return;
+    }
+    const loginForm: boolean = /<input\b[^>]*\btype\s*=\s*["']?password\b/i.test(response.body);
+    const terms: number = response.statusCode === 200 && !loginForm ?
+      EasLegacyTimetableParser.parseTerms(response.body).length : 0;
+    hilog.info(DOMAIN, TAG, 'Benbu EAS verification attempt=%{public}d status=%{public}d terms=%{public}d jsession=%{public}s hit=%{public}s',
+      attempt, response.statusCode, terms, String(!isBlank(cookies.get('JSESSIONID'))),
+      String(!isBlank(cookies.get('HIT'))));
+    this.completing = false;
+    if (terms > 0) {
+      this.setError('');
+      this.handleSuccessPage(url, cookies);
+    } else if (attempt < 3) {
+      this.startCookiePolling();
+    } else {
+      this.setPhase(EasLoginPhase.ERROR, '本部教务会话验证未完成');
+      this.setError('本部教务会话尚未就绪，请确认已进入教务后刷新；仍失败可重置登录');
+    }
   }
 
   private canExchangeWeihaiCookies(url: string, cookies: Map<string, string>): boolean {
@@ -874,7 +931,12 @@ export class EasWebLoginController {
         this.finish(this.collectedEasCookies, this.lastUrl, '');
       }
     }, EELAB_NAV_TIMEOUT_MS);
-    wc.loadUrl(EasCampusUrls.EELABINFO_URL + '/api/cas/loginSuccess');
+    try {
+      wc.loadUrl(EasCampusUrls.EELABINFO_URL + '/api/cas/loginSuccess');
+    } catch (e) {
+      this.navigatingToEelab = false;
+      this.finish(this.collectedEasCookies, this.lastUrl, '');
+    }
   }
 
   private async advanceEelabIfReady(): Promise<void> {
@@ -964,94 +1026,6 @@ export class EasWebLoginController {
   }
 
   // ------------------------------------------------------------------
-  // MFA 探测与操作
-  // ------------------------------------------------------------------
-
-  private scheduleMfaDetection(wc: webview.WebviewController, url: string): void {
-    const now: number = Date.now();
-    if (now - this.lastMfaDetectAt < MFA_DETECT_GATE_MS) {
-      return;
-    }
-    this.lastMfaDetectAt = now;
-    const generation: number = this.navigationGeneration;
-    EasWebMfaBridge.detect(wc).then((state: EasMfaOverlayState) => {
-      if (this.finished || generation !== this.navigationGeneration) {
-        return;
-      }
-      if (state.visible) {
-        this.setPhase(EasLoginPhase.MFA_PAGE, '检测到二次验证：' + state.verifyMethod);
-        this.setMfa(state);
-      }
-    }).catch(() => {});
-  }
-
-  async submitMfaInput(code: string): Promise<void> {
-    const wc: webview.WebviewController | undefined = this.webController;
-    if (wc === undefined || !this.mfaState.visible) {
-      return;
-    }
-    const generation: number = this.navigationGeneration;
-    const action: EasMfaAction = await EasWebMfaBridge.submit(wc, code, this.mfaState.inputId);
-    if (this.finished || generation !== this.navigationGeneration) {
-      return;
-    }
-    if (action.ok) {
-      this.setMfa(new EasMfaOverlayState());
-      setTimeout(() => {
-        if (this.webController !== undefined && !this.finished && generation === this.navigationGeneration) {
-          this.scheduleMfaDetection(this.webController, this.lastUrl);
-        }
-      }, 1200);
-    } else {
-      this.setError('提交失败，请重试');
-    }
-  }
-
-  async sendMfaCode(): Promise<void> {
-    const wc: webview.WebviewController | undefined = this.webController;
-    if (wc === undefined) {
-      return;
-    }
-    const generation: number = this.navigationGeneration;
-    const action: EasMfaAction = await EasWebMfaBridge.sendCode(wc);
-    if (this.finished || generation !== this.navigationGeneration) {
-      return;
-    }
-    if (action.ok) {
-      this.setError('验证码已发送');
-    } else {
-      this.setError('发送验证码失败');
-    }
-  }
-
-  async switchMfaMethod(): Promise<void> {
-    const wc: webview.WebviewController | undefined = this.webController;
-    if (wc === undefined) {
-      return;
-    }
-    const generation: number = this.navigationGeneration;
-    const action: EasMfaAction = await EasWebMfaBridge.switchMethod(wc);
-    if (this.finished || generation !== this.navigationGeneration) {
-      return;
-    }
-    if (action.ok) {
-      this.setMfa(new EasMfaOverlayState());
-      setTimeout(() => {
-        if (this.webController !== undefined && !this.finished && generation === this.navigationGeneration) {
-          this.scheduleMfaDetection(this.webController, this.lastUrl);
-        }
-      }, 800);
-    } else {
-      this.setError('无法打开验证方式选择，请在网页内操作');
-    }
-  }
-
-  dismissMfa(): void {
-    this.setMfa(new EasMfaOverlayState());
-    this.setError('');
-  }
-
-  // ------------------------------------------------------------------
   // 状态发布
   // ------------------------------------------------------------------
 
@@ -1064,11 +1038,6 @@ export class EasWebLoginController {
     this.onProgress(Math.max(0, Math.min(100, p)));
   }
 
-  private setMfa(state: EasMfaOverlayState): void {
-    this.mfaState = state;
-    this.onMfaStateChanged(state);
-  }
-
   private setError(message: string): void {
     this.onError(message === undefined || message === null ? '' : message);
   }
@@ -1076,6 +1045,25 @@ export class EasWebLoginController {
   // ------------------------------------------------------------------
   // 静态工具与脚本
   // ------------------------------------------------------------------
+
+  private static async runJs(controller: webview.WebviewController, script: string): Promise<string> {
+    // Portal navigation/viewport helpers must not wait forever on a stalled page.
+    return new Promise<string>((resolve) => {
+      const timer: number = setTimeout(() => resolve(''), 5000);
+      try {
+        controller.runJavaScript(script).then((result: string) => {
+          clearTimeout(timer);
+          resolve(result === undefined || result === null ? '' : result);
+        }).catch(() => {
+          clearTimeout(timer);
+          resolve('');
+        });
+      } catch (e) {
+        clearTimeout(timer);
+        resolve('');
+      }
+    });
+  }
 
   static campusOfCode(code: string): EasCampus {
     if (code === 'BENBU') {

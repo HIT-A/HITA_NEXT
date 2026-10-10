@@ -11,7 +11,8 @@ function setup(apiVersion = 26) {
   const timers = new Map();
   const cache = new Map();
   const state = { now: 10000, syncReads: 0, reads: 0, cookie: '', navigations: [],
-    finished: [], errors: [], mfa: [], requests: 0, exchanges: 0, resetCookies: 0, resetStorage: 0, allReads: 0 };
+    finished: [], errors: [], scripts: [], progress: [], requests: 0, exchanges: 0,
+    resetCookies: 0, resetStorage: 0, allReads: 0 };
   let timerId = 0;
   const setTimer = (callback, delay) => {
     const id = ++timerId;
@@ -23,7 +24,9 @@ function setup(apiVersion = 26) {
   const web = {
     getUserAgent: () => 'test UA', setCustomUserAgent() {},
     loadUrl: url => state.navigations.push(url), refresh() {}, stop() {}, removeCache() {},
-    runJavaScript: async () => 'false', accessBackward: () => false
+    runJavaScript: async script => { state.scripts.push(script); return 'false'; },
+    accessBackward: () => false,
+    getUrl: () => state.currentUrl ?? ''
   };
   const webview = {
     WebviewController: class {
@@ -53,8 +56,13 @@ function setup(apiVersion = 26) {
   const http = {
     RequestMethod: { GET: 'GET' }, HttpDataType: { STRING: 'STRING' },
     createHttp: () => ({
-      request: url => {
+      request: (url, options) => {
         state.requests++;
+        if (url.includes('jwts-hit-edu-cn.ivpn.hit.edu.cn') && url.includes('/kbcx/queryGrkb')) {
+          state.benbuRequests = (state.benbuRequests ?? 0) + 1;
+          state.benbuRequest = { url, options };
+          if (state.benbuResponse) return state.benbuResponse();
+        }
         if (url.includes('/wengine-vpn/cookie')) {
           state.exchanges++;
           return state.httpResponse ? state.httpResponse() :
@@ -101,7 +109,7 @@ function setup(apiVersion = 26) {
   ctrl.attachWeb(web);
   ctrl.onFinished = session => state.finished.push(session);
   ctrl.onError = text => { if (text) state.errors.push(text); };
-  ctrl.onMfaStateChanged = value => state.mfa.push({ ...value });
+  ctrl.onProgress = value => state.progress.push(value);
   async function tick(ms) {
     const end = state.now + ms;
     for (let guard = 0; guard < 1000; guard++) {
@@ -156,38 +164,73 @@ test('cookie probes never use synchronous reads on the UI thread', async () => {
   ctrl.stop();
 });
 
-test('late MFA detection cannot cover the next page after navigation', async () => {
-  const { ctrl, state, urls, page, load } = setup();
-  const { EasWebMfaBridge, EasMfaOverlayState } = load('feature/eas/webLogin/EasWebMfaBridge.ets');
-  let resolve;
-  EasWebMfaBridge.detect = () => new Promise(done => { resolve = done; });
-  ctrl.start('WEIHAI', '1');
-  await page('https://webvpn.hitwh.edu.cn/authserver/reAuthCheck/index');
-  assert.ok(resolve);
-  ctrl.notifyPageBegin(urls.WEIHAI_EAS_PREFIX + '/index');
-  resolve(Object.assign(new EasMfaOverlayState(), { visible: true }));
-  await flush();
-  assert.equal(state.mfa.filter(value => value.visible).length, 0);
-  ctrl.stop();
+test('verification has no native overlay, code field or scripted send/submit bridge', () => {
+  const login = fs.readFileSync(path.join(root, 'feature/eas/webLogin/EasLoginPage.ets'), 'utf8');
+  const controller = fs.readFileSync(path.join(root, 'feature/eas/webLogin/EasWebLoginController.ets'), 'utf8');
+  assert.doesNotMatch(login, /EasMfa|mfaState|mfaInput|mfaBusy|TextInput\s*\(/);
+  assert.doesNotMatch(controller, /EasWebMfaBridge|scheduleMfaDetection|submitMfaInput|sendMfaCode|switchMfaMethod/);
+  assert.equal(fs.existsSync(path.join(root, 'feature/eas/webLogin/EasWebMfaBridge.ets')), false);
+  assert.match(login, /\.javaScriptAccess\(true\)/);
+  assert.match(login, /\.onPageEnd\(/);
+  assert.match(login, /\.onLoadFinished\(/);
 });
 
-test('late MFA actions cannot change the next page or schedule another overlay', async () => {
-  const { ctrl, state, urls, load, tick } = setup();
-  const { EasWebMfaBridge } = load('feature/eas/webLogin/EasWebMfaBridge.ets');
-  ctrl.start('WEIHAI', '1');
-  ctrl.mfaState.visible = true;
-  const pending = [];
-  for (const method of ['submit', 'sendCode', 'switchMethod']) {
-    EasWebMfaBridge[method] = () => new Promise(resolve => pending.push(resolve));
+for (const api of [23, 26]) {
+  for (const campus of ['BENBU', 'WEIHAI', 'SHENZHEN']) {
+    test(`${campus} API ${api}: verification stays in the webpage and its successful redirect completes login`, async () => {
+      const { ctrl, state, urls, page, tick } = setup(api);
+      const authBase = campus === 'BENBU' ? 'https://ids.hit.edu.cn' :
+        campus === 'WEIHAI' ? 'https://webvpn.hitwh.edu.cn' : 'https://authserver.hitsz.edu.cn';
+      const easBase = campus === 'BENBU' ? urls.JWTS_BASE :
+        campus === 'WEIHAI' ? urls.WEIHAI_EAS_PREFIX : urls.SHENZHEN_PROXY_BASE;
+      state.cookie = 'JSESSIONID=stale; route=old-route; HIT=old; wengine_vpn_ticket_test=old';
+      ctrl.start(campus, '1');
+      for (const base of [authBase, easBase]) {
+        await page(base + '/authserver/login');
+        await page(base + '/authserver/reAuthCheck/index');
+        // A failed code / changed verification method can reload the same page.
+        await page(base + '/authserver/reAuthCheck/index');
+      }
+      ctrl.notifyProgress(100);
+      await tick(65000);
+      assert.equal(state.finished.length, 0);
+      assert.equal(state.requests, 0);
+      assert.equal(state.reads, 0);
+      assert.deepEqual(state.navigations, []);
+      assert.deepEqual(state.errors, []);
+      assert.equal(state.progress.at(-1), 100);
+      // Shenzhen keeps only its existing mobile viewport fix, not form interception.
+      for (const script of state.scripts) {
+        assert.match(script, /hita-mfa-viewport-fix/);
+        assert.doesNotMatch(script, /\.click\(|\.value\s*=|reAuthParams|querySelector.*input/);
+      }
+
+      state.cookie = 'JSESSIONID=current; route=current-route; HIT=gateway; wengine_vpn_ticket_test=ticket';
+      const destination = campus === 'BENBU' ? urls.BENBU_JWTS :
+        campus === 'WEIHAI' ? urls.WEIHAI_JWTS : urls.SHENZHEN_DIRECT_BASE + '/student_index';
+      await page(destination);
+      await tick(10001);
+      assert.equal(state.finished.length, 1);
+      assert.equal(state.finished[0].isLogin(), true);
+      assert.deepEqual(state.errors, []);
+      ctrl.stop();
+    });
   }
-  const actions = [ctrl.submitMfaInput('123456'), ctrl.sendMfaCode(), ctrl.switchMfaMethod()];
-  ctrl.notifyPageBegin(urls.WEIHAI_EAS_PREFIX + '/index');
-  pending.forEach(resolve => resolve({ ok: true }));
-  await Promise.all(actions);
-  await tick(2000);
-  assert.equal(state.errors.length, 0);
-  assert.equal(state.mfa.filter(value => value.visible).length, 0);
-  ctrl.stop();
+}
+
+test('loading a verification page dismisses the loading cover without a second native prompt', async () => {
+  const h = setup();
+  const page = loginPage(h);
+  const url = 'https://webvpn.hitwh.edu.cn/authserver/reAuthCheck/index';
+  page.watchPageLoad(url);
+  assert.equal(page.webReady, false);
+  page.pageEnded(url);
+  await h.tick(20000);
+  assert.equal(page.webReady, true);
+  assert.equal(page.errorText, '');
+  assert.equal(page.pageLoadTimer, -1);
+  assert.equal(h.state.scripts.length, 0);
+  page.aboutToDisappear();
 });
 
 test('authentication/portal redirect loops stop with a recovery message', async () => {
@@ -277,9 +320,8 @@ test('never-settling cookie and JavaScript operations time out asynchronously', 
   state.fetchCookie = () => new Promise(() => {});
   web.runJavaScript = () => new Promise(() => {});
   const { EasWebLoginController } = load('feature/eas/webLogin/EasWebLoginController.ets');
-  const { EasWebMfaBridge } = load('feature/eas/webLogin/EasWebMfaBridge.ets');
   const cookie = EasWebLoginController.tryFetchCookie('https://webvpn.hitwh.edu.cn/');
-  const script = EasWebMfaBridge.runJs(web, 'test');
+  const script = EasWebLoginController.runJs(web, 'test');
   await tick(5000);
   assert.equal(await cookie, '');
   assert.equal(await script, '');
@@ -456,4 +498,190 @@ test('API 23 supplement stays on the active first-party host and times out witho
   assert.equal(h.timers.size, 0);
   h.state.fetchAllCookies = async () => [storedCookie()];
   assert.equal(await EasWebLoginController.tryFetchCookieWithPartitioned('https://jwts.hit.edu.cn/'), 'sid=normal; JSESSIONID=session');
+});
+
+test('Benbu loginCAS can finish after the timetable endpoint verifies the current session', async () => {
+  for (const api of [23, 26]) {
+    const h = setup(api);
+    h.state.cookie = 'JSESSIONID=current; HIT=gateway';
+    h.ctrl.start('BENBU', '1');
+    await h.page(h.urls.BENBU_JWTS);
+    assert.equal(h.state.benbuRequests, 1);
+    assert.ok(h.state.navigations.some(url => url.startsWith(h.urls.EELABINFO_URL)));
+    await h.tick(10001);
+    assert.equal(h.state.finished.length, 1);
+    assert.equal(h.state.finished[0].webCookies.get('JSESSIONID'), 'current');
+    assert.equal(h.state.finished[0].getStudentType(), '1');
+  }
+});
+
+test('Benbu delayed cookies on a non-login EAS page are retried even without auto-open', async () => {
+  const h = setup();
+  h.ctrl.start('BENBU', '1');
+  await h.page(h.urls.JWTS_BASE + '/xs/main');
+  h.state.cookie = 'JSESSIONID=late; HIT=gateway';
+  await h.tick(600);
+  assert.equal(h.state.benbuRequests, 1);
+  await h.tick(10001);
+  assert.equal(h.state.finished.length, 1);
+});
+
+test('Benbu verification can use a path-scoped JSESSIONID without a readable HIT cookie', async () => {
+  const h = setup(23);
+  h.state.fetchCookie = url => Promise.resolve(url.endsWith('/kbcx/queryGrkb') ? 'JSESSIONID=path-session' : '');
+  h.ctrl.start('BENBU', '1');
+  await h.page(h.urls.JWTS_BASE + '/index');
+  assert.equal(h.state.benbuRequests, 1);
+  assert.match(h.state.benbuRequest.options.header.Cookie, /JSESSIONID=path-session/);
+  await h.tick(10001);
+  assert.equal(h.state.finished.length, 1);
+});
+
+test('Benbu gateway or stale cookies without authenticated timetable data cannot finish', async () => {
+  for (const response of [
+    { responseCode: 200, result: '<html>统一认证登录</html>' },
+    { responseCode: 401, result: '<select name="xnxq"><option value="2026-20271">秋季</option></select>' },
+    { responseCode: 200, result: '<form><input type="password"><select name="xnxq"><option value="2026-20271">秋季</option></select></form>' }
+  ]) {
+    const h = setup();
+    h.state.cookie = 'JSESSIONID=stale; HIT=stale';
+    h.state.benbuResponse = async () => response;
+    h.ctrl.start('BENBU', '1');
+    await h.page(h.urls.JWTS_BASE + '/index');
+    await h.tick(20000);
+    assert.equal(h.state.finished.length, 0);
+    assert.equal(h.state.navigations.length, 0);
+    assert.equal(h.state.benbuRequests, 3);
+    assert.ok(h.state.errors.some(error => error.includes('本部教务')));
+  }
+});
+
+test('Benbu duplicate page completion does not run concurrent verification', async () => {
+  const h = setup();
+  let release;
+  h.state.cookie = 'JSESSIONID=current; HIT=gateway';
+  h.state.benbuResponse = () => new Promise(resolve => { release = resolve; });
+  h.ctrl.start('BENBU', '1');
+  await h.page(h.urls.BENBU_JWTS);
+  h.ctrl.notifyPageEnd(h.urls.BENBU_JWTS);
+  await flush();
+  assert.equal(h.state.benbuRequests, 1);
+  release({ responseCode: 200, result: '<select name="pageXnxq"><option value="2026-20271">秋季</option></select>' });
+  await flush();
+  await h.tick(10001);
+  assert.equal(h.state.finished.length, 1);
+});
+
+test('Benbu verification timeout stays bounded and late results cannot finish a restarted login', async () => {
+  const h = setup();
+  let release;
+  h.state.cookie = 'JSESSIONID=current; HIT=gateway';
+  h.state.benbuResponse = () => new Promise(resolve => { release = resolve; });
+  h.ctrl.start('BENBU', '1');
+  await h.page(h.urls.BENBU_JWTS);
+  await h.tick(32000);
+  assert.equal(h.state.finished.length, 0);
+  assert.equal(h.state.benbuRequests, 3);
+  assert.ok(h.state.errors.length > 0);
+  h.ctrl.stop();
+  h.ctrl.start('BENBU', '1');
+  release({ responseCode: 200, result: '<select name="xnxq"><option value="2026-20271">秋季</option></select>' });
+  await flush();
+  assert.equal(h.state.finished.length, 0);
+  assert.equal(h.state.navigations.length, 0);
+  h.ctrl.stop();
+});
+
+test('Benbu authentication, unrelated hosts and graduate pages never use undergraduate verification', async () => {
+  for (const [type, url] of [
+    ['1', 'https://ids.hit.edu.cn/authserver/login'],
+    ['1', 'http://jwts-hit-edu-cn.ivpn.hit.edu.cn:1080/authserver/reAuthCheck/'],
+    ['1', 'https://jwts-hit-edu-cn.ivpn.hit.edu.cn.evil.example/index'],
+    ['1', 'https://unrelated.hit.edu.cn/index'],
+    ['2', 'http://yjsgl-hit-edu-cn.ivpn.hit.edu.cn:1080/xs/index']
+  ]) {
+    const h = setup();
+    h.state.cookie = 'JSESSIONID=stale; HIT=stale';
+    h.ctrl.start('BENBU', type);
+    await h.page(url);
+    await h.tick(16000);
+    assert.equal(h.state.benbuRequests ?? 0, 0, url);
+    assert.equal(h.state.finished.length, 0, url);
+    h.ctrl.stop();
+  }
+});
+
+test('Benbu main-frame completion accepts a verified current URL after in-page navigation only', async () => {
+  const h = setup();
+  const { EasLoginPage } = h.load('feature/eas/webLogin/EasLoginPage.ets');
+  const page = new EasLoginPage();
+  page.campusCode = 'BENBU';
+  page.aboutToAppear();
+  const completed = [];
+  page.loginController.notifyPageEnd = url => completed.push(url);
+  page.watchPageLoad(h.urls.BENBU_JWTS);
+  h.state.currentUrl = h.urls.JWTS_BASE + '/index#/home';
+  page.pageLoadFinished(h.state.currentUrl);
+  assert.deepEqual(completed, [h.state.currentUrl]);
+  assert.equal(page.webReady, true);
+  page.pageLoadFinished(h.urls.BENBU_JWTS);
+  assert.equal(completed.length, 1);
+  page.aboutToDisappear();
+  page.pageLoadFinished(h.state.currentUrl);
+  assert.equal(completed.length, 1);
+});
+
+test('Benbu login resumes after a failed probe when a new authenticated page arrives', async () => {
+  const h = setup();
+  h.state.cookie = 'JSESSIONID=stale; HIT=gateway';
+  h.state.benbuResponse = async () => ({ responseCode: 200, result: 'login required' });
+  h.ctrl.start('BENBU', '1');
+  await h.page(h.urls.BENBU_JWTS);
+  await h.tick(2000);
+  assert.equal(h.state.benbuRequests, 3);
+  h.state.cookie = 'JSESSIONID=new; HIT=gateway';
+  h.state.benbuResponse = async () => ({
+    responseCode: 200, result: '<select name="xnxq"><option value="2026-20271">秋季</option></select>'
+  });
+  await h.page(h.urls.JWTS_BASE + '/index');
+  await h.tick(10001);
+  assert.equal(h.state.finished.length, 1);
+  assert.equal(h.state.finished[0].webCookies.get('JSESSIONID'), 'new');
+});
+
+test('Benbu completed verification cannot finish after navigation back to CAS', async () => {
+  const h = setup();
+  let release;
+  h.state.cookie = 'JSESSIONID=current; HIT=gateway';
+  h.state.benbuResponse = () => new Promise(resolve => { release = resolve; });
+  h.ctrl.start('BENBU', '1');
+  await h.page(h.urls.BENBU_JWTS);
+  await h.page('https://ids.hit.edu.cn/authserver/login');
+  release({ responseCode: 200, result: '<select name="xnxq"><option value="2026-20271">秋季</option></select>' });
+  await h.tick(12000);
+  assert.equal(h.state.finished.length, 0);
+  assert.equal(h.state.navigations.length, 0);
+  h.ctrl.stop();
+});
+
+test('Benbu graduate final page retries late cookies without entering undergraduate token flow', async () => {
+  const h = setup();
+  h.ctrl.start('BENBU', '2');
+  await h.page(h.urls.GRADUATE_BASE + '/xs/index');
+  h.state.cookie = 'JSESSIONID=graduate; sdp_user_token=graduate-token';
+  await h.tick(600);
+  assert.equal(h.state.finished.length, 1);
+  assert.equal(h.state.finished[0].getStudentType(), '2');
+  assert.equal(h.state.benbuRequests ?? 0, 0);
+  assert.equal(h.state.navigations.length, 0);
+});
+
+test('Benbu successful EAS login survives optional laboratory navigation errors', async () => {
+  const h = setup();
+  h.state.cookie = 'JSESSIONID=current; HIT=gateway';
+  h.web.loadUrl = () => { throw Error('optional laboratory site failed'); };
+  h.ctrl.start('BENBU', '1');
+  await h.page(h.urls.BENBU_JWTS);
+  assert.equal(h.state.finished.length, 1);
+  assert.equal(h.state.finished[0].electronicExpToken, '');
 });

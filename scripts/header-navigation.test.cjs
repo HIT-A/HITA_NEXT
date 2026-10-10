@@ -17,7 +17,7 @@ test('all more pages use the shared navigation button, not text glyphs', () => {
     assert.doesNotMatch(source, /Text\(['"][<‹×]['"]\)/, page);
   }
   const home = read('pages/Home.ets');
-  assert.equal((home.match(/HeaderBackButton\(\{/g) || []).length, 2);
+  assert.equal((home.match(/HeaderBackButton\(\{/g) || []).length, 1);
   assert.doesNotMatch(home, /sheetCloseButton/);
 });
 
@@ -41,18 +41,36 @@ test('page and sheet header back buttons stay on the leading side', () => {
     assert.match(header, /Row\(\) \{\s*HeaderBackButton\(\{/, page);
   }
   const home = read('pages/Home.ets');
-  for (const name of ['courseDetailSheet(event: EasEventItem)', 'sessionSheet()']) {
-    const header = home.slice(home.indexOf('  ' + name));
-    assert.match(header, /Column\(\) \{\s*Row\(\) \{\s*HeaderBackButton\(\{/);
-  }
+  const session = home.slice(home.indexOf('  sessionSheet()'));
+  assert.match(session, /Column\(\) \{\s*Row\(\) \{\s*HeaderBackButton\(\{/);
   const login = read('feature/eas/webLogin/EasLoginPage.ets');
   assert.match(login, /Row\(\{ space: 8 \}\) \{\s*HeaderBackButton\(\{/);
+});
+
+test('timetable detail uses an aligned color circle instead of the old back button and stripe', () => {
+  const home = read('pages/Home.ets');
+  const header = home.slice(home.indexOf('  courseDetailSheet('), home.indexOf('  courseDetailRow('));
+  const row = home.slice(home.indexOf('  courseDetailRow('), home.indexOf('  private static canvasColorCss('));
+  assert.match(home, /const COURSE_DETAIL_ICON_SIZE: number = 38;/);
+  assert.match(home, /const COURSE_DETAIL_TEXT_GAP: number = 12;/);
+  assert.match(header, /Row\(\) \{\s*Circle\(\)/);
+  assert.doesNotMatch(header, /HeaderBackButton|\.width\(7\)|\.height\(50\)/);
+  for (const section of [header, row]) {
+    assert.match(section, /\.width\(COURSE_DETAIL_ICON_SIZE\)/);
+    assert.match(section, /\.height\(COURSE_DETAIL_ICON_SIZE\)/);
+    assert.match(section, /\.flexShrink\(0\)/);
+    assert.match(section, /\.margin\(\{ left: COURSE_DETAIL_TEXT_GAP \}\)/);
+    assert.match(section, /\.alignItems\(HorizontalAlign\.Start\)/);
+  }
+  assert.match(header, /CirclePaintModifier\(Home\.canvasColorCss\(timetableBlockColor\(event\.color\)\)\)/);
+  assert.match(header, /event\.type === EasEventType\.EXAM \? '考试详情' : '课程详情'/);
+  assert.match(home, /\.bindSheet\(\$\$this\.activeSheetVisible,[\s\S]*?dragBar: true/);
 });
 
 test('login uses one app-return button and no overlapping system close control', () => {
   const home = read('pages/Home.ets');
   const source = read('feature/eas/webLogin/EasLoginPage.ets');
-  assert.match(home, /\.bindSheet\(this\.activeSheetVisible,/);
+  assert.match(home, /\.bindSheet\(\$\$this\.activeSheetVisible,/);
   assert.match(home, /showClose: false/);
   assert.doesNotMatch(home, /showClose: this\.loginSheetOpen/);
   assert.equal((source.match(/HeaderBackButton\(\{/g) || []).length, 1);
@@ -66,7 +84,7 @@ test('login uses one app-return button and no overlapping system close control',
 test('sheet dismissal preserves the active content until onDisappear', () => {
   const home = read('pages/Home.ets');
   const login = home.slice(home.indexOf('  activeSheet()'), home.indexOf('  pillNavigation()'));
-  assert.match(login, /onCancel: \(\) => \{\s*this\.activeSheetVisible = false;/);
+  assert.match(login, /onCancel: \(\) => \{\s*this\.closeActiveSheet\(\);/);
   assert.doesNotMatch(login, /this\.loginSheetOpen = false/);
   assert.match(home, /onDisappear: \(\) => \{[\s\S]*?this\.loginSheetOpen = false;[\s\S]*?this\.selectedCourse = undefined;/);
 });

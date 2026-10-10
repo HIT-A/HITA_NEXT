@@ -5,6 +5,7 @@
  * week ranges, and carry shared teacher/location information across elements.
  */
 import { EasCourseItem, EasTermItem } from '../model/EasModels';
+import { normalizeHtmlSpaces } from '../../../common/util/HtmlSpaces';
 
 /** 传统 HTML 课表中可能附带的课程分类元数据。 */
 class LegacyCourseMetadata {
@@ -98,7 +99,7 @@ export class EasLegacyTimetableParser {
         .replace(/\u00a0/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
-      if (part.length > 0 && part !== '&nbsp;') {
+      if (part.length > 0) {
         parts.push(part);
       }
     }
@@ -329,7 +330,7 @@ export class EasLegacyTimetableParser {
   }
 
   private static cleanClassroom(raw: string): string {
-    return raw.replace(/上课形式\s*\[[^\]]*\]/g, '')
+    return normalizeHtmlSpaces(raw).replace(/上课形式\s*\[[^\]]*\]/g, '')
       .replace(/第\s*\d+\s*[-至,，]\s*\d+\s*节/g, '')
       .replace(/^[\/／\s]+/, '').trim();
   }
@@ -481,7 +482,7 @@ export class EasLegacyTimetableParser {
   }
 
   private static decodeHtml(raw: string): string {
-    return raw.replace(/&nbsp;|&#160;/gi, ' ')
+    return normalizeHtmlSpaces(raw)
       .replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
       .replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'");
   }

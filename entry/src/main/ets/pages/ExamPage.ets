@@ -9,7 +9,7 @@ import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
-import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
+import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTimetable } from '../common/model/timetable/TimetableModels';
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
@@ -42,6 +42,7 @@ struct ExamPage {
   @State hasSession: boolean = false;
   @State queryMsg: string = '';
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
+  @StorageProp('hita_nav_bar_vp') navBarInset: number = NAV_BAR_INSET_FALLBACK;
   /** Keep the editor identity until its dismissal animation finishes. */
   @State sheetVisible: boolean = false;
   /** 0=closed, 1=exam detail, 2=editor, 3=remote exam detail. */
@@ -344,34 +345,28 @@ struct ExamPage {
             .fontSize(16)
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.hita_text_1a1a1a'))
+            .width('100%')
+            .textAlign(TextAlign.Center)
           Text(this.hasSession ? '点击右上角“查询”从教务同步，或手动添加考试' : '登录教务后可查询考试，也可手动添加')
             .fontSize(13)
             .fontColor($r('app.color.hita_text_secondary_808080'))
+            .width('100%')
             .textAlign(TextAlign.Center)
             .lineHeight(20)
-            .margin({ top: 8, bottom: 20 })
+            .margin({ top: 8 })
           if (this.queryMsg.length > 0) {
             Text(this.queryMsg)
               .fontSize(12)
               .fontColor($r('app.color.hita_error'))
-              .margin({ bottom: 12 })
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .margin({ top: 12 })
           }
-          Text('添加考试')
-            .fontSize(15)
-            .fontWeight(FontWeight.Medium)
-            .fontColor('#FFFFFF')
-            .height(44)
-            .padding({ left: 32, right: 32 })
-            .backgroundColor($r('app.color.hita_primary_fill'))
-            .borderRadius(22)
-            .textAlign(TextAlign.Center)
-            .onClick(() => {
-              this.openAddExam();
-            })
         }
         .width('100%')
-        .margin({ top: HEADER_HEIGHT + 40 })
-        .padding({ left: 32, right: 32 })
+        .height('100%')
+        .padding({ left: 32, right: 32, top: HEADER_HEIGHT, bottom: this.navBarInset })
+        .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
       } else {
         List({ space: 8, scroller: this.pageScroller }) {

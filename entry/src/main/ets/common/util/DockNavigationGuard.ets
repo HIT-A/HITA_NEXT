@@ -42,6 +42,13 @@ export class DockNavigationGuard {
       this.pressed = false;
       return;
     }
+    if (!this.dock || this.rejected) {
+      // Content scrolling and already-cancelled drags need no native history copy.
+      if (event.type === TouchType.Up) {
+        this.pressed = false;
+      }
+      return;
+    }
     if (event.touches.length > 1) {
       this.rejected = true;
     }

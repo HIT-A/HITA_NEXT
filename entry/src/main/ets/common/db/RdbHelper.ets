@@ -21,6 +21,7 @@ import {
   EasTimePeriodInDay,
   EasTimetable
 } from '../model/timetable/TimetableModels';
+import { normalizeHtmlSpaces } from '../util/HtmlSpaces';
 
 // The first prototype shipped a different schema under this name.  Use a
 // versioned store so an upgrade cannot keep an incompatible old table layout.
@@ -458,6 +459,10 @@ export class RdbHelper {
     e.type = RdbHelper.eventTypeOf(col('type').str());
     e.name = col('name').str();
     e.place = col('place').str();
+    if (e.type === EasEventType.CLASS) {
+      // Also clean placeholders in courses imported by earlier app versions.
+      e.place = normalizeHtmlSpaces(e.place);
+    }
     e.teacher = col('teacher').str();
     e.subjectId = col('subjectId').str();
     e.timetableId = col('timetableId').str();
