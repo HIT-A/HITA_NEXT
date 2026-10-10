@@ -151,6 +151,8 @@ node scripts/static-checks.cjs
 
 使用和验证说明：
 
+- [0.2.1 版本说明](docs/release-0.2.1.md)
+
 - [使用说明](docs/usage.md)
 - [构建与设备验证](docs/DEVICE-RUNBOOK.md)
 - [应用功能边界与回归检查](docs/production-surface.md)
