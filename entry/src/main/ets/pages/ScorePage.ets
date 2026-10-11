@@ -5,6 +5,8 @@
  */
 import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
+import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
+import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
@@ -259,37 +261,40 @@ struct ScorePage {
         headerHeight: HEADER_HEIGHT
       })
 
-      Row() {
-        HeaderBackButton({
-          onBack: () => this.getUIContext().getRouter().back()
-        })
-          .margin({ right: 12 })
-        Text('成绩查询')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.hita_text_1a1a1a'))
-          .layoutWeight(1)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-        Text('查询')
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.hita_primary_3390ec'))
-          .height(32)
-          .padding({ left: 12, right: 12 })
-          .borderRadius(16)
-          .backgroundColor($r('app.color.hita_selected_ebf4fc'))
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            this.queryReal();
+      ImmersiveHeader({ barHeight: HEADER_HEIGHT }) {
+        Row() {
+          HeaderBackButton({
+            onBack: () => this.getUIContext().getRouter().back()
           })
+            .margin({ right: 12 })
+          Text('成绩查询')
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.hita_text_1a1a1a'))
+            .layoutWeight(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+          Text('查询')
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(CompatibleMaterialModifier.foreground($r('app.color.hita_primary_3390ec')))
+            .height(32)
+            .padding({ left: 12, right: 12 })
+            .borderRadius(16)
+            .backgroundColor($r('app.color.hita_selected_ebf4fc'))
+            .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_selected_ebf4fc')))
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.queryReal();
+            })
+        }
+        .width('100%')
+        .height(HEADER_HEIGHT)
+        .padding({ left: 16, right: 16 })
+        .alignItems(VerticalAlign.Center)
+        .hitTestBehavior(HitTestMode.Transparent)
       }
-      .width('100%')
-      .height(HEADER_HEIGHT)
-      .padding({ left: 16, right: 16 })
-      .alignItems(VerticalAlign.Center)
-      .hitTestBehavior(HitTestMode.Transparent)
     }
     .width('100%')
     .height('100%')

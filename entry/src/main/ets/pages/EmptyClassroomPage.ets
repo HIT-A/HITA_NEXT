@@ -1,5 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
+import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
+import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
 import { STATUS_BAR_INSET_FALLBACK, NAV_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasTimePeriodInDay, EasTimetable } from '../common/model/timetable/TimetableModels';
@@ -324,21 +326,25 @@ struct EmptyClassroomPage {
 
   build() {
     Column({ space: 8 }) {
-      Row({ space: 12 }) {
-        HeaderBackButton({ onBack: () => this.getUIContext().getRouter().back() })
-        Text('空教室查询').fontSize(20).fontWeight(FontWeight.Bold).fontColor(TEXT).layoutWeight(1)
-          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        Button({ type: ButtonType.Circle }) {
-          if (this.loading || this.querying) {
-            LoadingProgress().width(22).height(22).color(PRIMARY)
-          } else {
-            SymbolGlyph($r('sys.symbol.arrow_clockwise')).fontSize(22).fontColor([PRIMARY])
+      ImmersiveHeader({ barHeight: 60 }) {
+        Row({ space: 12 }) {
+          HeaderBackButton({ onBack: () => this.getUIContext().getRouter().back() })
+          Text('空教室查询').fontSize(20).fontWeight(FontWeight.Bold).fontColor(TEXT).layoutWeight(1)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Button({ type: ButtonType.Circle }) {
+            if (this.loading || this.querying) {
+              LoadingProgress().width(22).height(22).color(PRIMARY)
+            } else {
+              SymbolGlyph($r('sys.symbol.arrow_clockwise')).fontSize(22)
+                .fontColor([CompatibleMaterialModifier.foreground(PRIMARY)])
+            }
           }
-        }
-        .width(44).height(44).backgroundColor(Color.Transparent)
-        .accessibilityText('刷新空教室').enabled(!this.loading && !this.querying)
-        .onClick(async () => { await this.loadOptions(); })
-      }.width('100%').height(60).padding({ left: 4, right: 4 })
+          .width(44).height(44).backgroundColor(Color.Transparent)
+          .attributeModifier(new CompatibleMaterialModifier(Color.Transparent))
+          .accessibilityText('刷新空教室').enabled(!this.loading && !this.querying)
+          .onClick(async () => { await this.loadOptions(); })
+        }.width('100%').height(60).padding({ left: 4, right: 4 })
+      }
       Row({ space: 4 }) {
         this.selector(0, '选择教学楼', FlexAlign.Start, () => this.chooseBuilding())
         this.selector(1, '选择学期', FlexAlign.Center, () => this.chooseTerm())

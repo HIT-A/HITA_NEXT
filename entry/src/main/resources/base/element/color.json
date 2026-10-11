@@ -1,6 +1,18 @@
 {
   "color": [
     {
+      "name": "hita_immersive_sheet_card",
+      "value": "#8CFFFFFF"
+    },
+    {
+      "name": "hita_immersive_segment_selected",
+      "value": "#1F000000"
+    },
+    {
+      "name": "hita_immersive_hero_tint",
+      "value": "#D92365B2"
+    },
+    {
       "name": "hita_page",
       "value": "#F4F7FC"
     },

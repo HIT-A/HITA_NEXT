@@ -1,7 +1,10 @@
 /** Android HITA-style timetable library. */
 import { common } from '@kit.AbilityKit';
+import { deviceInfo } from '@kit.BasicServicesKit';
 import { CirclePaintModifier } from '../common/theme/CirclePaintModifier';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
+import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
+import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
 import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
@@ -390,50 +393,70 @@ struct TimetableManagerPage {
         headerHeight: HEADER_HEIGHT
       })
 
-      Row() {
-        HeaderBackButton({
-          onBack: () => {
-            if (this.selectionMode) {
-              this.selectedIds = [];
-              this.selectionMode = false;
-            } else {
-              this.getUIContext().getRouter().back();
+      ImmersiveHeader({ barHeight: HEADER_HEIGHT }) {
+        Row() {
+          HeaderBackButton({
+            onBack: () => {
+              if (this.selectionMode) {
+                this.selectedIds = [];
+                this.selectionMode = false;
+              } else {
+                this.getUIContext().getRouter().back();
+              }
             }
-          }
-        })
-          .margin({ right: 12 });
-        Text(this.selectionMode ? '已选择 ' + this.selectedIds.length.toString() + ' 项' : '课表管理')
-          .fontSize(22)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.hita_text_202633'))
-          .layoutWeight(1)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        if (this.selectionMode) {
-          Text('删除')
-            .fontSize(15)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(HitaColors.error)
-            .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-            .onClick(() => {
-              this.confirmDelete();
-            })
-        } else {
-          SymbolGlyph($r('sys.symbol.doc_plaintext'))
-            .fontSize(20)
-            .fontColor([HitaColors.primary])
+          })
+            .margin({ right: 12 });
+          Text(this.selectionMode ? '已选择 ' + this.selectedIds.length.toString() + ' 项' : '课表管理')
+            .fontSize(22)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.hita_text_202633'))
+            .layoutWeight(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (this.selectionMode) {
+            Text('删除')
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(HitaColors.error)
+              .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+              .borderRadius(22)
+              .attributeModifier(new CompatibleMaterialModifier(Color.Transparent))
+              .onClick(() => {
+                this.confirmDelete();
+              })
+          } else if (deviceInfo.apiAvailable('26.0.0')) {
+            Button({ type: ButtonType.Circle }) {
+              SymbolGlyph($r('sys.symbol.doc_plaintext'))
+                .fontSize(20)
+                .fontColor([CompatibleMaterialModifier.foreground(HitaColors.primary)]);
+            }
             .width(44)
             .height(44)
+            .padding(0)
+            .flexShrink(0)
+            .backgroundColor(Color.Transparent)
+            .attributeModifier(new CompatibleMaterialModifier(Color.Transparent))
+            .accessibilityText('导出课表')
             .onClick(() => {
               this.showExportMenu();
             });
+          } else {
+            SymbolGlyph($r('sys.symbol.doc_plaintext'))
+              .fontSize(20)
+              .fontColor([HitaColors.primary])
+              .width(44)
+              .height(44)
+              .onClick(() => {
+                this.showExportMenu();
+              });
+          }
         }
+        .width('100%')
+        .height(HEADER_HEIGHT)
+        .padding({ left: 16, right: 16 })
+        .alignItems(VerticalAlign.Center)
+        .hitTestBehavior(HitTestMode.Transparent)
       }
-      .width('100%')
-      .height(HEADER_HEIGHT)
-      .padding({ left: 16, right: 16 })
-      .alignItems(VerticalAlign.Center)
-      .hitTestBehavior(HitTestMode.Transparent)
     }
     .width('100%')
     .height('100%')

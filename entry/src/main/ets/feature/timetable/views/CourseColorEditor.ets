@@ -1,10 +1,14 @@
 import { TimetableTheme } from '../../../common/theme/TimetableTheme';
 import { CirclePaintModifier } from '../../../common/theme/CirclePaintModifier';
+import { CompatibleMaterialModifier } from '../../../common/theme/CompatibleMaterialModifier';
+import { CompatibleSheetMaterial } from '../../../common/theme/CompatibleSheetMaterial';
+import { ImmersiveHeader } from '../../../common/components/ImmersiveHeader';
 import { CourseColorModel } from './CourseColorModel';
 import { timetableBlockColor } from './TimetableWeekDraw';
 
 @Component
 export struct CourseColorEditor {
+  @Prop immersiveControls: boolean = false;
   @Prop previewDark: boolean = false;
   @Prop previewWallpaper: boolean = false;
   @Prop textMode: boolean = false;
@@ -144,11 +148,30 @@ export struct CourseColorEditor {
       if (this.error.length > 0) {
         Text(this.error).fontColor($r('app.color.hita_error_8a2e42')).fontSize(13);
       }
-      Row({ space: 12 }) {
-        Button('取消').layoutWeight(1).enabled(!this.saving).onClick(() => this.onCancel());
-        Button(this.saving ? '保存中…' : '保存').layoutWeight(1)
-          .enabled(!this.saving).onClick(() => this.save());
-      }.width('100%').margin({ top: 12 });
+      if (this.immersiveControls && CompatibleSheetMaterial.isEnabled()) {
+        ImmersiveHeader({ barHeight: 56 }) {
+          Row({ space: 12 }) {
+            Button('取消', { type: ButtonType.Capsule })
+              .width(0).layoutWeight(1).height(44).fontSize(16)
+              .fontColor(CompatibleMaterialModifier.foreground($r('app.color.hita_text')))
+              .backgroundColor($r('app.color.hita_selected'))
+              .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_selected')))
+              .enabled(!this.saving).onClick(() => this.onCancel());
+            Button(this.saving ? '保存中…' : '保存', { type: ButtonType.Capsule })
+              .width(0).layoutWeight(1).height(44).fontSize(16).fontWeight(FontWeight.Medium)
+              .fontColor(CompatibleMaterialModifier.foreground($r('app.color.hita_text')))
+              .backgroundColor($r('app.color.hita_selected'))
+              .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_selected')))
+              .enabled(!this.saving).onClick(() => this.save());
+          }.width('100%').padding({ top: 12 });
+        }
+      } else {
+        Row({ space: 12 }) {
+          Button('取消').layoutWeight(1).enabled(!this.saving).onClick(() => this.onCancel());
+          Button(this.saving ? '保存中…' : '保存').layoutWeight(1)
+            .enabled(!this.saving).onClick(() => this.save());
+        }.width('100%').margin({ top: 12 });
+      }
     }.width('100%');
   }
 }

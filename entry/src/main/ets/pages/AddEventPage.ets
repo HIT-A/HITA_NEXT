@@ -6,6 +6,7 @@
  */
 import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
+import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
 import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
@@ -394,47 +395,51 @@ export struct EventEditorForm {
   build() {
     Column() {
       if (this.sheetMode) {
-        Row() {
-          HeaderBackButton({
-            onBack: () => this.onCancel()
-          })
-            .margin({ right: 12 })
-          Column() {
-            Text(this.sheetTitle())
+        ImmersiveHeader({ barHeight: 58 }) {
+          Row() {
+            HeaderBackButton({
+              onBack: () => this.onCancel()
+            })
+              .margin({ right: 12 })
+            Column() {
+              Text(this.sheetTitle())
+                .fontSize(20)
+                .fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.hita_text_1d2b45'))
+              Text(this.sheetSubtitle())
+                .fontSize(12)
+                .fontColor($r('app.color.hita_text_secondary_72809a'))
+                .margin({ top: 3 })
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+          }
+          .width('100%')
+          .height(58)
+          .padding({ left: 20, right: 16 })
+          .alignItems(VerticalAlign.Center)
+        }
+      } else {
+        ImmersiveHeader({ barHeight: 56 }) {
+          Row() {
+            HeaderBackButton({
+              onBack: () => this.getUIContext().getRouter().back()
+            })
+              .margin({ right: 12 })
+            Text(this.editId.length > 0 ? '编辑事件' : '新建事件')
               .fontSize(20)
               .fontWeight(FontWeight.Bold)
-              .fontColor($r('app.color.hita_text_1d2b45'))
-            Text(this.sheetSubtitle())
-              .fontSize(12)
-              .fontColor($r('app.color.hita_text_secondary_72809a'))
-              .margin({ top: 3 })
+              .fontColor('#FFFFFF')
+              .layoutWeight(1)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
           }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
+          .width('100%')
+          .height(56)
+          .padding({ left: 16, right: 16 })
+          .backgroundColor($r('app.color.hita_primary_fill'))
+          .alignItems(VerticalAlign.Center)
         }
-        .width('100%')
-        .height(58)
-        .padding({ left: 20, right: 16 })
-        .alignItems(VerticalAlign.Center)
-      } else {
-        Row() {
-          HeaderBackButton({
-            onBack: () => this.getUIContext().getRouter().back()
-          })
-            .margin({ right: 12 })
-          Text(this.editId.length > 0 ? '编辑事件' : '新建事件')
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor('#FFFFFF')
-            .layoutWeight(1)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .width('100%')
-        .height(56)
-        .padding({ left: 16, right: 16 })
-        .backgroundColor($r('app.color.hita_primary_fill'))
-        .alignItems(VerticalAlign.Center)
       }
 
       List({ space: 8 }) {

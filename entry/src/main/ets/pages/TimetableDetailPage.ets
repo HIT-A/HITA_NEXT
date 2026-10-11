@@ -1,6 +1,9 @@
 /** Android HITA-style timetable detail and course management. */
 import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
+import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
+import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
+import { CompatibleSheetMaterial } from '../common/theme/CompatibleSheetMaterial';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
 import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
@@ -53,9 +56,7 @@ struct TimetableDetailPage {
   /** 展开科目里“学分”输入框的草稿值。 */
   @State creditDraft: string = '';
   @State fadeOpacity: number = 0;
-  // Keep this page on one explicit vertical scroller so rebuilt event rows do
-  // not change the gesture/measurement path used by the parent container.
-  private detailScroller: Scroller = new Scroller();
+  private detailScroller: ListScroller = new ListScroller();
   private timetableId: string = '';
 
   async aboutToAppear(): Promise<void> {
@@ -275,12 +276,15 @@ struct TimetableDetailPage {
   }
 
   private toggleSubject(row: TimetableSubjectRow): void {
-    if (this.expandedSubjectId === row.subject.id) {
-      this.expandedSubjectId = '';
-      return;
-    }
-    this.expandedSubjectId = row.subject.id;
-    this.creditDraft = row.subject.credit > 0 ? TimetableDetailPage.numberText(row.subject.credit) : '';
+    this.detailScroller.closeAllSwipeActions();
+    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseInOut }, () => {
+      if (this.expandedSubjectId === row.subject.id) {
+        this.expandedSubjectId = '';
+      } else {
+        this.expandedSubjectId = row.subject.id;
+        this.creditDraft = row.subject.credit > 0 ? TimetableDetailPage.numberText(row.subject.credit) : '';
+      }
+    });
   }
 
   /** 手动修正学分（教务属性表缺失或同名多Variant时自动读取会失败）。 */
@@ -320,6 +324,46 @@ struct TimetableDetailPage {
       await RdbHelper.getInstance().deleteEvent(event.id);
       await this.load();
       this.getUIContext().getPromptAction().showToast({ message: '课程已删除' });
+    }).catch(() => {
+    });
+  }
+
+  private confirmDeleteCourse(row: TimetableSubjectRow): void {
+    const subjectId: string = row.subject.id;
+    const timetableId: string = row.subject.timetableId;
+    this.detailScroller.closeAllSwipeActions();
+    this.getUIContext().getPromptAction().showDialog({
+      title: '删除整门课程',
+      message: '确定删除「' + row.subject.name + '」及其全部 ' + row.classCount.toString() + ' 次课吗？此操作无法撤销。',
+      buttons: [
+        { text: '取消', color: $r('app.color.hita_text_secondary_7b8190') },
+        { text: '删除', color: HitaColors.error }
+      ]
+    }).then(async (ret) => {
+      if (ret.index !== 1) {
+        return;
+      }
+      try {
+        await RdbHelper.getInstance().deleteCourseWithClasses(subjectId, timetableId);
+        this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseInOut }, () => {
+          this.subjectRows = this.subjectRows.filter((item: TimetableSubjectRow): boolean =>
+            item.subject.id !== subjectId || item.subject.timetableId !== timetableId);
+          this.eventRows = this.eventRows.filter((event: EasEventItem): boolean =>
+            event.subjectId !== subjectId || event.timetableId !== timetableId || event.type !== EasEventType.CLASS);
+          if (this.expandedSubjectId === subjectId) {
+            this.expandedSubjectId = '';
+          }
+        });
+        let message: string = '课程及全部课时已删除';
+        try {
+          await this.resyncReminders();
+        } catch (reminderError) {
+          message = '课程已删除，但提醒同步失败';
+        }
+        this.getUIContext().getPromptAction().showToast({ message: message });
+      } catch (e) {
+        this.getUIContext().getPromptAction().showToast({ message: '删除失败，请重试' });
+      }
     }).catch(() => {
     });
   }
@@ -382,20 +426,40 @@ struct TimetableDetailPage {
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
-        Text('添加课程')
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.hita_primary_3390ec'))
-          .height(32)
-          .padding({ left: 12, right: 12 })
-          .borderRadius(16)
-          .backgroundColor($r('app.color.hita_selected_ebf4fc'))
-          .textAlign(TextAlign.Center)
+        if (CompatibleSheetMaterial.isEnabled()) {
+          Column() {
+            ImmersiveHeader({ barHeight: 44 }) {
+              Button('添加课程', { type: ButtonType.Capsule })
+                .fontSize(13)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(CompatibleMaterialModifier.foreground($r('app.color.hita_primary_3390ec')))
+                .width('100%')
+                .height(44)
+                .backgroundColor($r('app.color.hita_selected_ebf4fc'))
+                .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_selected_ebf4fc')))
+                .onClick(() => { this.openAddEvent(); })
+            }
+          }
+          .width(104)
+          .height(44)
           .margin({ left: 8 })
           .flexShrink(0)
-          .onClick(() => {
-            this.openAddEvent();
-          })
+        } else {
+          Text('添加课程')
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.hita_primary_3390ec'))
+            .height(32)
+            .padding({ left: 12, right: 12 })
+            .borderRadius(16)
+            .backgroundColor($r('app.color.hita_selected_ebf4fc'))
+            .textAlign(TextAlign.Center)
+            .margin({ left: 8 })
+            .flexShrink(0)
+            .onClick(() => {
+              this.openAddEvent();
+            })
+        }
       }
       .width('100%')
       Row() {
@@ -473,76 +537,105 @@ struct TimetableDetailPage {
     Column() {
       this.subjectCard(row)
       if (this.expandedSubjectId === row.subject.id) {
-        Divider()
-          .color($r('app.color.hita_divider_eef1f6'))
-          .margin({ left: 14, right: 14 })
-        Row() {
-          Text('课程类型')
-            .fontSize(13)
-            .fontColor($r('app.color.hita_text_secondary_7b8498'))
-          Blank()
-          Text(TimetableDetailPage.typeName(row.subject.type))
-            .fontSize(13)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(HitaColors.primary)
-          Text('›')
-            .fontSize(20)
-            .fontColor($r('app.color.hita_text_hint_b2b8c4'))
-            .margin({ left: 6 })
-        }
-        .width('100%')
-        .height(44)
-        .padding({ left: 14, right: 14 })
-        .onClick(() => {
-          this.chooseSubjectType(row);
-        })
-        Row() {
-          Text('学分')
-            .fontSize(13)
-            .fontColor($r('app.color.hita_text_secondary_7b8498'))
-          Blank()
-          TextInput({ text: this.creditDraft, placeholder: '未设置' })
-            .fontSize(13)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(HitaColors.primary)
-            .textAlign(TextAlign.End)
-            .width(84)
-            .height(32)
-            .padding({ left: 8, right: 8 })
-            .backgroundColor($r('app.color.hita_surface_soft_f4f7fb'))
-            .borderRadius(8)
-            .enterKeyType(EnterKeyType.Done)
-            .onChange((value: string) => {
-              this.creditDraft = value;
-            })
-            .onSubmit(() => {
-              this.saveSubjectCredit(row);
-            })
-        }
-        .width('100%')
-        .height(44)
-        .padding({ left: 14, right: 14 })
-        if (row.sessions.length === 0) {
-          Text('暂无课时记录')
-            .fontSize(12)
-            .fontColor($r('app.color.hita_text_hint_9aa2b1'))
-            .width('100%')
-            .textAlign(TextAlign.Center)
-            .padding({ top: 12, bottom: 14 })
-        } else {
-          Column({ space: 6 }) {
-            ForEach(row.sessions, (session: EasEventItem) => {
-              this.sessionRow(session)
-            }, (session: EasEventItem) => session.id)
+        Column() {
+          Divider()
+            .color($r('app.color.hita_divider_eef1f6'))
+            .margin({ left: 14, right: 14 })
+          Row() {
+            Text('课程类型')
+              .fontSize(13)
+              .fontColor($r('app.color.hita_text_secondary_7b8498'))
+            Blank()
+            Text(TimetableDetailPage.typeName(row.subject.type))
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(HitaColors.primary)
+            Text('›')
+              .fontSize(20)
+              .fontColor($r('app.color.hita_text_hint_b2b8c4'))
+              .margin({ left: 6 })
           }
           .width('100%')
-          .padding({ left: 10, right: 10, top: 10, bottom: 10 })
+          .height(44)
+          .padding({ left: 14, right: 14 })
+          .onClick(() => {
+            this.chooseSubjectType(row);
+          })
+          Row() {
+            Text('学分')
+              .fontSize(13)
+              .fontColor($r('app.color.hita_text_secondary_7b8498'))
+            Blank()
+            TextInput({ text: this.creditDraft, placeholder: '未设置' })
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(HitaColors.primary)
+              .textAlign(TextAlign.End)
+              .width(84)
+              .height(32)
+              .padding({ left: 8, right: 8 })
+              .backgroundColor($r('app.color.hita_surface_soft_f4f7fb'))
+              .borderRadius(8)
+              .enterKeyType(EnterKeyType.Done)
+              .onChange((value: string) => {
+                this.creditDraft = value;
+              })
+              .onSubmit(() => {
+                this.saveSubjectCredit(row);
+              })
+          }
+          .width('100%')
+          .height(44)
+          .padding({ left: 14, right: 14 })
+          if (row.sessions.length === 0) {
+            Text('暂无课时记录')
+              .fontSize(12)
+              .fontColor($r('app.color.hita_text_hint_9aa2b1'))
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .padding({ top: 12, bottom: 14 })
+          } else {
+            Column({ space: 6 }) {
+              ForEach(row.sessions, (session: EasEventItem) => {
+                this.sessionRow(session)
+              }, (session: EasEventItem) => session.id)
+            }
+            .width('100%')
+            .padding({ left: 10, right: 10, top: 10, bottom: 10 })
+          }
         }
+        .width('100%')
+        .transition(TransitionEffect.OPACITY)
       }
     }
     .width('100%')
     .backgroundColor($r('app.color.hita_surface'))
     .borderRadius(16)
+    .clip(true)
+  }
+
+  @Builder
+  private courseDeleteAction(row: TimetableSubjectRow) {
+    Button({ type: ButtonType.Normal }) {
+      Column({ space: 4 }) {
+        SymbolGlyph($r('sys.symbol.trash'))
+          .fontSize(21)
+          .fontColor([Color.White])
+        Text('删除')
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(Color.White)
+      }
+    }
+    .width(76)
+    .height('100%')
+    .margin({ left: 8 })
+    .borderRadius(14)
+    .backgroundColor(HitaColors.error)
+    .accessibilityText('删除' + row.subject.name + '及全部课时')
+    .onClick(() => {
+      this.confirmDeleteCourse(row);
+    })
   }
 
   @Builder
@@ -642,45 +735,47 @@ struct TimetableDetailPage {
   @Builder
   private courseDetailSheet(event: EasEventItem) {
     Column() {
-      Row() {
-        HeaderBackButton({
-          onBack: () => this.closeSheet()
-        })
-          .margin({ right: 12 });
-        Row()
-          .width(7)
-          .height(50)
-          .borderRadius(4)
-          .backgroundColor(TimetableDetailPage.css(event.color === 0 ?
-            TimetableDetailPage.eventColor(event.type) : event.color));
-        Column() {
-          Text(event.name === 'NULL' || event.name.length === 0 ? '未命名课程' : event.name)
-            .fontSize(21)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.hita_text_202b45'))
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis });
-          Text('课程详情')
-            .fontSize(13)
-            .fontColor($r('app.color.hita_text_secondary_72809a'))
-            .margin({ top: 4 });
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        .margin({ left: 12, right: 8 });
+      ImmersiveHeader({ barHeight: 90 }) {
+        Row() {
+          HeaderBackButton({
+            onBack: () => this.closeSheet()
+          })
+            .margin({ right: 12 });
+          Row()
+            .width(7)
+            .height(50)
+            .borderRadius(4)
+            .backgroundColor(TimetableDetailPage.css(event.color === 0 ?
+              TimetableDetailPage.eventColor(event.type) : event.color));
+          Column() {
+            Text(event.name === 'NULL' || event.name.length === 0 ? '未命名课程' : event.name)
+              .fontSize(21)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.hita_text_202b45'))
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis });
+            Text('课程详情')
+              .fontSize(13)
+              .fontColor($r('app.color.hita_text_secondary_72809a'))
+              .margin({ top: 4 });
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          .margin({ left: 12, right: 8 });
 
-        Text('编辑')
-          .fontSize(14)
-          .fontColor(HitaColors.primary)
-          .fontWeight(FontWeight.Medium)
-          .padding({ left: 8, right: 8, top: 8, bottom: 8 })
-          .onClick(() => {
-            this.openEditEvent(event);
-          });
+          Text('编辑')
+            .fontSize(14)
+            .fontColor(HitaColors.primary)
+            .fontWeight(FontWeight.Medium)
+            .padding({ left: 8, right: 8, top: 8, bottom: 8 })
+            .onClick(() => {
+              this.openEditEvent(event);
+            });
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+        .margin({ bottom: 14 });
       }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
-      .margin({ bottom: 14 });
 
       this.courseDetailRow($r('sys.symbol.person_crop_circle_fill'), '老师',
         event.teacher.trim().length > 0 ? event.teacher : '无');
@@ -792,76 +887,81 @@ struct TimetableDetailPage {
           .fontColor($r('app.color.hita_text_secondary_7b8498'))
           .margin({ top: HEADER_HEIGHT + 80 })
       } else {
-        Scroll(this.detailScroller) {
-          Column() {
-            Blank().height(HEADER_HEIGHT);
-            this.infoCard(this.timetable as EasTimetable)
-
-            Row() {
-              Text('我的课程')
+        List({ scroller: this.detailScroller }) {
+          ListItem() {
+            Column() {
+              Blank().height(HEADER_HEIGHT)
+              this.infoCard(this.timetable as EasTimetable)
+              Row() {
+                Text('我的课程')
+                  .fontSize(18)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor($r('app.color.hita_text_202633'))
+                  .layoutWeight(1)
+                Text(this.subjectRows.length.toString() + ' 门课程 · 点击展开课时')
+                  .fontSize(11)
+                  .fontColor($r('app.color.hita_text_hint_9aa2b1'))
+              }
+              .width('100%')
+              .margin({ top: 24, bottom: 10 })
+              if (this.subjectRows.length === 0) {
+                Column() {
+                  Text('暂无课程')
+                    .fontSize(15)
+                    .fontColor($r('app.color.hita_text_secondary_7b8498'))
+                  Text('从教务导入或点击上方“添加课程”后显示在这里')
+                    .fontSize(12)
+                    .fontColor($r('app.color.hita_text_hint_a0a7b5'))
+                    .margin({ top: 6 })
+                }
+                .width('100%')
+                .padding({ top: 26, bottom: 26 })
+                .backgroundColor($r('app.color.hita_surface'))
+                .borderRadius(16)
+              }
+            }
+            .width('100%')
+          }
+          ForEach(this.subjectRows, (row: TimetableSubjectRow) => {
+            ListItem() {
+              this.courseGroupCard(row)
+            }
+            .swipeAction({
+              end: { builder: () => { this.courseDeleteAction(row) } },
+              edgeEffect: SwipeEdgeEffect.None
+            })
+            .margin({ bottom: 8 })
+            .transition(TransitionEffect.OPACITY)
+          }, (row: TimetableSubjectRow) => row.subject.id)
+          ListItem() {
+            Column() {
+              Text('课表结构')
                 .fontSize(18)
                 .fontWeight(FontWeight.Bold)
                 .fontColor($r('app.color.hita_text_202633'))
-                .layoutWeight(1)
-              Text(this.subjectRows.length.toString() + ' 门课程 · 点击展开课时')
-                .fontSize(11)
-                .fontColor($r('app.color.hita_text_hint_9aa2b1'))
-            }
-            .width('100%')
-            .margin({ top: 24, bottom: 10 })
-            if (this.subjectRows.length === 0) {
+                .width('100%')
+                .margin({ top: 16, bottom: 10 })
               Column() {
-                Text('暂无课程')
-                  .fontSize(15)
-                  .fontColor($r('app.color.hita_text_secondary_7b8498'))
-                Text('从教务导入或点击上方“添加课程”后显示在这里')
-                  .fontSize(12)
-                  .fontColor($r('app.color.hita_text_hint_a0a7b5'))
-                  .margin({ top: 6 })
+                ForEach((this.timetable as EasTimetable).scheduleStructure,
+                  (period: EasTimePeriodInDay, index: number) => {
+                    this.scheduleRow(period, index)
+                  }, (period: EasTimePeriodInDay, index: number) => index.toString() + period.toString())
               }
               .width('100%')
-              .padding({ top: 26, bottom: 26 })
-              .backgroundColor($r('app.color.hita_surface'))
-              .borderRadius(16)
-            } else {
-              Column({ space: 8 }) {
-                ForEach(this.subjectRows, (row: TimetableSubjectRow) => {
-                  this.courseGroupCard(row)
-                }, (row: TimetableSubjectRow) => row.subject.id)
-              }
-              .width('100%')
-            }
-
-            Text('课表结构')
-              .fontSize(18)
-              .fontWeight(FontWeight.Bold)
-              .fontColor($r('app.color.hita_text_202633'))
-              .width('100%')
-              .margin({ top: 24, bottom: 10 })
-            Column() {
-              ForEach((this.timetable as EasTimetable).scheduleStructure,
-                (period: EasTimePeriodInDay, index: number) => {
-                  this.scheduleRow(period, index)
-                }, (period: EasTimePeriodInDay, index: number) => index.toString() + period.toString())
+              .borderRadius(18)
+              .clip(true)
+              Text('点击课程展开每次上课记录；点击具体课时查看详情、编辑或删除')
+                .fontSize(12)
+                .fontColor($r('app.color.hita_text_hint_9aa2b1'))
+                .margin({ top: 14, bottom: 36 })
+              Blank().height(72)
             }
             .width('100%')
-            .borderRadius(18)
-            .clip(true)
-
-            Text('点击课程展开每次上课记录；点击具体课时查看详情、编辑或删除')
-              .fontSize(12)
-              .fontColor($r('app.color.hita_text_hint_9aa2b1'))
-              .margin({ top: 14, bottom: 36 })
           }
-          .width('100%')
-          // Keep the final card above the system navigation gesture area.  A
-          // plain bottom margin is not included in the Scroll's measured
-          // content extent on some HarmonyOS builds, so use real padding.
-          .padding({ left: 16, right: 16, bottom: 72 })
         }
         .width('100%')
         .height('100%')
-        .scrollable(ScrollDirection.Vertical)
+        .padding({ left: 16, right: 16 })
         .enableScrollInteraction(true)
         .edgeEffect(EdgeEffect.None)
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
@@ -877,24 +977,26 @@ struct TimetableDetailPage {
         headerHeight: HEADER_HEIGHT
       })
 
-      Row() {
-        HeaderBackButton({
-          onBack: () => this.getUIContext().getRouter().back()
-        })
-          .margin({ right: 12 })
-        Text('课表详情')
-          .fontSize(22)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.hita_text_202633'))
-          .layoutWeight(1)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      ImmersiveHeader({ barHeight: HEADER_HEIGHT }) {
+        Row() {
+          HeaderBackButton({
+            onBack: () => this.getUIContext().getRouter().back()
+          })
+            .margin({ right: 12 })
+          Text('课表详情')
+            .fontSize(22)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.hita_text_202633'))
+            .layoutWeight(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .width('100%')
+        .height(HEADER_HEIGHT)
+        .padding({ left: 16, right: 16 })
+        .alignItems(VerticalAlign.Center)
+        .hitTestBehavior(HitTestMode.Transparent)
       }
-      .width('100%')
-      .height(HEADER_HEIGHT)
-      .padding({ left: 16, right: 16 })
-      .alignItems(VerticalAlign.Center)
-      .hitTestBehavior(HitTestMode.Transparent)
     }
     .width('100%')
     .height('100%')

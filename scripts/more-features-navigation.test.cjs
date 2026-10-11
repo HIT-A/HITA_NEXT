@@ -28,7 +28,7 @@ test('assistant, news and campus links are registered routes in More, after acad
     assert.match(source, /@Entry\s+@Component/);
     assert.match(source, /Row\(\) \{\s*HeaderBackButton\(\{/);
     assert.match(source, /getRouter\(\)\.back\(\)/);
-    assert.doesNotMatch(source, /replaceUrl|Tabs\(|TabContent\(|dockPageInset/);
+    assert.doesNotMatch(source, /replaceUrl|\bTabs\(|\bTabContent\(|dockPageInset/);
   }
 });
 
@@ -42,6 +42,7 @@ function deferred() {
 function pageClass(name, mocks = {}, moduleCache = new Map()) {
   let source = read(`pages/${name}.ets`);
   source = source.slice(0, source.indexOf('\n  build()')) + '\n}\n';
+  source = source.replace(/^import lazy /gm, 'import ');
   source = source.replace(/^@(Entry|Component|Observed)\r?\n/gm, '')
     .replace(/@(State|StorageProp|Watch)(\([^)]*\))?\s*/g, '')
     .replace(`struct ${name}`, `export class ${name}`);
@@ -61,6 +62,10 @@ function pageClass(name, mocks = {}, moduleCache = new Map()) {
     hasCloudModel() { return false; }
   };
   const platform = spec => {
+    if (spec.endsWith('/EasSession')) return { EasCampus: { BENBU: 'BENBU', SHENZHEN: 'SHENZHEN', WEIHAI: 'WEIHAI' } };
+    if (spec.endsWith('/EasSessionStore')) return { EasSessionStore: { getInstance: () => ({
+      init: async () => {}, loadLastCampus: mocks.loadLastCampus || (async () => undefined)
+    }) } };
     if (spec.endsWith('/AssistantConversation')) {
       if (!moduleCache.has(spec)) {
         const state = { exports: {} };
@@ -219,6 +224,7 @@ test('news opens on blogs and refreshing or reopening preserves the correct cate
   assert.deepEqual(requests, [['blog', 0], ['blog', 0]]);
 
   page.selectTab(1);
+  await new Promise(resolve => setImmediate(resolve));
   await page.reload();
   assert.deepEqual(requests.slice(2), [['10', 0], ['10', 0]]);
   page.aboutToDisappear();
@@ -227,6 +233,98 @@ test('news opens on blogs and refreshing or reopening preserves the correct cate
   reopened.aboutToAppear();
   assert.equal(reopened.selected, 0);
   assert.deepEqual(requests.at(-1), ['blog', 0]);
+});
+
+test('notifications use the latest login campus on refresh and pin it while loading more', async () => {
+  let selectedCampus;
+  const requests = [];
+  const { Page } = pageClass('NewsPage', {
+    loadLastCampus: async () => selectedCampus,
+    fetchCategory: async (id, page, campus) => {
+      requests.push([id, page, campus]);
+      return { ok: true, items: [{ url: `${campus}/${page}`, title: '通知' }], hasMore: true, message: '', sourceUrl: '' };
+    }
+  });
+  const page = new Page();
+  page.selected = 1;
+  await page.reload();
+  assert.deepEqual(requests.at(-1), ['10', 0, 'BENBU']);
+  for (const campus of ['SHENZHEN', 'BENBU', 'WEIHAI']) {
+    selectedCampus = campus;
+    await page.reload();
+    assert.deepEqual(requests.at(-1), ['10', 0, campus]);
+    assert.deepEqual(page.items.map(value => value.url), [`${campus}/0`]);
+    selectedCampus = 'different selection';
+    await page.loadPage();
+    assert.deepEqual(requests.at(-1), ['10', 1, campus]);
+    assert.deepEqual(page.items.map(value => value.url), [`${campus}/0`, `${campus}/1`]);
+  }
+});
+
+test('a slow campus read cannot start a notification request after switching back to blogs or closing', async () => {
+  for (const action of ['selectTab', 'aboutToDisappear']) {
+    const pending = deferred();
+    const requests = [];
+    const { Page } = pageClass('NewsPage', {
+      loadLastCampus: () => pending.promise,
+      fetchCategory: async (id, page, campus) => {
+        requests.push(id);
+        return { ok: true, items: [], hasMore: false, message: '', sourceUrl: '' };
+      }
+    });
+    const page = new Page();
+    page.selected = 1;
+    const loading = page.reload();
+    page[action](0);
+    pending.resolve('SHENZHEN');
+    await loading;
+    assert.deepEqual(requests, action === 'selectTab' ? ['blog'] : []);
+  }
+});
+
+test('a prior campus response cannot contaminate a refreshed campus list', async () => {
+  const oldResponse = deferred();
+  let campus = 'SHENZHEN';
+  const { Page } = pageClass('NewsPage', {
+    loadLastCampus: async () => campus,
+    fetchCategory: async (id, page, selected) => selected === 'SHENZHEN' ? oldResponse.promise :
+      { ok: true, items: [{ url: 'weihai' }], hasMore: false, message: '', sourceUrl: 'weihai-source' }
+  });
+  const page = new Page();
+  page.selected = 1;
+  const oldLoad = page.reload();
+  await new Promise(resolve => setImmediate(resolve));
+  campus = 'WEIHAI';
+  await page.reload();
+  oldResponse.resolve({ ok: true, items: [{ url: 'shenzhen' }], hasMore: true, message: '', sourceUrl: 'shenzhen-source' });
+  await oldLoad;
+  assert.deepEqual(page.items, [{ url: 'weihai' }]);
+  assert.equal(page.sourceUrl, 'weihai-source');
+  assert.equal(page.page, 1);
+  assert.equal(page.loading, false);
+});
+
+test('returning from notice website authentication refreshes the campus list once', async () => {
+  let requests = 0;
+  const { Page, ui } = pageClass('NewsPage', {
+    loadLastCampus: async () => 'SHENZHEN',
+    fetchCategory: async () => {
+      requests++;
+      return { ok: false, items: [], hasMore: false, message: '需要认证', sourceUrl: 'http://info.hitsz.edu.cn/list.jsp' };
+    }
+  });
+  const page = new Page();
+  page.selected = 1;
+  await page.reload();
+  page.openSource();
+  assert.deepEqual(ui.routes.at(-1), {
+    url: 'pages/WebBrowserPage', params: { url: 'http://info.hitsz.edu.cn/list.jsp', title: '校区通知' }
+  });
+  page.onPageShow();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests, 2);
+  page.onPageShow();
+  assert.equal(requests, 2);
 });
 
 test('six campus links are grouped into school sites and course resources, and open in the in-app browser', () => {
@@ -277,6 +375,7 @@ test('switching news categories resets scrolling and ignores stale responses', a
   page.selectTab(1);
   page.selectTab(2);
   page.selectTab(-1);
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(page.selected, 1);
   assert.deepEqual(pending.map(request => [request.id, request.page]), [['blog', 0], ['10', 0]]);
   assert.deepEqual(ui.scrolls, ['top']);
@@ -288,7 +387,7 @@ test('switching news categories resets scrolling and ignores stale responses', a
   assert.equal(page.loading, false);
 });
 
-test('the complete blog feed stops pagination while notifications still load subsequent pages', async () => {
+test('the complete blog list stops pagination while notifications still load subsequent pages', async () => {
   const requests = [];
   const { Page } = pageClass('NewsPage', {
     fetchCategory: async (id, page) => {

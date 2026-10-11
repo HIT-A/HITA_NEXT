@@ -1,11 +1,18 @@
 /**
  * NewsPage.ets — 功能中心「资讯」：博客与通知。
  */
+import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
+import { deviceInfo } from '@kit.BasicServicesKit';
+import lazy { ImmersiveNewsLayout } from '../common/components/ImmersiveNewsLayout';
+import lazy { ImmersiveNewsTabs } from '../common/components/ImmersiveNewsTabs';
+import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { NewsCategory, NewsItem, NewsPage as NewsPageResult, NewsService } from '../feature/news/NewsService';
+import { EasCampus } from '../feature/eas/EasSession';
+import { EasSessionStore } from '../feature/eas/EasSessionStore';
 
 const COLOR_PRIMARY: ResourceColor = $r('app.color.hita_primary');
 const SURFACE_RGB: string = '244,247,252';
@@ -24,11 +31,14 @@ struct NewsPage {
   @State refreshing: boolean = false;
   @State hasMore: boolean = true;
   @State message: string = '';
+  @State sourceUrl: string = '';
   @State fadeOpacity: number = 0;
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
   @StorageProp('hita_nav_bar_vp') navBarInset: number = NAV_BAR_INSET_FALLBACK;
   private page: number = 0;
   private generation: number = 0;
+  private campus: EasCampus = EasCampus.BENBU;
+  private returningFromSource: boolean = false;
   private newsScroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
@@ -37,6 +47,13 @@ struct NewsPage {
 
   aboutToDisappear(): void {
     this.generation++;
+  }
+
+  onPageShow(): void {
+    if (this.returningFromSource) {
+      this.returningFromSource = false;
+      this.reload();
+    }
   }
 
   private selectTab(index: number): void {
@@ -56,7 +73,17 @@ struct NewsPage {
     this.fadeOpacity = 0;
     this.hasMore = true;
     this.message = '';
+    this.sourceUrl = '';
+    this.loading = true;
     const generation: number = this.generation;
+    if (NewsService.CATEGORIES[this.selected].id === '10') {
+      const store: EasSessionStore = EasSessionStore.getInstance();
+      await store.init(this.getUIContext().getHostContext() as common.Context);
+      // Public notices follow the last login selection even after its EAS session expires.
+      const campus: EasCampus | undefined = await store.loadLastCampus();
+      if (generation !== this.generation) { return; }
+      this.campus = campus === undefined ? EasCampus.BENBU : campus;
+    }
     await this.loadPage();
     if (generation === this.generation) {
       this.refreshing = false;
@@ -70,11 +97,12 @@ struct NewsPage {
     const generation: number = this.generation;
     const category: NewsCategory = NewsService.CATEGORIES[this.selected];
     this.loading = true;
-    const result: NewsPageResult = await NewsService.fetchCategory(category.id, this.page);
+    const result: NewsPageResult = await NewsService.fetchCategory(category.id, this.page, this.campus);
     if (generation !== this.generation) {
       return;
     }
     this.loading = false;
+    this.sourceUrl = result.sourceUrl;
     if (!result.ok) {
       this.message = result.message;
       this.hasMore = false;
@@ -95,44 +123,80 @@ struct NewsPage {
     });
   }
 
+  private openSource(): void {
+    this.returningFromSource = true;
+    this.open(this.sourceUrl, '校区通知');
+  }
+
   build() {
     Column() {
-      Row() {
-        HeaderBackButton({
-          onBack: () => this.getUIContext().getRouter().back()
-        })
-          .margin({ right: 12 });
-        Column() {
-          Text('资讯')
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(COLOR_TEXT_PRIMARY);
-          Text('博客与通知')
-            .fontSize(12)
-            .fontColor(COLOR_TEXT_SECONDARY)
-            .margin({ top: 2 });
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start);
-        Button({ type: ButtonType.Circle }) {
-          SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-            .fontSize(18)
-            .fontColor([COLOR_PRIMARY]);
-        }
-        .width(40)
-        .height(40)
-        .backgroundColor(COLOR_NAV_ACTIVE)
-        .enabled(!this.loading)
-        .accessibilityText('刷新')
-        .onClick(() => {
-          this.reload();
+      if (deviceInfo.apiAvailable('26.0.0')) {
+        ImmersiveNewsLayout({
+          titleHeight: 60 + this.statusBarInset,
+          header: () => { this.headerContent(); },
+          dock: () => { this.dockContent(); },
+          content: () => { this.newsList(); }
         });
+      } else {
+        this.headerContent();
+        this.dockContent();
+        this.newsList();
       }
-      .width('100%')
-      .padding({ left: 16, right: 16, top: 8 + this.statusBarInset, bottom: 8 })
-      .alignItems(VerticalAlign.Center);
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor($r('app.color.hita_page'))
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM]);
+  }
 
+  @Builder
+  headerContent() {
+    Row() {
+      HeaderBackButton({
+        onBack: () => this.getUIContext().getRouter().back()
+      })
+        .margin({ right: 12 });
       Column() {
+        Text('资讯')
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(COLOR_TEXT_PRIMARY);
+        Text('博客与通知')
+          .fontSize(12)
+          .fontColor(COLOR_TEXT_SECONDARY)
+          .margin({ top: 2 });
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start);
+      Button({ type: ButtonType.Circle }) {
+        SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+          .fontSize(18)
+          .fontColor([CompatibleMaterialModifier.foreground(COLOR_PRIMARY)]);
+      }
+      .width(40)
+      .height(40)
+      .backgroundColor(COLOR_NAV_ACTIVE)
+      .attributeModifier(new CompatibleMaterialModifier(COLOR_NAV_ACTIVE))
+      .enabled(!this.loading)
+      .accessibilityText('刷新')
+      .onClick(() => {
+        this.reload();
+      });
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 8 + this.statusBarInset, bottom: 8 })
+    .alignItems(VerticalAlign.Center);
+  }
+
+  @Builder
+  dockContent() {
+    Column() {
+      if (deviceInfo.apiAvailable('26.0.0')) {
+        ImmersiveNewsTabs({
+          selectedIndex: this.selected,
+          onSelect: (index: number) => { this.selectTab(index); }
+        });
+      } else {
         Row({ space: 4 }) {
           ForEach(NewsService.CATEGORIES, (category: NewsCategory, index: number) => {
             this.segment(category.name, index);
@@ -143,15 +207,10 @@ struct NewsPage {
         .backgroundColor($r('app.color.hita_control_eaf0f7'))
         .borderRadius(16);
       }
-      .width('100%')
-      .padding({ left: 16, right: 16, bottom: 8 });
-
-      this.newsList();
     }
     .width('100%')
-    .height('100%')
-    .backgroundColor($r('app.color.hita_page'))
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM]);
+    .alignItems(HorizontalAlign.Center)
+    .padding({ left: 16, right: 16, bottom: 8 });
   }
 
   @Builder
@@ -175,6 +234,11 @@ struct NewsPage {
     Stack({ alignContent: Alignment.Top }) {
       Refresh({ refreshing: $$this.refreshing }) {
         List({ space: 10, scroller: this.newsScroller }) {
+          if (deviceInfo.apiAvailable('26.0.0')) {
+            ListItem() {
+              Column().height(112 + this.statusBarInset);
+            }
+          }
           ForEach(this.items, (item: NewsItem) => {
             ListItem() {
               this.newsRow(item);
@@ -208,7 +272,9 @@ struct NewsPage {
         this.reload();
       });
 
-      HeaderFadeMask({ maskOpacity: this.fadeOpacity, rgb: SURFACE_RGB });
+      if (!deviceInfo.apiAvailable('26.0.0')) {
+        HeaderFadeMask({ maskOpacity: this.fadeOpacity, rgb: SURFACE_RGB });
+      }
     }
     .width('100%')
     .layoutWeight(1)
@@ -242,6 +308,18 @@ struct NewsPage {
           .onClick(() => {
             this.reload();
           });
+        if (this.sourceUrl.length > 0) {
+          Button('打开通知网站')
+            .fontSize(14)
+            .height(36)
+            .fontColor(COLOR_PRIMARY)
+            .backgroundColor(COLOR_NAV_ACTIVE)
+            .borderRadius(18)
+            .margin({ top: 10 })
+            .onClick(() => {
+              this.openSource();
+            });
+        }
       } else if (!this.hasMore && this.items.length > 0) {
         Text('没有更多了')
           .fontSize(12)

@@ -16,6 +16,8 @@ import { EasWebLoginController } from './EasWebLoginController';
 import { easWebLoginConfigFor, EasCampusConfig } from './EasWebLoginConfig';
 import { HitaColors } from '../../../common/theme/HitaColors';
 import { HeaderBackButton } from '../../../common/components/HeaderBackButton';
+import { ImmersiveHeader } from '../../../common/components/ImmersiveHeader';
+import { CompatibleSheetMaterial } from '../../../common/theme/CompatibleSheetMaterial';
 
 const TAG: string = 'HitaLoginPage';
 const DOMAIN: number = 0x0000;
@@ -274,74 +276,76 @@ export struct EasLoginPage {
     Column() {
       // Android WebViewLoginActivity uses a compact white app bar with a thin
       // brand accent, leaving the authentication page itself visually calm.
-      Row({ space: 8 }) {
-        HeaderBackButton({
-          accessibilityLabel: '返回应用',
-          onBack: () => this.cancelLogin()
-        });
+      ImmersiveHeader({ barHeight: 62 }) {
+        Row({ space: 8 }) {
+          HeaderBackButton({
+            accessibilityLabel: '返回应用',
+            onBack: () => this.cancelLogin()
+          });
 
-        Column() {
-          Text('统一认证登录')
-            .fontSize(17)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(HitaColors.onSurface)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis });
-          Text(this.campusDisplayName)
-            .fontSize(12)
-            .fontColor(HitaColors.primary)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .margin({ top: 2 });
+          Column() {
+            Text('统一认证登录')
+              .fontSize(17)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(HitaColors.onSurface)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis });
+            Text(this.campusDisplayName)
+              .fontSize(12)
+              .fontColor(HitaColors.primary)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .margin({ top: 2 });
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start);
+
+          Button({ type: ButtonType.Circle }) {
+            SymbolGlyph($r('sys.symbol.arrow_left'))
+              .fontSize(18)
+              .fontColor([HitaColors.onSurface]);
+          }
+          .width(36)
+          .height(44)
+          .padding(0)
+          .flexShrink(0)
+          .backgroundColor(Color.Transparent)
+          .enabled(this.canGoBack)
+          .opacity(this.canGoBack ? 1 : 0.35)
+          .accessibilityText('返回上一网页')
+          .onClick(() => {
+            this.navigateWebBack();
+          });
+
+          Button({ type: ButtonType.Circle }) {
+            SymbolGlyph($r('sys.symbol.repeat_1'))
+              .fontSize(20)
+              .fontColor([HitaColors.primary]);
+          }
+          .width(40)
+          .height(44)
+          .padding(0)
+          .flexShrink(0)
+          .backgroundColor(Color.Transparent)
+          .accessibilityText('刷新认证网页')
+          .enabled(!this.recoveryBusy)
+          .onClick(() => {
+            try {
+              this.loginController.start(this.campusCode, this.studentType);
+              this.watchPageLoad(this.currentPageUrl);
+              this.progressValue = 0;
+              this.webController.refresh();
+            } catch (e) {}
+          });
+
         }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start);
-
-        Button({ type: ButtonType.Circle }) {
-          SymbolGlyph($r('sys.symbol.arrow_left'))
-            .fontSize(18)
-            .fontColor([HitaColors.onSurface]);
-        }
-        .width(36)
-        .height(44)
-        .padding(0)
-        .flexShrink(0)
-        .backgroundColor(Color.Transparent)
-        .enabled(this.canGoBack)
-        .opacity(this.canGoBack ? 1 : 0.35)
-        .accessibilityText('返回上一网页')
-        .onClick(() => {
-          this.navigateWebBack();
-        });
-
-        Button({ type: ButtonType.Circle }) {
-          SymbolGlyph($r('sys.symbol.repeat_1'))
-            .fontSize(20)
-            .fontColor([HitaColors.primary]);
-        }
-        .width(40)
-        .height(44)
-        .padding(0)
-        .flexShrink(0)
-        .backgroundColor(Color.Transparent)
-        .accessibilityText('刷新认证网页')
-        .enabled(!this.recoveryBusy)
-        .onClick(() => {
-          try {
-            this.loginController.start(this.campusCode, this.studentType);
-            this.watchPageLoad(this.currentPageUrl);
-            this.progressValue = 0;
-            this.webController.refresh();
-          } catch (e) {}
-        });
-
+        .width('100%')
+        .height(62)
+        .padding({ left: 16, right: 16 })
+        .backgroundColor(CompatibleSheetMaterial.bodyColor($r('app.color.hita_surface')))
+        .border({ width: { bottom: 1 }, color: HitaColors.divider })
+        .alignItems(VerticalAlign.Center)
       }
-      .width('100%')
-      .height(62)
-      .padding({ left: 16, right: 16 })
-      .backgroundColor($r('app.color.hita_surface'))
-      .border({ width: { bottom: 1 }, color: HitaColors.divider })
-      .alignItems(VerticalAlign.Center)
 
       // ═══════════════ 线性进度条（对齐安卓 LinearProgressIndicator） ═══════════════
       Progress({ value: this.progressValue, total: 100, type: ProgressType.Linear })
@@ -507,6 +511,6 @@ export struct EasLoginPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.hita_surface'))
+    .backgroundColor(CompatibleSheetMaterial.bodyColor($r('app.color.hita_surface')))
   }
 }

@@ -252,7 +252,7 @@ test('appearance matches surrounding settings rows and reveals choices only when
   assert.match(setting, /this\.appearanceMode === AppearanceMode\.LIGHT \? '已关闭' : '跟随系统'/);
   assert.match(setting, /animateTo\(\{ duration: 200, curve: Curve\.EaseInOut \}/);
   assert.match(setting, /this\.appearanceExpanded = !this\.appearanceExpanded/);
-  assert.match(setting, /if \(this\.appearanceExpanded\) \{\s*Row[\s\S]*this\.appearanceOption\(AppearanceMode\.SYSTEM/);
+  assert.match(setting, /if \(this\.appearanceExpanded\) \{\s*ImmersiveHeader\(\{ barHeight: 60, materialEnabled: CompatibleSheetMaterial\.isEnabled\(\) \}\) \{\s*Row[\s\S]*this\.appearanceOption\(AppearanceMode\.SYSTEM/);
   assert.match(setting, /\.padding\(\{ left: 16, right: 16, top: 4, bottom: 12 \}\)/);
   assert.doesNotMatch(setting, /this\.selectAppearance|AppearanceStore/);
   assert.match(setting, /\.rotate\(\{ angle: this\.appearanceExpanded \? 90 : 0 \}\)/);

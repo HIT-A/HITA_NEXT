@@ -2,6 +2,8 @@
 import { common } from '@kit.AbilityKit';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
+import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
+import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
 import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
@@ -319,38 +321,41 @@ struct ImportTimetablePage {
         headerHeight: HEADER_HEIGHT
       })
 
-      Row() {
-        HeaderBackButton({
-          onBack: () => this.getUIContext().getRouter().back()
-        })
-          .margin({ right: 12 });
-        Text('导入课表')
-          .fontSize(22)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(TEXT_PRIMARY)
-          .layoutWeight(1)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis });
-        Text(this.importing ? '导入中' : '导入')
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.hita_primary_3390ec'))
-          .height(32)
-          .padding({ left: 12, right: 12 })
-          .borderRadius(16)
-          .backgroundColor($r('app.color.hita_selected_ebf4fc'))
-          .textAlign(TextAlign.Center)
-          .margin({ left: 8 })
-          .flexShrink(0)
-          .enabled(!this.importing && !this.loading && !this.detailsLoading &&
-            this.startTime > 0 && this.selectedTerm() !== undefined)
-          .onClick(() => this.import());
+      ImmersiveHeader({ barHeight: HEADER_HEIGHT }) {
+        Row() {
+          HeaderBackButton({
+            onBack: () => this.getUIContext().getRouter().back()
+          })
+            .margin({ right: 12 });
+          Text('导入课表')
+            .fontSize(22)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(TEXT_PRIMARY)
+            .layoutWeight(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis });
+          Text(this.importing ? '导入中' : '导入')
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(CompatibleMaterialModifier.foreground($r('app.color.hita_primary_3390ec')))
+            .height(32)
+            .padding({ left: 12, right: 12 })
+            .borderRadius(16)
+            .backgroundColor($r('app.color.hita_selected_ebf4fc'))
+            .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_selected_ebf4fc')))
+            .textAlign(TextAlign.Center)
+            .margin({ left: 8 })
+            .flexShrink(0)
+            .enabled(!this.importing && !this.loading && !this.detailsLoading &&
+              this.startTime > 0 && this.selectedTerm() !== undefined)
+            .onClick(() => this.import());
+        }
+        .width('100%')
+        .height(HEADER_HEIGHT)
+        .padding({ left: 16, right: 16 })
+        .alignItems(VerticalAlign.Center)
+        .hitTestBehavior(HitTestMode.Transparent)
       }
-      .width('100%')
-      .height(HEADER_HEIGHT)
-      .padding({ left: 16, right: 16 })
-      .alignItems(VerticalAlign.Center)
-      .hitTestBehavior(HitTestMode.Transparent)
     }
     .width('100%')
     .height('100%')

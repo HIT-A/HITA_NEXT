@@ -5,6 +5,8 @@
 import { common } from '@kit.AbilityKit';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
+import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
+import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
 import { AssistantConversation } from '../feature/assistant/AssistantConversation';
@@ -222,36 +224,38 @@ struct AssistantPage {
           .width('100%')
           .align(Alignment.Bottom);
 
-        Row() {
-          HeaderBackButton({
-            onBack: () => {
-              this.dismissKeyboard();
-              this.getUIContext().getRouter().back();
-            }
-          })
-            .margin({ right: 12 });
-          Text('助手')
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(COLOR_TEXT_PRIMARY)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .layoutWeight(1);
-          this.headerButton($r('sys.symbol.trash'), '清空对话', () => {
-            this.clearChat();
-          });
-          this.headerButton($r('sys.symbol.gearshape'), '助手设置', () => {
-            this.settingsOpen = !this.settingsOpen;
-            if (this.settingsOpen) {
-              this.provider = this.settings.provider;
-              this.apiKeyDraft = this.settings.apiKey;
-            }
-          });
+        ImmersiveHeader({ barHeight: this.headerChromeHeight() }) {
+          Row() {
+            HeaderBackButton({
+              onBack: () => {
+                this.dismissKeyboard();
+                this.getUIContext().getRouter().back();
+              }
+            })
+              .margin({ right: 12 });
+            Text('助手')
+              .fontSize(20)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(COLOR_TEXT_PRIMARY)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1);
+            this.headerButton($r('sys.symbol.trash'), '清空对话', () => {
+              this.clearChat();
+            });
+            this.headerButton($r('sys.symbol.gearshape'), '助手设置', () => {
+              this.settingsOpen = !this.settingsOpen;
+              if (this.settingsOpen) {
+                this.provider = this.settings.provider;
+                this.apiKeyDraft = this.settings.apiKey;
+              }
+            });
+          }
+          .width('100%')
+          .height(this.headerChromeHeight())
+          .padding({ left: 16, right: 16, top: this.statusBarInset })
+          .alignItems(VerticalAlign.Center);
         }
-        .width('100%')
-        .height(this.headerChromeHeight())
-        .padding({ left: 16, right: 16, top: this.statusBarInset })
-        .alignItems(VerticalAlign.Center);
       }
       .width('100%')
       .layoutWeight(1);
@@ -269,12 +273,13 @@ struct AssistantPage {
     Button({ type: ButtonType.Circle }) {
       SymbolGlyph(symbol)
         .fontSize(18)
-        .fontColor([COLOR_PRIMARY]);
+        .fontColor([CompatibleMaterialModifier.foreground(COLOR_PRIMARY)]);
     }
     .width(40)
     .height(40)
     .margin({ left: 8 })
     .backgroundColor(COLOR_NAV_ACTIVE)
+    .attributeModifier(new CompatibleMaterialModifier(COLOR_NAV_ACTIVE))
     .accessibilityText(label)
     .onClick(action);
   }

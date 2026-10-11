@@ -502,6 +502,33 @@ export class RdbHelper {
     await this.del(new relationalStore.RdbPredicates('events').equalTo('subjectId', subjectId));
   }
 
+  /** 原子删除一门课程及其课时；关联考试由考试管理独立维护。 */
+  async deleteCourseWithClasses(subjectId: string, timetableId: string): Promise<void> {
+    if (subjectId.length === 0 || timetableId.length === 0) {
+      throw new Error('Missing course identity');
+    }
+    const transaction: relationalStore.Transaction = await this.s().createTransaction();
+    try {
+      const removed: number = await transaction.delete(new relationalStore.RdbPredicates('subject')
+        .equalTo('id', subjectId).equalTo('timetableId', timetableId));
+      if (removed !== 1) {
+        throw new Error('Course no longer exists');
+      }
+      await transaction.delete(new relationalStore.RdbPredicates('events')
+        .equalTo('subjectId', subjectId).equalTo('timetableId', timetableId)
+        .equalTo('type', EasEventType.CLASS));
+      await transaction.commit();
+    } catch (e) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        hilog.error(DOMAIN, TAG, 'rollback course delete failed %{public}s', String(rollbackError));
+      }
+      hilog.error(DOMAIN, TAG, 'delete course failed %{public}s', String(e));
+      throw new Error(String(e));
+    }
+  }
+
   /** 删除科目。 */
   async deleteSubject(id: string): Promise<void> {
     await this.del(new relationalStore.RdbPredicates('subject').equalTo('id', id));

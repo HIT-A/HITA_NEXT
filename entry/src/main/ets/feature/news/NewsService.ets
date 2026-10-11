@@ -1,10 +1,15 @@
 /**
- * HOA 博客订阅与今日哈工大通知列表。
+ * HOA 博客列表（RSS 备用）与三校区通知列表。
  */
 import { util, xml } from '@kit.ArkTS';
 import { http } from '@kit.NetworkKit';
+import { webview } from '@kit.ArkWeb';
+import { EasCampus } from '../eas/EasSession';
 
 const BASE_URL: string = 'https://today.hit.edu.cn';
+const SHENZHEN_URL: string = 'http://info.hitsz.edu.cn';
+const WEIHAI_URL: string = 'http://today.hitwh.edu.cn';
+const BLOG_LIST_URL: string = 'https://hoa.moe/blog';
 const BLOG_FEED_URL: string = 'https://hoa.moe/blog/rss.xml';
 const DESKTOP_UA: string =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36';
@@ -31,6 +36,7 @@ export class NewsPage {
   ok: boolean = false;
   hasMore: boolean = false;
   message: string = '';
+  sourceUrl: string = '';
 }
 
 export class NewsService {
@@ -39,26 +45,35 @@ export class NewsService {
     new NewsCategory('10', '通知')
   ];
 
-  static async fetchCategory(categoryId: string, page: number): Promise<NewsPage> {
+  static async fetchCategory(categoryId: string, page: number,
+    campus: EasCampus = EasCampus.BENBU): Promise<NewsPage> {
     const result: NewsPage = new NewsPage();
     const blog: boolean = categoryId === 'blog';
     if ((!blog && categoryId !== '10') || page < 0 || !Number.isInteger(page)) {
       result.message = '暂时无法获取资讯，请稍后重试';
       return result;
     }
-    // The blog feed contains the complete list; it has no next-page endpoint.
+    // The HOA blog list contains all posts; it has no next-page endpoint.
     if (blog && page > 0) {
       result.ok = true;
       return result;
     }
-    const url: string = blog ? BLOG_FEED_URL :
-      BASE_URL + '/category/10' + (page > 0 ? '?page=' + page.toString() : '');
+    if (blog) {
+      return NewsService.fetchBlogCategory();
+    }
+    const url: string = NewsService.noticeUrl(campus, page);
+    result.sourceUrl = NewsService.noticeUrl(campus, 0);
     const header: Record<string, string> = {
       'User-Agent': DESKTOP_UA,
-      'Accept': blog ? 'application/rss+xml,application/xml,text/xml' : 'text/html,application/xhtml+xml'
+      'Accept': 'text/html,application/xhtml+xml'
     };
     const request: http.HttpRequest = http.createHttp();
     try {
+      if (campus === EasCampus.SHENZHEN) {
+        // Only use this site's browser cookies, never the EAS session cookie map.
+        const cookie: string = await NewsService.noticeCookie(url);
+        if (cookie.length > 0) { header['Cookie'] = cookie; }
+      }
       const resp: http.HttpResponse = await request.request(url, {
         method: http.RequestMethod.GET,
         header: header,
@@ -67,19 +82,31 @@ export class NewsService {
         readTimeout: 20000,
         usingCache: false
       });
+      if (resp.responseCode === 401 || resp.responseCode === 403) {
+        result.message = '通知网站需要认证，请打开通知网站完成认证后返回重试';
+        return result;
+      }
       if (resp.responseCode < 200 || resp.responseCode >= 300) {
         result.message = '暂时无法获取资讯，请稍后重试';
         return result;
       }
       const body: string = resp.result === undefined || resp.result === null ? '' : String(resp.result);
+      if (/<title[^>]*>[^<]*(?:统一身份认证|用户登录)|<form\b[^>]*action=["'][^"']*authserver\/login/i.test(body)) {
+        result.message = '通知网站需要认证，请打开通知网站完成认证后返回重试';
+        return result;
+      }
       try {
-        result.items = blog ? NewsService.parseBlogFeed(body) : NewsService.parseList(body);
+        result.items = NewsService.parseList(body, campus);
+        if (campus !== EasCampus.BENBU && result.items.length === 0 &&
+          !/暂无(?:通知|信息|内容)|没有相关(?:信息|内容)|(?:共|总共)\s*(?:&nbsp;|<[^>]+>|\s)*0\s*(?:<[^>]+>|\s)*(?:条|记录)/.test(body)) {
+          throw new Error('Unrecognized notice list');
+        }
       } catch (e) {
         result.message = '暂时无法解析资讯，请稍后重试';
         return result;
       }
       result.ok = true;
-      result.hasMore = !blog && result.items.length > 0;
+      result.hasMore = result.items.length > 0 && NewsService.hasNextPage(body, campus, page);
       if (result.items.length === 0) {
         result.message = '暂无可显示的资讯';
       }
@@ -89,6 +116,126 @@ export class NewsService {
       request.destroy();
     }
     return result;
+  }
+
+  private static async fetchBlogCategory(): Promise<NewsPage> {
+    const result: NewsPage = new NewsPage();
+    try {
+      result.items = NewsService.parseBlogList(await NewsService.blogBody(BLOG_LIST_URL, 'text/html'));
+    } catch (e) {
+      try {
+        result.items = NewsService.parseBlogFeed(await NewsService.blogBody(BLOG_FEED_URL,
+          'application/rss+xml,application/xml,text/xml'));
+      } catch (feedError) {
+        result.message = '博客刷新失败，请稍后重试';
+        return result;
+      }
+    }
+    result.ok = true;
+    if (result.items.length === 0) {
+      result.message = '暂无可显示的资讯';
+    }
+    return result;
+  }
+
+  private static async blogBody(url: string, accept: string): Promise<string> {
+    const request: http.HttpRequest = http.createHttp();
+    try {
+      const resp: http.HttpResponse = await request.request(url, {
+        method: http.RequestMethod.GET,
+        header: { 'User-Agent': DESKTOP_UA, 'Accept': accept },
+        expectDataType: http.HttpDataType.STRING,
+        connectTimeout: 15000,
+        readTimeout: url === BLOG_LIST_URL ? 15000 : 30000,
+        usingCache: false
+      });
+      if (resp.responseCode < 200 || resp.responseCode >= 300) {
+        throw new Error('Blog request failed');
+      }
+      return resp.result === undefined || resp.result === null ? '' : String(resp.result);
+    } finally {
+      request.destroy();
+    }
+  }
+
+  static parseBlogList(html: string): NewsItem[] {
+    const items: NewsItem[] = [];
+    const seen: Set<string> = new Set<string>();
+    const card: RegExp = /<a\b([^>]*)>\s*<span\b[^>]*class=["'][^"']*\bsr-only\b[^"']*["'][^>]*>[\s\S]*?<\/span>\s*<\/a>([\s\S]*?)<time\b([^>]*)>[\s\S]*?<\/time>/gi;
+    let match: RegExpExecArray | null = card.exec(html);
+    while (match !== null) {
+      const path: string = NewsService.attribute(match[1], 'href');
+      const titleMatch: RegExpExecArray | null = /<h2\b[^>]*>([\s\S]*?)<\/h2>/i.exec(match[2]);
+      const title: string = titleMatch === null ? '' : NewsService.cleanText(titleMatch[1]);
+      if (/^\/blog\/[^/?#\s<>]+$/.test(path) && path !== '/blog/tags' && path !== '/blog/rss.xml' &&
+        title.length > 0 && !seen.has(path)) {
+        const item: NewsItem = new NewsItem();
+        item.url = 'https://hoa.moe' + path;
+        item.title = title;
+        item.department = 'HOA';
+        const date: string = NewsService.attribute(match[3], 'datetime');
+        const dateMatch: RegExpExecArray | null = /^(\d{4}-\d{2}-\d{2})/.exec(date);
+        item.date = dateMatch === null ? '' : dateMatch[1];
+        seen.add(path);
+        items.push(item);
+      }
+      match = card.exec(html);
+    }
+    if (items.length === 0) {
+      throw new Error('Unrecognized blog list');
+    }
+    return items;
+  }
+
+  static noticeUrl(campus: EasCampus, page: number): string {
+    if (campus === EasCampus.SHENZHEN) {
+      // PAGENUM is one-based. The site's totalpage value changes as notices are published.
+      return SHENZHEN_URL + '/list.jsp?PAGENUM=' + (page + 1).toString() +
+        '&urltype=tree.TreeTempUrl&wbtreeid=1053';
+    }
+    if (campus === EasCampus.WEIHAI) {
+      return WEIHAI_URL + '/1024/list' + (page > 0 ? (page + 1).toString() : '') + '.htm';
+    }
+    return BASE_URL + '/category/10' + (page > 0 ? '?page=' + page.toString() : '');
+  }
+
+  private static noticeCookie(url: string): Promise<string> {
+    return new Promise<string>((resolve) => {
+      const timer: number = setTimeout(() => resolve(''), 3000);
+      try {
+        webview.WebCookieManager.fetchCookie(url).then((value: string) => {
+          clearTimeout(timer);
+          resolve(value || '');
+        }).catch(() => {
+          clearTimeout(timer);
+          resolve('');
+        });
+      } catch (e) {
+        clearTimeout(timer);
+        resolve('');
+      }
+    });
+  }
+
+  private static hasNextPage(html: string, campus: EasCampus, page: number): boolean {
+    if (campus === EasCampus.BENBU) { return true; }
+    const total: RegExpExecArray | null = campus === EasCampus.WEIHAI ?
+      /<em\b[^>]*class=["']all_pages["'][^>]*>\s*(\d+)\s*<\/em>/i.exec(html) :
+      /totalpage=(\d+)|共\s*(\d+)\s*页/i.exec(html);
+    if (total !== null) { return page + 1 < Number(total[1] || total[2]); }
+    // A disabled next link has no HTTP destination; never re-fetch the last page.
+    const links: RegExp = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+    let match: RegExpExecArray | null = links.exec(html);
+    while (match !== null) {
+      const href: string = NewsService.attribute(match[1], 'href');
+      if ((NewsService.cleanText(match[2]).includes('下页') ||
+        NewsService.cleanText(match[2]).includes('下一页')) &&
+        (campus === EasCampus.SHENZHEN ? /[?&]PAGENUM=\d+/i.test(href) : /\/1024\/list\d+\.htm/.test(href))) {
+        return true;
+      }
+      match = links.exec(html);
+    }
+    return false;
   }
 
   static parseBlogFeed(feed: string): NewsItem[] {
@@ -167,7 +314,10 @@ export class NewsService {
     return items;
   }
 
-  static parseList(html: string): NewsItem[] {
+  static parseList(html: string, campus: EasCampus = EasCampus.BENBU): NewsItem[] {
+    if (campus !== EasCampus.BENBU) {
+      return NewsService.parseCampusList(html, campus);
+    }
     const out: NewsItem[] = [];
     const seen: Set<string> = new Set<string>();
     const itemPattern: RegExp = /<li>\s*<div class="pull-right">([\s\S]*?)<\/li>/g;
@@ -198,6 +348,64 @@ export class NewsService {
     return out;
   }
 
+  private static parseCampusList(html: string, campus: EasCampus): NewsItem[] {
+    const out: NewsItem[] = [];
+    const seen: Set<string> = new Set<string>();
+    const content: string = html.replace(/<!--[\s\S]*?-->|<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+    // VSB uses li or table rows; WebPlus uses li with news-time2 and a full title attribute.
+    const patterns: RegExp[] = [/<li\b[^>]*>([\s\S]*?)<\/li>/gi, /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi];
+    for (let i: number = 0; i < patterns.length && out.length === 0; i++) {
+      let row: RegExpExecArray | null = patterns[i].exec(content);
+      while (row !== null) {
+        const block: string = row[1];
+        row = patterns[i].exec(content);
+        const links: RegExp = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+        let link: RegExpExecArray | null = links.exec(block);
+        while (link !== null) {
+          const url: string = NewsService.articleUrl(NewsService.attribute(link[1], 'href'), campus);
+          const title: string = NewsService.cleanText(NewsService.attribute(link[1], 'title') || link[2]);
+          link = links.exec(block);
+          if (url.length === 0 || title.length === 0 || seen.has(url)) { continue; }
+          seen.add(url);
+          const item: NewsItem = new NewsItem();
+          item.url = url;
+          item.title = title;
+          // Dates mentioned in the article title are not its publication date.
+          const metadata: string = block.replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, '');
+          const date: RegExpExecArray | null = /(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})/.exec(
+            NewsService.cleanText(metadata));
+          item.date = date === null ? '' : date[1] + '-' + date[2].padStart(2, '0') + '-' + date[3].padStart(2, '0');
+          out.push(item);
+        }
+      }
+    }
+    return out;
+  }
+
+  private static articleUrl(href: string, campus: EasCampus): string {
+    const origin: string = campus === EasCampus.SHENZHEN ? SHENZHEN_URL : WEIHAI_URL;
+    let path: string = href.trim();
+    const absolute: RegExpExecArray | null = /^(?:https?:)?\/\/([^/]+)(\/.*)$/i.exec(path);
+    let base: string = origin;
+    if (absolute !== null) {
+      if (absolute[1].toLowerCase() !== origin.substring(7)) { return ''; }
+      base = path.startsWith('https://') ? origin.replace('http:', 'https:') : origin;
+      path = absolute[2];
+    }
+    path = '/' + path.replace(/^(?:\.\/|\.\.\/)+/, '').replace(/^\//, '');
+    const valid: boolean = campus === EasCampus.SHENZHEN ?
+      /^\/info\/\d+\/\d+\.htm(?:[?#][^\s<>]*)?$/.test(path) ||
+        /^\/content\.jsp\?[^\s<>]*\bwbnewsid=\d+(?:&[^\s<>]*)?$/.test(path) :
+      /^\/\d{4}\/\d{4}\/c\d+a\d+\/page\.htm(?:[?#][^\s<>]*)?$/.test(path);
+    return valid ? base + path : '';
+  }
+
+  private static attribute(attributes: string, name: string): string {
+    const match: RegExpExecArray | null = new RegExp('(?:^|\\s)' + name + '\\s*=\\s*([\"\'])([\\s\\S]*?)\\1', 'i')
+      .exec(attributes);
+    return match === null ? '' : match[2].replace(/&amp;/g, '&');
+  }
+
   private static cleanText(raw: string): string {
     return raw.replace(/<[^>]+>/g, '')
       .replace(/&nbsp;/g, ' ')
@@ -205,7 +413,7 @@ export class NewsService {
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"')
-      .replace(/&#039;/g, '\'')
+      .replace(/&apos;|&#0?39;/g, '\'')
       .replace(/\s+/g, ' ')
       .trim();
   }

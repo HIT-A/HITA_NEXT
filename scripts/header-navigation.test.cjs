@@ -42,7 +42,7 @@ test('page and sheet header back buttons stay on the leading side', () => {
   }
   const home = read('pages/Home.ets');
   const session = home.slice(home.indexOf('  sessionSheet()'));
-  assert.match(session, /Column\(\) \{\s*Row\(\) \{\s*HeaderBackButton\(\{/);
+  assert.match(session, /Column\(\) \{\s*ImmersiveHeader\(\{[^\n]+\}\) \{\s*Row\(\) \{\s*HeaderBackButton\(\{/);
   const login = read('feature/eas/webLogin/EasLoginPage.ets');
   assert.match(login, /Row\(\{ space: 8 \}\) \{\s*HeaderBackButton\(\{/);
 });

@@ -3,6 +3,7 @@
  */
 import { webview } from '@kit.ArkWeb';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
+import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
 import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 
 @Entry
@@ -52,39 +53,41 @@ struct WebBrowserPage {
 
   build() {
     Column() {
-      Row() {
-        HeaderBackButton({
-          onBack: () => this.goBack()
-        })
-          .margin({ right: 12 })
-        Text(this.titleText)
-          .fontSize(17)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.hita_text_1a1a1a'))
-          .layoutWeight(1)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Button({ type: ButtonType.Circle }) {
-          SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-            .fontSize(18)
-            .fontColor([$r('app.color.hita_primary')])
-        }
-        .width(40)
-        .height(40)
-        .backgroundColor($r('app.color.hita_control'))
-        .accessibilityText('刷新')
-        .onClick(() => {
-          this.failed = false;
-          try {
-            this.controller.refresh();
-          } catch (e) {
+      ImmersiveHeader({ barHeight: 60 }) {
+        Row() {
+          HeaderBackButton({
+            onBack: () => this.goBack()
+          })
+            .margin({ right: 12 })
+          Text(this.titleText)
+            .fontSize(17)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.hita_text_1a1a1a'))
+            .layoutWeight(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Button({ type: ButtonType.Circle }) {
+            SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+              .fontSize(18)
+              .fontColor([$r('app.color.hita_primary')])
           }
-        })
+          .width(40)
+          .height(40)
+          .backgroundColor($r('app.color.hita_control'))
+          .accessibilityText('刷新')
+          .onClick(() => {
+            this.failed = false;
+            try {
+              this.controller.refresh();
+            } catch (e) {
+            }
+          })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+        .backgroundColor($r('app.color.hita_surface'))
+        .alignItems(VerticalAlign.Center)
       }
-      .width('100%')
-      .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-      .backgroundColor($r('app.color.hita_surface'))
-      .alignItems(VerticalAlign.Center)
 
       if (this.progress > 0 && this.progress < 100) {
         Progress({ value: this.progress, total: 100, type: ProgressType.Linear })

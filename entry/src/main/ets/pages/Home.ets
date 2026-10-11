@@ -9,12 +9,16 @@ import { common } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { CommonModifier, FrameCallback, KeyboardAvoidMode, SymbolGlyphModifier } from '@kit.ArkUI';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
+import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
+import { ImmersiveEventCard } from '../common/components/ImmersiveEventCard';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
 import { TimetableTheme } from '../common/theme/TimetableTheme';
 import { AppearanceMode, AppearanceStore } from '../common/theme/AppearanceStore';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { CompatibleDockModifier } from '../common/theme/CompatibleDockModifier';
+import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
+import { CompatibleSheetMaterial } from '../common/theme/CompatibleSheetMaterial';
 import { CirclePaintModifier } from '../common/theme/CirclePaintModifier';
 import { FrostedDock } from '../common/components/FrostedDock';
 import { DockNavigationGuard } from '../common/util/DockNavigationGuard';
@@ -1286,7 +1290,7 @@ struct Home {
       this.selectTab(index);
       this.selectedNav = index;
     })
-    .bindSheet($$this.activeSheetVisible, this.activeSheet(), {
+    .bindSheet($$this.activeSheetVisible, this.activeSheet(), CompatibleSheetMaterial.options({
       height: this.loginSheetOpen ? SheetSize.LARGE : SheetSize.FIT_CONTENT,
       dragBar: true,
       // Every sheet owns its header control; the system close bubble overlaps
@@ -1309,7 +1313,8 @@ struct Home {
         this.calendarExportSheetOpen = false;
         this.calendarExportTimetable = undefined;
       }
-    });
+    }, this.loginSheetOpen || this.sessionSheetOpen || this.courseSheetOpen || this.timetablePaletteOpen ||
+      this.calendarExportSheetOpen));
   }
 
   @Builder
@@ -1437,11 +1442,13 @@ struct Home {
     Column() {
       this.todayHeader();
 
-      Row() {
-        this.todayHeroCard();
+      ImmersiveHeader({ barHeight: this.activeClass !== undefined ? 184 : 148 }) {
+        Row() {
+          this.todayHeroCard();
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16 })
       }
-      .width('100%')
-      .padding({ left: 16, right: 16 })
       this.todaySectionHeader();
 
       if (this.todayItems.length === 0) {
@@ -1450,7 +1457,11 @@ struct Home {
         List({ space: 10 }) {
           ForEach(this.todayItems, (event: EasEventItem) => {
             ListItem() {
-              this.eventRow(event);
+              if (CompatibleSheetMaterial.isEnabled()) {
+                ImmersiveEventCard({ content: () => { this.eventRow(event, true); } })
+              } else {
+                this.eventRow(event);
+              }
             }
           }, (event: EasEventItem) => event.id);
         }
@@ -1597,6 +1608,7 @@ struct Home {
     .backgroundColor($r('app.color.hita_primary_fill'))
     .borderRadius(24)
     .shadow({ radius: 14, color: '#262E86E8', offsetY: 6 })
+    .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_primary_fill'), true))
     .margin({ top: 12 });
   }
 
@@ -1647,7 +1659,7 @@ struct Home {
   }
 
   @Builder
-  eventRow(event: EasEventItem) {
+  eventRow(event: EasEventItem, immersive: boolean = false) {
     Row() {
       Column() {
         Text(EasTimeTools.printTime(event.from))
@@ -1798,12 +1810,13 @@ struct Home {
       .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
-    .backgroundColor(COLOR_CARD)
+    .backgroundColor(immersive ? Color.Transparent : COLOR_CARD)
     .borderRadius(16)
     .border({ width: event.containsTimestamp(this.nowTick) ? 1.5 : 1,
       color: event.containsTimestamp(this.nowTick) ? $r('app.color.hita_focus') : $r('app.color.hita_divider_edf1f7') })
     .clip(true)
-    .margin({ bottom: 2 });
+    .hitTestBehavior(immersive ? HitTestMode.Transparent : HitTestMode.Default)
+    .margin({ bottom: immersive ? 0 : 2 });
   }
 
   @Builder
@@ -1994,66 +2007,70 @@ struct Home {
       }
 
       Column() {
-        Row() {
-          Column() {
-            Text(this.currentTimetable === undefined ? '时间表' :
-              '第' + this.timetableWeek.toString() + '周')
-              .fontSize(34)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.timetableInk())
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(this.timetableCampusTerm())
-              .fontSize(15)
-              .fontColor(this.timetableInk())
-              .backgroundColor(Color.Transparent)
-              .borderRadius(12)
-              .padding({ left: 11, right: 11, top: 5, bottom: 5 })
-              .margin({ top: 7 })
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-          .backgroundColor(Color.Transparent)
-
-          Button({ type: ButtonType.Circle }) {
-            SymbolGlyph($r('sys.symbol.paintpalette'))
-              .fontSize(20)
-              .fontColor([COLOR_PRIMARY]);
-          }
-          .width(44)
-          .height(44)
-          .backgroundColor(COLOR_NAV_ACTIVE)
-          .flexShrink(0)
-          .margin({ left: 8 })
-          .accessibilityText('选择时间表字体颜色')
-          .onClick(() => {
-            if (this.canOpenSheet()) {
-              this.timetablePaletteOpen = true;
-              this.activeSheetVisible = true;
+        ImmersiveHeader({ barHeight: 110 }) {
+          Row() {
+            Column() {
+              Text(this.currentTimetable === undefined ? '时间表' :
+                '第' + this.timetableWeek.toString() + '周')
+                .fontSize(34)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(this.timetableInk())
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+              Text(this.timetableCampusTerm())
+                .fontSize(15)
+                .fontColor(this.timetableInk())
+                .backgroundColor(Color.Transparent)
+                .borderRadius(12)
+                .padding({ left: 11, right: 11, top: 5, bottom: 5 })
+                .margin({ top: 7 })
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
             }
-          })
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+            .backgroundColor(Color.Transparent)
 
-          Button({ type: ButtonType.Circle }) {
-            SymbolGlyph($r('sys.symbol.picture'))
-              .fontSize(20)
-              .fontColor([COLOR_PRIMARY]);
+            Button({ type: ButtonType.Circle }) {
+              SymbolGlyph($r('sys.symbol.paintpalette'))
+                .fontSize(20)
+                .fontColor([CompatibleMaterialModifier.foreground(COLOR_PRIMARY)]);
+            }
+            .width(44)
+            .height(44)
+            .backgroundColor(COLOR_NAV_ACTIVE)
+            .attributeModifier(new CompatibleMaterialModifier(COLOR_NAV_ACTIVE))
+            .flexShrink(0)
+            .margin({ left: 8 })
+            .accessibilityText('选择时间表字体颜色')
+            .onClick(() => {
+              if (this.canOpenSheet()) {
+                this.timetablePaletteOpen = true;
+                this.activeSheetVisible = true;
+              }
+            })
+
+            Button({ type: ButtonType.Circle }) {
+              SymbolGlyph($r('sys.symbol.picture'))
+                .fontSize(20)
+                .fontColor([CompatibleMaterialModifier.foreground(COLOR_PRIMARY)]);
+            }
+            .width(44)
+            .height(44)
+            .backgroundColor(COLOR_NAV_ACTIVE)
+            .attributeModifier(new CompatibleMaterialModifier(COLOR_NAV_ACTIVE))
+            .flexShrink(0)
+            .margin({ left: 8 })
+            .accessibilityText('选择时间表背景')
+            .onClick(() => {
+              this.onTimetableBackgroundTap();
+            })
           }
-          .width(44)
-          .height(44)
-          .backgroundColor(COLOR_NAV_ACTIVE)
-          .flexShrink(0)
-          .margin({ left: 8 })
-          .accessibilityText('选择时间表背景')
-          .onClick(() => {
-            this.onTimetableBackgroundTap();
-          })
+          .width('100%')
+          .padding({ left: 20, right: 18, top: 16, bottom: 10 })
+          .alignItems(VerticalAlign.Center)
+          .backgroundColor(Color.Transparent)
         }
-        .width('100%')
-        .padding({ left: 20, right: 18, top: 16, bottom: 10 })
-        .alignItems(VerticalAlign.Center)
-        .backgroundColor(Color.Transparent)
 
         if (this.currentTimetable !== undefined) {
           this.timetableDateHeader()
@@ -2292,14 +2309,16 @@ struct Home {
         });
       });
       if (this.appearanceExpanded) {
-        Row({ space: 8 }) {
-          this.appearanceOption(AppearanceMode.DARK, '开启');
-          this.appearanceOption(AppearanceMode.LIGHT, '关闭');
-          this.appearanceOption(AppearanceMode.SYSTEM, '跟随系统');
+        ImmersiveHeader({ barHeight: 60, materialEnabled: CompatibleSheetMaterial.isEnabled() }) {
+          Row({ space: 8 }) {
+            this.appearanceOption(AppearanceMode.DARK, '开启');
+            this.appearanceOption(AppearanceMode.LIGHT, '关闭');
+            this.appearanceOption(AppearanceMode.SYSTEM, '跟随系统');
+          }
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 4, bottom: 12 })
+          .transition(TransitionEffect.OPACITY);
         }
-        .width('100%')
-        .padding({ left: 16, right: 16, top: 4, bottom: 12 })
-        .transition(TransitionEffect.OPACITY);
       }
     }
     .width('100%')
@@ -2324,7 +2343,8 @@ struct Home {
         });
       Text(label)
         .fontSize(13)
-        .fontColor(COLOR_TEXT_PRIMARY)
+        .fontColor(CompatibleSheetMaterial.isEnabled() ? CompatibleMaterialModifier.foreground(COLOR_TEXT_PRIMARY) :
+          COLOR_TEXT_PRIMARY)
         .maxLines(1);
     }
     .width(0)
@@ -2334,6 +2354,8 @@ struct Home {
     .justifyContent(FlexAlign.Center)
     .backgroundColor(this.appearanceMode === mode ? COLOR_NAV_ACTIVE : $r('app.color.hita_control'))
     .borderRadius(8)
+    .attributeModifier(new CompatibleMaterialModifier(this.appearanceMode === mode ? COLOR_NAV_ACTIVE :
+      $r('app.color.hita_control'), false, CompatibleSheetMaterial.isEnabled()))
     .enabled(!this.appearanceBusy)
     .onClick(() => {
       void this.selectAppearance(mode);
@@ -2420,16 +2442,24 @@ struct Home {
         .margin({ left: COURSE_DETAIL_TEXT_GAP });
         if (event.type === EasEventType.EXAM ||
           (event.type === EasEventType.CLASS && event.subjectId.length > 0)) {
-          Button({ type: ButtonType.Circle }) {
-            SymbolGlyph($r('sys.symbol.paintpalette')).fontSize(22).fontColor([COLOR_PRIMARY]);
+          Column() {
+            ImmersiveHeader({ barHeight: 44, materialEnabled: CompatibleSheetMaterial.isEnabled() }) {
+              Button({ type: ButtonType.Circle }) {
+                SymbolGlyph($r('sys.symbol.paintpalette')).fontSize(22)
+                  .fontColor([CompatibleSheetMaterial.isEnabled() ? CompatibleMaterialModifier.foreground(COLOR_PRIMARY) :
+                    COLOR_PRIMARY]);
+              }
+              .width(44).height(44).padding(0).flexShrink(0)
+              .backgroundColor(COLOR_NAV_ACTIVE)
+              .attributeModifier(new CompatibleMaterialModifier(COLOR_NAV_ACTIVE, false, CompatibleSheetMaterial.isEnabled()))
+              .accessibilityText(event.type === EasEventType.EXAM ? '修改考试颜色' : '修改课程颜色')
+              .onClick(() => {
+                this.courseColorPreview = event.color;
+                this.courseColorEditing = !this.courseColorEditing;
+              });
+            }
           }
-          .width(44).height(44).padding(0).flexShrink(0)
-          .backgroundColor(COLOR_NAV_ACTIVE)
-          .accessibilityText(event.type === EasEventType.EXAM ? '修改考试颜色' : '修改课程颜色')
-          .onClick(() => {
-            this.courseColorPreview = event.color;
-            this.courseColorEditing = !this.courseColorEditing;
-          });
+          .width(44).height(44).flexShrink(0);
         }
       }
       .width('100%')
@@ -2439,6 +2469,7 @@ struct Home {
       if (this.courseColorEditing) {
         CourseColorEditor({
           initialColor: event.color,
+          immersiveControls: true,
           examMode: event.type === EasEventType.EXAM,
           textColor: this.timetableTextColor,
           onPreview: (color: number) => { this.courseColorPreview = color; },
@@ -2512,29 +2543,31 @@ struct Home {
   @Builder
   sessionSheet() {
     Column() {
-      Row() {
-        HeaderBackButton({
-          onBack: () => {
-            this.closeActiveSheet();
+      ImmersiveHeader({ barHeight: 60 }) {
+        Row() {
+          HeaderBackButton({
+            onBack: () => {
+              this.closeActiveSheet();
+            }
+          })
+            .margin({ right: 12 });
+          Column() {
+            Text('教务认证')
+              .fontSize(22)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(COLOR_TEXT_PRIMARY);
+            Text(this.sessionSheetInfo === undefined ? '请登录教务账号以继续' : '当前教务会话')
+              .fontSize(13)
+              .fontColor(COLOR_TEXT_SECONDARY)
+              .margin({ top: 4 });
           }
-        })
-          .margin({ right: 12 });
-        Column() {
-          Text('教务认证')
-            .fontSize(22)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(COLOR_TEXT_PRIMARY);
-          Text(this.sessionSheetInfo === undefined ? '请登录教务账号以继续' : '当前教务会话')
-            .fontSize(13)
-            .fontColor(COLOR_TEXT_SECONDARY)
-            .margin({ top: 4 });
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start);
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start);
 
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center);
       }
-      .width('100%')
-      .alignItems(VerticalAlign.Center);
 
       Column() {
         Text('认证校区')
@@ -2543,16 +2576,19 @@ struct Home {
           .fontColor(COLOR_TEXT_SECONDARY)
           .width('100%');
 
-        Row({ space: 4 }) {
-          this.sessionCampusButton('SHENZHEN', '深圳');
-          this.sessionCampusButton('BENBU', '本部');
-          this.sessionCampusButton('WEIHAI', '威海');
+        ImmersiveHeader({ barHeight: 57 }) {
+          Row({ space: 4 }) {
+            this.sessionCampusButton('SHENZHEN', '深圳');
+            this.sessionCampusButton('BENBU', '本部');
+            this.sessionCampusButton('WEIHAI', '威海');
+          }
+          .width('100%')
+          .padding(4)
+          .backgroundColor($r('app.color.hita_control_eaf0f7'))
+          .borderRadius(16)
+          .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_control_eaf0f7')))
+          .margin({ top: 7 });
         }
-        .width('100%')
-        .padding(4)
-        .backgroundColor($r('app.color.hita_control_eaf0f7'))
-        .borderRadius(16)
-        .margin({ top: 7 });
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
@@ -2600,7 +2636,7 @@ struct Home {
         }
         .width('100%')
         .padding(15)
-        .backgroundColor($r('app.color.hita_surface_soft_f8fafd'))
+        .backgroundColor(CompatibleSheetMaterial.cardColor($r('app.color.hita_surface_soft_f8fafd')))
         .border({ width: 1, color: $r('app.color.hita_divider_e3eaf2') })
         .borderRadius(18)
         .margin({ top: 16 });
@@ -2686,7 +2722,7 @@ struct Home {
         }
         .width('100%')
         .padding(16)
-        .backgroundColor($r('app.color.hita_surface_soft_f8fafd'))
+        .backgroundColor(CompatibleSheetMaterial.cardColor($r('app.color.hita_surface_soft_f8fafd')))
         .border({ width: 1, color: $r('app.color.hita_divider_e3eaf2') })
         .borderRadius(18)
         .margin({ top: 16 });

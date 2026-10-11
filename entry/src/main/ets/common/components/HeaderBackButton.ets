@@ -1,4 +1,5 @@
 import { HitaColors } from '../theme/HitaColors';
+import { CompatibleMaterialModifier } from '../theme/CompatibleMaterialModifier';
 
 @Component
 export struct HeaderBackButton {
@@ -10,13 +11,14 @@ export struct HeaderBackButton {
       SymbolGlyph($r('sys.symbol.chevron_left'))
         .fontSize(20)
         .fontWeight(FontWeight.Regular)
-        .fontColor([HitaColors.onSurface]);
+        .fontColor([CompatibleMaterialModifier.foreground(HitaColors.onSurface)]);
     }
     .width(44)
     .height(44)
     .padding(0)
     .flexShrink(0)
     .backgroundColor($r('app.color.hita_control'))
+    .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_control')))
     .accessibilityText(this.accessibilityLabel)
     .onClick(() => {
       this.onBack();
