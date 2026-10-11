@@ -62,9 +62,22 @@ test('timetable detail uses an aligned color circle instead of the old back butt
     assert.match(section, /\.margin\(\{ left: COURSE_DETAIL_TEXT_GAP \}\)/);
     assert.match(section, /\.alignItems\(HorizontalAlign\.Start\)/);
   }
-  assert.match(header, /CirclePaintModifier\(Home\.canvasColorCss\(timetableBlockColor\(event\.color\)\)\)/);
+  assert.match(header, /CirclePaintModifier\(Home\.canvasColorCss\(timetableBlockColor\(\s*this\.courseColorEditing \? this\.courseColorPreview : event\.color\)\)\)/);
   assert.match(header, /event\.type === EasEventType\.EXAM \? '考试详情' : '课程详情'/);
   assert.match(home, /\.bindSheet\(\$\$this\.activeSheetVisible,[\s\S]*?dragBar: true/);
+});
+
+test('local and remote exam details use aligned color circles with live palette previews', () => {
+  const page = read('pages/ExamPage.ets');
+  assert.doesNotMatch(page, /教务返回|Text\('教务查询'\)/);
+  assert.match(page, /Text\(this\.queryContext\)/);
+  const details = page.slice(page.indexOf('  private examDetailSheet('), page.indexOf('  private examColorButton('));
+  assert.equal((details.match(/Circle\(\)/g) || []).length, 2);
+  assert.doesNotMatch(details, /HeaderBackButton|\.width\(7\)|\.height\(50\)/);
+  assert.equal((details.match(/\.margin\(\{ left: DETAIL_TEXT_GAP \}\)/g) || []).length, 2);
+  assert.equal((details.match(/onPreview: \(color: number\) => \{ this\.examColorPreview = color; \}/g) || []).length, 2);
+  assert.equal((details.match(/this\.examColorEditing \? this\.examColorPreview/g) || []).length, 2);
+  assert.match(read('pages/Home.ets'), /onPreview: \(color: number\) => \{ this\.courseColorPreview = color; \}/);
 });
 
 test('login uses one app-return button and no overlapping system close control', () => {

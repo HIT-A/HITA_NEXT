@@ -1,7 +1,7 @@
 /**
  * ScorePage.ets — 成绩查询。
  *
- * 需要教务会话：无会话 → 空态引导去登录；有会话 → 拉取学期成绩并渲染。
+ * 需要教务会话：无会话 → 显示登录提示；有会话 → 拉取学期成绩并渲染。
  */
 import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
@@ -118,24 +118,6 @@ struct ScorePage {
             .width('100%')
             .textAlign(TextAlign.Center)
             .lineHeight(20)
-          if (!this.hasSession) {
-            Text('去登录')
-              .fontSize(15)
-              .fontWeight(FontWeight.Medium)
-              .fontColor('#FFFFFF')
-              .height(44)
-              .padding({ left: 32, right: 32 })
-              .backgroundColor($r('app.color.hita_primary_fill'))
-              .borderRadius(22)
-              .textAlign(TextAlign.Center)
-              .margin({ top: 20 })
-              .onClick(() => {
-                this.getUIContext().getRouter().pushUrl({
-                  url: 'pages/Home',
-                  params: { 'openSession': '1' }
-                });
-              })
-          }
         }
         .width('100%')
         .height('100%')

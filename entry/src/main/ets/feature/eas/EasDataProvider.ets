@@ -16,6 +16,7 @@ import { EasLegacyCourseCatalogParser, LegacyCourseAttributes } from './data/Eas
 import { ParsedShenzhenWebScores, parseShenzhenWebScores } from './data/ShenzhenWebScores';
 import { ParsedShenzhenWebExams, parseShenzhenWebExams } from './data/ShenzhenWebExams';
 import { ExamSchedule } from './ExamSchedule';
+import { LegacyWebExams } from './data/LegacyWebExams';
 import {
   parseShenzhenWebSelectedSubjects,
   parseShenzhenWebTerms,
@@ -45,6 +46,7 @@ export class EasShenzhenEndpoints {
 }
 
 export class EasWeihaiEndpoints {
+  static examsPath: string = '/kscx/queryKcForXs';
   static termsPath: string = '/kbcx/queryGrkb';
   static scoreTermsPath: string = '/cjcx/queryQmcj';
   static timetableTermsPath: string = '/kbcx/queryGrkb';
@@ -54,6 +56,7 @@ export class EasWeihaiEndpoints {
 }
 
 export class EasBenbuEndpoints {
+  static examsPath: string = '/kscx/queryKcForXs1';
   static termsPath: string = '/kbcx/queryGrkb';
   static scoreTermsPath: string = '/cjcx/queryQmcj';
   static timetableTermsPath: string = '/kbcx/queryGrkb';
@@ -79,6 +82,11 @@ export class EasScoresResult {
   msg: string = '';
   items: EasCourseScoreItem[] = [];
   ok: boolean = false;
+}
+
+export class EasExamQueryResult {
+  items: EasExamItem[] = [];
+  failedTypes: string[] = [];
 }
 
 export class EasDataProvider {
@@ -669,13 +677,126 @@ export class EasDataProvider {
   }
 
   async getExamItems(session: EasSession, term: EasTermItem | undefined): Promise<EasExamItem[]> {
+    return (await this.getExamResult(session, term)).items;
+  }
+
+  /** Prefer the exam page's selected term over unrelated course-registration terms. */
+  async getExamTerms(session: EasSession): Promise<EasTermItem[]> {
+    if (session.campus === EasCampus.SHENZHEN) {
+      return this.getAllTerms(session);
+    }
+    EasDataProvider.assertLegacyExamSession(session);
+    const path: string = session.campus === EasCampus.WEIHAI ?
+      EasWeihaiEndpoints.examsPath : EasBenbuEndpoints.examsPath;
+    const response: EasApiResponse = await this.getHtml(session, path);
+    if (response.statusCode === 405) {
+      return this.getAllTerms(session);
+    }
+    EasDataProvider.assertExamResponse(response);
+    const terms: EasTermItem[] = EasLegacyTimetableParser.parseTerms(response.body);
+    return terms.length > 0 ? terms : this.getAllTerms(session);
+  }
+
+  async getExamResult(session: EasSession, term: EasTermItem | undefined): Promise<EasExamQueryResult> {
     if (term === undefined) {
-      return [];
+      throw new Error('未获取到学期列表');
     }
     if (session.campus === EasCampus.SHENZHEN) {
-      return await this.getShenzhenExams(session, term);
+      const result: EasExamQueryResult = new EasExamQueryResult();
+      result.items = await this.getShenzhenExams(session, term);
+      return result;
     }
-    throw new Error('当前校区暂不支持考试查询，请手动添加考试');
+    return this.getLegacyExams(session, term);
+  }
+
+  private static assertLegacyExamSession(session: EasSession): void {
+    if (session.campus !== EasCampus.BENBU && session.campus !== EasCampus.WEIHAI) {
+      throw new Error('当前校区暂不支持考试查询，请手动添加考试');
+    }
+    if (session.getStudentType() === '2') {
+      throw new Error('本部和威海研究生考试接口暂未接入，请到教务网站查询');
+    }
+    if (session.webCookies.size === 0) {
+      throw new Error('教务会话已失效，请重新登录');
+    }
+  }
+
+  private static assertExamResponse(response: EasApiResponse): void {
+    const body: string = response.body.toLowerCase();
+    if (response.statusCode === 401 || response.statusCode === 403 ||
+      response.statusCode === 302 || response.statusCode === 303 ||
+      EasDataProvider.isLoginResponse(response.body) ||
+      /<input\b[^>]*type\s*=\s*["']?password\b/.test(body) ||
+      /请(?:先|重新)登录|登录(?:已)?(?:失效|过期)|会话(?:已)?(?:失效|过期|超时)/.test(body) ||
+      /(?:window|top|parent)(?:\.location)(?:\.href)?\s*=\s*["'][^"']*(?:logincas|\/cas\/login|\/login)/.test(body)) {
+      throw new Error('教务会话已失效，请重新登录');
+    }
+    if (response.statusCode === 0) {
+      throw new Error('考试请求网络失败');
+    }
+    if (!EasDataProvider.isHttpOk(response)) {
+      throw new Error('教务考试查询暂不可用，请稍后重试');
+    }
+  }
+
+  private async getLegacyExams(session: EasSession, term: EasTermItem): Promise<EasExamQueryResult> {
+    EasDataProvider.assertLegacyExamSession(session);
+    if (term.yearCode.trim().length === 0 || term.termCode.trim().length === 0) {
+      throw new Error('未获取到学期列表');
+    }
+    const path: string = session.campus === EasCampus.WEIHAI ?
+      EasWeihaiEndpoints.examsPath : EasBenbuEndpoints.examsPath;
+    const codes: string[] = ['01', '02', '03'];
+    const names: string[] = ['期末', '期中', '补考'];
+    const result: EasExamQueryResult = new EasExamQueryResult();
+    const seen: Set<string> = new Set<string>();
+    let lastError: Error = new Error('未获取到考试安排');
+    for (let i: number = 0; i < codes.length; i++) {
+      try {
+        const fields: Map<string, string> = new Map<string, string>();
+        fields.set('xnxq', term.getCode());
+        fields.set('kssjd', codes[i]);
+        // Android Benbu uses Jsoup's default GET, whereas Weihai requires a form POST.
+        let response: EasApiResponse = session.campus === EasCampus.WEIHAI ?
+          await this.postForm(session, path, fields, 20000) :
+          await this.getHtml(session, path + '?xnxq=' + encodeURIComponent(term.getCode()) +
+            '&kssjd=' + codes[i], 20000);
+        if (session.campus === EasCampus.BENBU && response.statusCode === 405) {
+          // Aura uses POST for this same endpoint. Only retry a definite method rejection.
+          response = await this.postForm(session, path, fields, 20000);
+        }
+        EasDataProvider.assertExamResponse(response);
+        const rows: EasExamItem[] = LegacyWebExams.parse(
+          response.body, term, names[i], ExamSchedule.campusName(session.campus.toString()));
+        for (let j: number = 0; j < rows.length; j++) {
+          const row: EasExamItem = rows[j];
+          const key: string = JSON.stringify([row.courseName, row.examDate, row.examTime, row.examLocation,
+            row.examType]);
+          if (!seen.has(key)) {
+            seen.add(key);
+            result.items.push(row);
+          }
+        }
+        hilog.info(DOMAIN, TAG, 'exams campus=%{public}s period=%{public}s count=%{public}d',
+          session.campus.toString(), codes[i], rows.length);
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error('未获取到考试安排');
+        if (lastError.message === '教务会话已失效，请重新登录') {
+          throw lastError;
+        }
+        result.failedTypes.push(names[i]);
+      }
+    }
+    if (result.failedTypes.length === codes.length) {
+      throw lastError;
+    }
+    result.items.sort((a: EasExamItem, b: EasExamItem): number => {
+      const first: number[] | undefined = ExamSchedule.parseRange(a.examDate, a.examTime);
+      const second: number[] | undefined = ExamSchedule.parseRange(b.examDate, b.examTime);
+      return (first === undefined ? Number.MAX_SAFE_INTEGER : first[0]) -
+        (second === undefined ? Number.MAX_SAFE_INTEGER : second[0]);
+    });
+    return result;
   }
 
   /** 深圳新版 Web 考试安排，请求形态对齐成绩查询。 */

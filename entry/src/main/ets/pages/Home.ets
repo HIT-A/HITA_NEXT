@@ -132,6 +132,7 @@ struct Home {
   @State loginCampusCode: string = 'WEIHAI';
   @State courseSheetOpen: boolean = false;
   @State courseColorEditing: boolean = false;
+  @State courseColorPreview: number = 0;
   @State selectedCourse: EasEventItem | undefined = undefined;
   @State classReminderEnabled: boolean = false;
   private reminderBusy: boolean = false;
@@ -359,7 +360,12 @@ struct Home {
       }
       for (let i: number = 0; i < allEvents.length; i++) {
         const color: number | undefined = colorById.get(allEvents[i].subjectId);
-        allEvents[i].color = color === undefined ? Home.defaultCanvasColor(allEvents[i].type) : color;
+        if (allEvents[i].type === EasEventType.EXAM) {
+          allEvents[i].color = allEvents[i].color === 0 ?
+            Home.defaultCanvasColor(allEvents[i].type) : allEvents[i].color;
+        } else {
+          allEvents[i].color = color === undefined ? Home.defaultCanvasColor(allEvents[i].type) : color;
+        }
       }
       this.timetableEvents = allEvents;
       const currentWeek: number = display.getWeekNumber(this.nowTick);
@@ -554,10 +560,16 @@ struct Home {
   }
 
   private async saveCourseColor(event: EasEventItem, color: number): Promise<void> {
-    await RdbHelper.getInstance().saveCourseColor(event.subjectId, event.timetableId, color);
+    const isExam: boolean = event.type === EasEventType.EXAM;
+    if (isExam) {
+      await RdbHelper.getInstance().saveExamColor(event.id, event.timetableId, color);
+    } else {
+      await RdbHelper.getInstance().saveCourseColor(event.subjectId, event.timetableId, color);
+    }
     // Update every week without resetting the currently viewed week.
     for (const item of this.timetableEvents) {
-      if (item.subjectId === event.subjectId && item.timetableId === event.timetableId) {
+      if (item.timetableId === event.timetableId && (isExam ? item.id === event.id :
+        item.type !== EasEventType.EXAM && item.subjectId === event.subjectId)) {
         item.color = color;
       }
     }
@@ -2389,7 +2401,8 @@ struct Home {
           .width(COURSE_DETAIL_ICON_SIZE)
           .height(COURSE_DETAIL_ICON_SIZE)
           .flexShrink(0)
-          .attributeModifier(new CirclePaintModifier(Home.canvasColorCss(timetableBlockColor(event.color))));
+          .attributeModifier(new CirclePaintModifier(Home.canvasColorCss(timetableBlockColor(
+            this.courseColorEditing ? this.courseColorPreview : event.color))));
         Column() {
           Text(event.name === 'NULL' || event.name.length === 0 ? '未命名课程' : event.name)
             .fontSize(21)
@@ -2405,13 +2418,18 @@ struct Home {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
         .margin({ left: COURSE_DETAIL_TEXT_GAP });
-        if (event.type === EasEventType.CLASS && event.subjectId.length > 0) {
+        if (event.type === EasEventType.EXAM ||
+          (event.type === EasEventType.CLASS && event.subjectId.length > 0)) {
           Button({ type: ButtonType.Circle }) {
             SymbolGlyph($r('sys.symbol.paintpalette')).fontSize(22).fontColor([COLOR_PRIMARY]);
           }
           .width(44).height(44).padding(0).flexShrink(0)
-          .backgroundColor(COLOR_NAV_ACTIVE).accessibilityText('修改课程颜色')
-          .onClick(() => { this.courseColorEditing = !this.courseColorEditing; });
+          .backgroundColor(COLOR_NAV_ACTIVE)
+          .accessibilityText(event.type === EasEventType.EXAM ? '修改考试颜色' : '修改课程颜色')
+          .onClick(() => {
+            this.courseColorPreview = event.color;
+            this.courseColorEditing = !this.courseColorEditing;
+          });
         }
       }
       .width('100%')
@@ -2421,7 +2439,9 @@ struct Home {
       if (this.courseColorEditing) {
         CourseColorEditor({
           initialColor: event.color,
+          examMode: event.type === EasEventType.EXAM,
           textColor: this.timetableTextColor,
+          onPreview: (color: number) => { this.courseColorPreview = color; },
           onSave: async (color: number) => { await this.saveCourseColor(event, color); },
           onCancel: () => { this.courseColorEditing = false; }
         })

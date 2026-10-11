@@ -44,11 +44,13 @@ const CREATE_EVENTS: string =
   'CREATE TABLE IF NOT EXISTS events (' +
   'id TEXT PRIMARY KEY, type TEXT NOT NULL, name TEXT NOT NULL, place TEXT, teacher TEXT, ' +
   'subjectId TEXT NOT NULL, timetableId TEXT NOT NULL, fromTime INTEGER NOT NULL, toTime INTEGER NOT NULL, ' +
-  'fromNumber INTEGER NOT NULL, lastNumber INTEGER NOT NULL, createdAt INTEGER NOT NULL)';
+  'fromNumber INTEGER NOT NULL, lastNumber INTEGER NOT NULL, createdAt INTEGER NOT NULL, ' +
+  'color INTEGER NOT NULL DEFAULT 0)';
 
 export class RdbHelper {
   private static instance: RdbHelper | undefined = undefined;
   private store: relationalStore.RdbStore | undefined = undefined;
+  private initializing: Promise<void> | undefined = undefined;
 
   static getInstance(): RdbHelper {
     if (RdbHelper.instance === undefined) {
@@ -58,9 +60,25 @@ export class RdbHelper {
   }
 
   async init(context: common.Context): Promise<void> {
+    if (this.initializing !== undefined) {
+      await this.initializing;
+      return;
+    }
     if (this.store !== undefined) {
       return;
     }
+    this.initializing = this.openStore(context);
+    try {
+      await this.initializing;
+    } catch (e) {
+      this.store = undefined;
+      throw new Error(e instanceof Error ? e.message : String(e));
+    } finally {
+      this.initializing = undefined;
+    }
+  }
+
+  private async openStore(context: common.Context): Promise<void> {
     const config: relationalStore.StoreConfig = {
       name: DB_NAME,
       securityLevel: relationalStore.SecurityLevel.S1
@@ -73,7 +91,26 @@ export class RdbHelper {
     await this.execSql(CREATE_TIMETABLE);
     await this.execSql(CREATE_SUBJECT);
     await this.execSql(CREATE_EVENTS);
+    await this.ensureEventColorColumn();
     await this.repairLegacyWeihaiTimetables();
+  }
+
+  private async ensureEventColorColumn(): Promise<void> {
+    const columns: relationalStore.ResultSet = await this.s().querySql('PRAGMA table_info(events)');
+    let hasColor: boolean = false;
+    try {
+      while (columns.goToNextRow()) {
+        if (columns.getString(columns.getColumnIndex('name')) === 'color') {
+          hasColor = true;
+          break;
+        }
+      }
+    } finally {
+      columns.close();
+    }
+    if (!hasColor) {
+      await this.execSql('ALTER TABLE events ADD COLUMN color INTEGER NOT NULL DEFAULT 0');
+    }
   }
 
   private s(): relationalStore.RdbStore {
@@ -362,6 +399,19 @@ export class RdbHelper {
     await this.replaceRow('events', RdbHelper.eventValues(e), 'id', e.id);
   }
 
+  /** Exam colors belong to individual events, never to their linked course. */
+  async saveExamColor(id: string, timetableId: string, color: number): Promise<void> {
+    if (id.length === 0 || timetableId.length === 0) {
+      throw new Error('Missing exam identity');
+    }
+    const changed: number = await this.s().update({ 'color': color },
+      new relationalStore.RdbPredicates('events').equalTo('id', id)
+        .equalTo('timetableId', timetableId).equalTo('type', EasEventType.EXAM));
+    if (changed !== 1) {
+      throw new Error('Exam no longer exists');
+    }
+  }
+
   /** Edit in place: failed writes must not remove or recreate an existing event. */
   async updateEvent(e: EasEventItem): Promise<void> {
     try {
@@ -389,7 +439,8 @@ export class RdbHelper {
       'toTime': e.to,
       'fromNumber': e.fromNumber,
       'lastNumber': e.lastNumber,
-      'createdAt': e.createdAt
+      'createdAt': e.createdAt,
+      'color': e.type === EasEventType.EXAM ? e.color : 0
     };
   }
 
@@ -483,6 +534,7 @@ export class RdbHelper {
     e.fromNumber = col('fromNumber').num();
     e.lastNumber = col('lastNumber').num();
     e.createdAt = col('createdAt').num();
+    e.color = col('color').num();
     return e;
   }
 

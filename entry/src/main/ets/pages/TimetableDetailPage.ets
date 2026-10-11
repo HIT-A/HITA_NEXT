@@ -106,7 +106,11 @@ struct TimetableDetailPage {
       for (let i: number = 0; i < timetableEvents.length; i++) {
         const event: EasEventItem = timetableEvents[i];
         const subjectColor: number | undefined = colorById.get(event.subjectId);
-        event.color = subjectColor === undefined ? TimetableDetailPage.eventColor(event.type) : subjectColor;
+        if (event.type === EasEventType.EXAM) {
+          event.color = event.color === 0 ? TimetableDetailPage.eventColor(event.type) : event.color;
+        } else {
+          event.color = subjectColor === undefined ? TimetableDetailPage.eventColor(event.type) : subjectColor;
+        }
         events.push(event);
       }
     }
@@ -378,12 +382,17 @@ struct TimetableDetailPage {
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
-        Button('+ 课程')
+        Text('添加课程')
           .fontSize(13)
-          .fontColor('#FFFFFF')
-          .height(34)
-          .backgroundColor($r('app.color.hita_primary_fill'))
-          .borderRadius(17)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.hita_primary_3390ec'))
+          .height(32)
+          .padding({ left: 12, right: 12 })
+          .borderRadius(16)
+          .backgroundColor($r('app.color.hita_selected_ebf4fc'))
+          .textAlign(TextAlign.Center)
+          .margin({ left: 8 })
+          .flexShrink(0)
           .onClick(() => {
             this.openAddEvent();
           })
@@ -805,7 +814,7 @@ struct TimetableDetailPage {
                 Text('暂无课程')
                   .fontSize(15)
                   .fontColor($r('app.color.hita_text_secondary_7b8498'))
-                Text('从教务导入或点击上方“+ 课程”添加后显示在这里')
+                Text('从教务导入或点击上方“添加课程”后显示在这里')
                   .fontSize(12)
                   .fontColor($r('app.color.hita_text_hint_a0a7b5'))
                   .margin({ top: 6 })

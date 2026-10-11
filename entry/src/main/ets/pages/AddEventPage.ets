@@ -303,7 +303,9 @@ export struct EventEditorForm {
     }
     ev.from = base + this.hour * 60 * 60 * 1000 + this.minute * 60 * 1000;
     ev.to = base + this.endHour * 60 * 60 * 1000 + this.endMinute * 60 * 1000;
-    ev.color = EventEditorForm.typeColor(ev.type);
+    if (this.editId.length === 0 || ev.color === 0) {
+      ev.color = EventEditorForm.typeColor(ev.type);
+    }
     if (this.editId.length > 0) {
       await rdb.updateEvent(ev);
     } else {

@@ -44,7 +44,7 @@ function load(file, mocks = {}, cache = new Map()) {
     }
     if (name.endsWith('/EasSessionStore')) {
       return { EasSessionStore: { getInstance: () => mocks.sessionStore || {
-        init: async () => {}, load: async () => undefined
+        init: async () => {}, loadPreferred: async () => undefined
       } } };
     }
     if (name.endsWith('/EasApiClient')) {
@@ -53,8 +53,8 @@ function load(file, mocks = {}, cache = new Map()) {
     if (name.endsWith('/EasDataProvider')) {
       return { EasDataProvider: mocks.EasDataProvider || class {
         constructor() {}
-        async getAllTerms() { return []; }
-        async getExamItems() { return []; }
+        async getExamTerms() { return []; }
+        async getExamResult() { return { items: [], failedTypes: [] }; }
       } };
     }
     assert.ok(name.startsWith('.'), `Unexpected platform import ${name}`);
@@ -76,7 +76,7 @@ function exam(id, timetableId = 'original') {
 }
 function setup(seeds = [exam('a'), exam('b', 'current')], extras = {}) {
   const rows = new Map(seeds.map(e => [e.id, clone(e)]));
-  const calls = { updates: [], inserts: [], deletes: [], toasts: [], dialogs: [] };
+  const calls = { updates: [], inserts: [], deletes: [], colors: [], toasts: [], dialogs: [] };
   const db = {
     init: async () => {},
     getTimetables: async () => [{ id: 'current' }, { id: 'original' }],
@@ -85,6 +85,14 @@ function setup(seeds = [exam('a'), exam('b', 'current')], extras = {}) {
     getEventById: async id => rows.has(id) ? clone(rows.get(id)) : undefined,
     saveEvent: async e => { calls.inserts.push(e.id); rows.set(e.id, clone(e)); },
     updateEvent: async e => { calls.updates.push(e.id); rows.set(e.id, clone(e)); },
+    saveExamColor: async (id, timetableId, color) => {
+      const row = rows.get(id);
+      if (!row || row.timetableId !== timetableId || row.type !== EasEventType.EXAM) {
+        throw new Error('Exam no longer exists');
+      }
+      calls.colors.push({ id, timetableId, color });
+      row.color = color;
+    },
     deleteEvent: async id => { calls.deletes.push(id); rows.delete(id); }
   };
   const prompt = {
@@ -136,7 +144,7 @@ test('list keeps event identity, filters courses and sorts by time across timeta
   assert.match(editor, /Column\(\) \{[\s\S]*?Button\(this\.loading \? '正在读取'/);
   assert.match(editor, /\.padding\(\{[\s\S]*?top: 8,[\s\S]*?bottom: 10/);
   assert.match(source, /this\.headerAction\(this\.querying \? '查询中' : '查询'/);
-  assert.match(source, /this\.headerAction\('添加考试'/);
+  assert.match(source, /this\.headerAction\('添加'/);
   assert.match(source, /private headerAction\(label: string, enabled: boolean/);
   assert.match(read('pages/TimetableDetailPage.ets'),
     /height: this\.eventSheetMode === 2 \? '78%' : SheetSize\.FIT_CONTENT/);
@@ -418,7 +426,7 @@ test('failed exam queries show actionable messages without internal error detail
   ];
   for (const [detail, message] of failures) {
     class FakeProvider {
-      async getAllTerms() { throw new Error(detail); }
+      async getExamTerms() { throw new Error(detail); }
     }
     const { page, calls } = setup([exam('a')], { EasDataProvider: FakeProvider });
     page.session = { campus: 'SHENZHEN' };
@@ -444,15 +452,15 @@ test('eas query keeps unmatched remotes and import writes an EXAM event', async 
   });
   class FakeProvider {
     constructor() {}
-    async getAllTerms() { return [{}]; }
-    async getExamItems() { return [remote]; }
+    async getExamTerms() { return [{ name: '2026秋季' }]; }
+    async getExamResult() { return { items: [remote], failedTypes: [] }; }
   }
   const { page, calls, rows } = setup([exam('a')], { EasDataProvider: FakeProvider });
   page.session = { campus: 'SHENZHEN' };
   await page.loadExams();
   await page.queryEasExams();
   assert.equal(page.remoteExams.length, 1);
-  assert.match(page.queryMsg, /1 条待导入考试/);
+  assert.equal(page.queryMsg, '', 'successful results have no extra query heading or count');
   await page.importRemoteExam(remote);
   assert.equal(calls.inserts.length, 1);
   const created = rows.get(calls.inserts[0]);
@@ -461,4 +469,160 @@ test('eas query keeps unmatched remotes and import writes an EXAM event', async 
   assert.equal(created.place, 'A-101');
   assert.equal(created.timetableId, 'current');
   assert.equal(page.remoteExams.length, 0);
+});
+
+test('exam queries use the preferred campus and the selected current term instead of the first term', async () => {
+  const preferred = { campus: 'WEIHAI' };
+  const current = { name: '2026秋季', isCurrent: true };
+  const calls = [];
+  class Provider {
+    async getExamTerms(s) {
+      assert.equal(s, preferred);
+      return [{ name: '2027春季', isCurrent: false }, current];
+    }
+    async getExamResult(s, term) {
+      calls.push({ s, term });
+      return { items: [], failedTypes: [] };
+    }
+  }
+  const { page } = setup([], {
+    sessionStore: { init: async () => {}, loadPreferred: async () => preferred },
+    EasDataProvider: Provider
+  });
+  await page.onPageShow();
+  assert.equal(page.hasSession, true);
+  await page.queryEasExams();
+  assert.equal(calls[0].s, preferred);
+  assert.equal(calls[0].term, current);
+  assert.match(page.queryContext, /威海校区.*2026秋季/);
+  assert.match(page.queryMsg, /本学期暂无教务考试安排/);
+  assert.equal(page.queryWarning, false);
+});
+
+test('partial exam results never claim there are no exams or that the query completed fully', async () => {
+  for (const items of [[], [{ courseName: '待定考试', examDate: '', examTime: '', examLocation: '' }]]) {
+    class Provider {
+      async getExamTerms() { return [{ name: '2026秋季' }]; }
+      async getExamResult() { return { items, failedTypes: ['补考'] }; }
+    }
+    const { page } = setup([], { EasDataProvider: Provider });
+    page.session = { campus: 'BENBU' };
+    await page.queryEasExams();
+    assert.equal(page.queryWarning, true);
+    assert.match(page.queryMsg, /补考查询失败/);
+    assert.doesNotMatch(page.queryMsg, /本学期暂无教务考试安排/);
+    assert.equal(page.remoteExams.length, items.length);
+  }
+});
+
+test('late exam requests cannot replace results or dismiss loading after leaving and starting a new query', async () => {
+  let finishOld;
+  let finishNew;
+  let requests = 0;
+  class Provider {
+    async getExamTerms() { return [{ name: '2026秋季' }]; }
+    async getExamResult() {
+      requests++;
+      return new Promise(resolve => {
+        if (requests === 1) finishOld = resolve;
+        else finishNew = resolve;
+      });
+    }
+  }
+  const { page } = setup([], { EasDataProvider: Provider });
+  page.session = { campus: 'BENBU' };
+  const first = page.queryEasExams();
+  await new Promise(resolve => setImmediate(resolve));
+  const duplicate = page.queryEasExams();
+  await duplicate;
+  assert.equal(requests, 1);
+  page.onPageHide();
+  page.session = { campus: 'WEIHAI' };
+  const second = page.queryEasExams();
+  await new Promise(resolve => setImmediate(resolve));
+  finishOld({ items: [{ courseName: 'Old' }], failedTypes: [] });
+  await first;
+  assert.equal(page.querying, true);
+  assert.deepEqual(page.remoteExams, []);
+  finishNew({ items: [], failedTypes: [] });
+  await second;
+  assert.equal(page.querying, false);
+  assert.match(page.queryContext, /威海校区/);
+});
+
+test('exams without complete valid times cannot be imported as a made-up two-hour event', async () => {
+  const { page, calls } = setup([]);
+  for (const [examDate, examTime] of [
+    ['2026-12-20', '待通知'], ['2026-12-20', '09:00'], ['2026-02-30', '09:00-11:00']
+  ]) {
+    await page.importRemoteExam({
+      courseName: 'Pending exam', examDate, examTime, examLocation: '', examType: '期末'
+    });
+  }
+  assert.equal(calls.inserts.length, 0);
+  assert.equal(calls.toasts.filter(text => text.includes('考试时间无法识别')).length, 3);
+});
+
+test('exam color previews are drafts; saving persists one exam and survives editing and reloading', async () => {
+  const { page, editor, rows, calls } = setup();
+  await page.loadExams();
+  const selected = page.exams.find(event => event.id === 'a');
+  page.openExamDetail(selected);
+  page.toggleExamColor(0xFFB24B63);
+  page.examColorPreview = 0xFF123456;
+  assert.equal(rows.get('a').color, 0);
+  assert.equal(selected.color, 0);
+  page.toggleExamColor(0xFFB24B63);
+  assert.equal(page.examColorEditing, false);
+  assert.equal(rows.get('a').color, 0, 'cancel does not persist the preview');
+  page.toggleExamColor(0xFFB24B63);
+  await page.saveExamColor(selected, 0xFF123456);
+  assert.deepEqual(calls.colors, [{ id: 'a', timetableId: 'original', color: 0xFF123456 }]);
+  assert.equal(rows.get('b').color, 0, 'a linked or same-name exam must keep its own color');
+  assert.equal(page.selectedExam.color, 0xFF123456);
+  assert.equal(page.examColorEditing, false);
+  editor.eventId = 'a';
+  await editor.aboutToAppear();
+  editor.name = 'Renamed exam';
+  await editor.save();
+  await page.loadExams();
+  assert.equal(page.exams.find(event => event.id === 'a').color, 0xFF123456);
+  assert.equal(rows.get('a').name, 'Renamed exam');
+});
+
+test('failed exam color saves keep existing data and the color editor available for retry', async () => {
+  const { page, rows, db } = setup();
+  await page.loadExams();
+  page.openExamDetail(page.exams[0]);
+  page.toggleExamColor(0xFFB24B63);
+  const save = db.saveExamColor;
+  db.saveExamColor = async () => { throw new Error('disk full'); };
+  await assert.rejects(page.saveExamColor(page.selectedExam, 0xFF123456), /disk full/);
+  assert.equal(page.examColorEditing, true);
+  assert.equal(page.savingExamColor, false);
+  assert.equal(page.selectedExam.color, 0);
+  assert.equal(rows.get('a').color, 0);
+  db.saveExamColor = save;
+  await page.saveExamColor(page.selectedExam, 0xFF123456);
+  assert.equal(page.examColorEditing, false);
+});
+
+test('pending remote colors stay with the full exam identity and are preserved on import', async () => {
+  const remote = {
+    courseName: 'Linear algebra', examDate: '2026-12-20', examTime: '09:00-11:00',
+    examLocation: 'A-101', examType: '期末', termName: '2026秋季', campusName: '本部'
+  };
+  const { page, rows, calls } = setup([]);
+  page.openRemoteDetail(remote);
+  page.toggleExamColor(page.remoteExamColor(remote));
+  page.examColorPreview = 0xFF123456;
+  assert.notEqual(page.remoteExamColor(remote), 0xFF123456);
+  await page.saveRemoteExamColor(remote, 0xFF123456);
+  assert.equal(page.remoteExamColor({ ...remote }), 0xFF123456);
+  assert.notEqual(page.remoteExamColor({ ...remote, examType: '补考' }), 0xFF123456);
+  assert.notEqual(page.remoteExamColor({ ...remote, campusName: '威海校区' }), 0xFF123456);
+  assert.equal(calls.inserts.length, 0, 'choosing a remote color alone must not create an exam');
+  await page.importRemoteExam(remote);
+  assert.equal(rows.get(calls.inserts[0]).color, 0xFF123456);
+  assert.equal(page.exams[0].color, 0xFF123456);
 });

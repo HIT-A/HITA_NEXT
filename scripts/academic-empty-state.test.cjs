@@ -32,17 +32,16 @@ for (const [file, condition] of cases) {
   });
 }
 
-test('empty states keep loading and score login, while adding exams is header-only', () => {
+test('empty states keep loading and text hints without login or add buttons', () => {
   const exam = read('ExamPage.ets');
   const score = read('ScorePage.ets');
   const examEmpty = emptyBranch(exam, cases[0][1]);
   const scoreEmpty = emptyBranch(score, cases[1][1]);
   assert.doesNotMatch(examEmpty, /Button\(|\.onClick\(|openAddExam|\.margin\(\{\s*bottom:/);
-  assert.match(exam, /this\.headerAction\('\u6dfb\u52a0\u8003\u8bd5',[\s\S]*?this\.openAddExam\(\)/);
+  assert.match(exam, /this\.headerAction\('\u6dfb\u52a0',[\s\S]*?this\.openAddExam\(\)/);
   assert.equal((exam.match(/this\.openAddExam\(\)/g) ?? []).length, 1);
   assert.match(examEmpty, /Text\(this\.queryMsg\)[\s\S]*?\.textAlign\(TextAlign\.Center\)/);
-  assert.match(scoreEmpty, /if \(!this\.hasSession\)/);
-  assert.match(scoreEmpty, /url: 'pages\/Home',\s*params: \{ 'openSession': '1' \}/);
+  assert.doesNotMatch(scoreEmpty, /Button\(|\.onClick\(|openSession/);
   assert.match(exam, /if \(this\.loading && this\.exams\.length === 0 && this\.remoteExams\.length === 0\) \{\s*LoadingProgress\(\)/);
   assert.match(score, /if \(this\.loading\) \{\s*Column\(\) \{\s*LoadingProgress\(\)/);
 });

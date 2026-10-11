@@ -3,20 +3,23 @@
  *
  * 数据面：聚合本地全部课表中类型为考试（EXAM）的事件，按时间升序展示；
  * 新建考试写入当前课表，编辑和删除始终使用考试原有的事件 ID。
- * 已登录教务时，可查询深圳校区考试安排并导入当前课表。
+ * 已登录教务时，可查询深圳、本部和威海本科考试安排并导入当前课表。
  */
 import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
+import { CirclePaintModifier } from '../common/theme/CirclePaintModifier';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTimetable } from '../common/model/timetable/TimetableModels';
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
 import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
-import { EasCampus, EasSession } from '../feature/eas/EasSession';
+import { CourseColorEditor } from '../feature/timetable/views/CourseColorEditor';
+import { timetableBlockColor } from '../feature/timetable/views/TimetableWeekDraw';
+import { EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
-import { EasDataProvider } from '../feature/eas/EasDataProvider';
+import { EasDataProvider, EasExamQueryResult } from '../feature/eas/EasDataProvider';
 import { EasUserMessages } from '../feature/eas/EasUserMessages';
 import { EasApiClient } from '../feature/eas/EasApiClient';
 import { EasExamItem, EasTermItem } from '../feature/eas/model/EasModels';
@@ -26,6 +29,9 @@ import { EventEditorForm } from './AddEventPage';
 const HEADER_HEIGHT: number = 60;
 const PAGE_BG: ResourceColor = $r('app.color.hita_page_f6f7fa');
 const PAGE_BG_RGB: string = '246,247,250';
+const DETAIL_ICON_SIZE: number = 38;
+const DETAIL_TEXT_GAP: number = 12;
+const DEFAULT_EXAM_COLOR: number = 0xFFB24B63;
 
 @Entry
 @Component
@@ -41,6 +47,12 @@ struct ExamPage {
   @State openingEditor: boolean = false;
   @State hasSession: boolean = false;
   @State queryMsg: string = '';
+  @State queryContext: string = '';
+  @State queryWarning: boolean = false;
+  @State examColorEditing: boolean = false;
+  @State examColorPreview: number = DEFAULT_EXAM_COLOR;
+  @State savingExamColor: boolean = false;
+  @State remoteColors: Map<string, number> = new Map<string, number>();
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
   @StorageProp('hita_nav_bar_vp') navBarInset: number = NAV_BAR_INSET_FALLBACK;
   /** Keep the editor identity until its dismissal animation finishes. */
@@ -54,32 +66,45 @@ struct ExamPage {
   @State fadeOpacity: number = 0;
   private pageScroller: Scroller = new Scroller();
   private session: EasSession | undefined = undefined;
-
-  async aboutToAppear(): Promise<void> {
-    await this.refreshSession();
-  }
+  private queryGeneration: number = 0;
 
   async onPageShow(): Promise<void> {
     await this.refreshSession();
     await this.loadExams();
   }
 
+  onPageHide(): void {
+    this.queryGeneration++;
+    this.querying = false;
+    this.closeSheet();
+  }
+
+  aboutToDisappear(): void {
+    this.onPageHide();
+  }
+
   private async refreshSession(): Promise<void> {
+    const generation: number = ++this.queryGeneration;
+    this.session = undefined;
+    this.hasSession = false;
+    this.querying = false;
+    this.remoteExams = [];
+    this.queryMsg = '';
+    this.queryContext = '';
+    this.queryWarning = false;
     try {
       const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
       await EasSessionStore.getInstance().init(ctx);
-      const order: EasCampus[] = [EasCampus.SHENZHEN, EasCampus.BENBU, EasCampus.WEIHAI];
-      this.session = undefined;
-      for (let i = 0; i < order.length; i++) {
-        const s: EasSession | undefined = await EasSessionStore.getInstance().load(order[i]);
-        if (s !== undefined && s.isLogin()) {
-          this.session = s;
-          break;
-        }
+      const session: EasSession | undefined = await EasSessionStore.getInstance().loadPreferred();
+      if (generation !== this.queryGeneration) {
+        return;
       }
-      this.hasSession = this.session !== undefined;
+      this.session = session;
+      this.hasSession = session !== undefined;
     } catch (_) {
-      this.hasSession = false;
+      if (generation === this.queryGeneration) {
+        this.hasSession = false;
+      }
     }
   }
 
@@ -148,7 +173,8 @@ struct ExamPage {
 
   /** 考试事件挂到当前选中的课表；没有可用课表时引导先建课表。 */
   private async openAddExam(): Promise<void> {
-    if (this.examSheetMode !== 0 || this.openingEditor || this.pendingDeleteId.length > 0) {
+    if (this.examSheetMode !== 0 || this.openingEditor || this.savingExamColor ||
+      this.pendingDeleteId.length > 0) {
       return;
     }
     this.openingEditor = true;
@@ -177,28 +203,54 @@ struct ExamPage {
     }
     if (this.session === undefined) {
       this.queryMsg = '请先登录教务';
+      this.queryWarning = true;
       this.getUIContext().getPromptAction().showToast({ message: '请先登录教务后再查询考试' });
       return;
     }
+    const session: EasSession = this.session;
+    const generation: number = ++this.queryGeneration;
     this.querying = true;
+    this.queryWarning = false;
+    this.remoteExams = [];
     this.queryMsg = '正在查询…';
+    this.queryContext = '';
     try {
       const provider: EasDataProvider = new EasDataProvider(new EasApiClient());
-      const terms: EasTermItem[] = await provider.getAllTerms(this.session);
-      if (terms.length === 0) {
-        this.queryMsg = '未获取到学期信息，请稍后重试';
+      const terms: EasTermItem[] = await provider.getExamTerms(session);
+      if (generation !== this.queryGeneration) {
         return;
       }
-      const items: EasExamItem[] = await provider.getExamItems(this.session, terms[0]);
+      if (terms.length === 0) {
+        this.queryMsg = '未获取到学期信息，请稍后重试';
+        this.queryWarning = true;
+        return;
+      }
+      const term: EasTermItem = terms.find((value: EasTermItem): boolean => value.isCurrent) ?? terms[0];
+      this.queryContext = ExamSchedule.campusName(session.campus.toString()) + ' · ' + term.name;
+      const result: EasExamQueryResult = await provider.getExamResult(session, term);
+      if (generation !== this.queryGeneration) {
+        return;
+      }
+      const items: EasExamItem[] = result.items;
       this.remoteExams = this.filterImported(items, this.exams);
-      this.queryMsg = this.remoteExams.length > 0 ?
-        '教务返回 ' + this.remoteExams.length.toString() + ' 条待导入考试' :
-        (items.length > 0 ? '教务考试已全部在本地课表中' : '本学期暂无教务考试安排');
+      this.queryWarning = result.failedTypes.length > 0;
+      const message: string = this.queryWarning ?
+        result.failedTypes.join('、') + '查询失败，请重试' +
+          (items.length === 0 ? '；尚不能确认是否有考试安排' : '') :
+        (this.remoteExams.length > 0 ? '' :
+          (items.length > 0 ? '教务考试已全部在本地课表中' : '本学期暂无教务考试安排'));
+      this.queryMsg = message;
     } catch (e) {
+      if (generation !== this.queryGeneration) {
+        return;
+      }
+      this.queryWarning = true;
       this.queryMsg = EasUserMessages.fromError(e instanceof Error ? e.message : String(e),
         '考试查询失败，请稍后重试');
     } finally {
-      this.querying = false;
+      if (generation === this.queryGeneration) {
+        this.querying = false;
+      }
     }
   }
 
@@ -218,6 +270,7 @@ struct ExamPage {
         this.getUIContext().getPromptAction().showToast({ message: '考试时间无法识别，请手动添加' });
         return;
       }
+      event.color = this.remoteExamColor(item);
       await RdbHelper.getInstance().saveEvent(event);
       this.closeSheet();
       await this.loadExams();
@@ -230,11 +283,13 @@ struct ExamPage {
   }
 
   private openExamDetail(event: EasEventItem): void {
-    if (this.examSheetMode !== 0 || this.openingEditor || this.pendingDeleteId.length > 0) {
+    if (this.examSheetMode !== 0 || this.openingEditor || this.savingExamColor ||
+      this.pendingDeleteId.length > 0) {
       return;
     }
     this.selectedExam = event;
     this.selectedRemote = undefined;
+    this.examColorEditing = false;
     this.sheetEventId = event.id;
     this.targetTimetableId = event.timetableId;
     this.examSheetMode = 1;
@@ -242,23 +297,81 @@ struct ExamPage {
   }
 
   private openRemoteDetail(item: EasExamItem): void {
-    if (this.examSheetMode !== 0 || this.openingEditor || this.pendingDeleteId.length > 0) {
+    if (this.examSheetMode !== 0 || this.openingEditor || this.savingExamColor ||
+      this.pendingDeleteId.length > 0) {
       return;
     }
     this.selectedRemote = item;
     this.selectedExam = undefined;
+    this.examColorEditing = false;
     this.sheetEventId = '';
     this.examSheetMode = 3;
     this.sheetVisible = true;
   }
 
   private openEditExam(event: EasEventItem): void {
-    if (this.pendingDeleteId.length > 0 || this.examSheetMode !== 1 || !this.sheetVisible) {
+    if (this.pendingDeleteId.length > 0 || this.savingExamColor ||
+      this.examSheetMode !== 1 || !this.sheetVisible) {
       return;
     }
     this.sheetEventId = event.id;
     this.targetTimetableId = event.timetableId;
+    this.examColorEditing = false;
     this.examSheetMode = 2;
+  }
+
+  private static examColor(event: EasEventItem): number {
+    return event.color === 0 ? DEFAULT_EXAM_COLOR : event.color;
+  }
+
+  private static colorCss(color: number): string {
+    return '#' + (timetableBlockColor(color) & 0xFFFFFF).toString(16).padStart(6, '0');
+  }
+
+  private static remoteKey(item: EasExamItem): string {
+    return JSON.stringify([item.campusName, item.termName, item.courseName, item.examType,
+      item.examDate, item.examTime, item.examLocation]);
+  }
+
+  private remoteExamColor(item: EasExamItem): number {
+    return this.remoteColors.get(ExamPage.remoteKey(item)) ?? DEFAULT_EXAM_COLOR;
+  }
+
+  private toggleExamColor(color: number): void {
+    if (this.savingExamColor || this.openingEditor || this.pendingDeleteId.length > 0) {
+      return;
+    }
+    this.examColorPreview = color;
+    this.examColorEditing = !this.examColorEditing;
+  }
+
+  private async saveExamColor(event: EasEventItem, color: number): Promise<void> {
+    this.savingExamColor = true;
+    try {
+      await RdbHelper.getInstance().saveExamColor(event.id, event.timetableId, color);
+      for (const item of this.exams) {
+        if (item.id === event.id && item.timetableId === event.timetableId) {
+          item.color = color;
+        }
+      }
+      this.exams = this.exams.slice();
+      this.upcoming = this.upcoming.slice();
+      this.past = this.past.slice();
+      if (this.selectedExam?.id === event.id && this.examSheetMode === 1 && this.sheetVisible) {
+        event.color = color;
+        this.selectedExam = this.exams.find((item: EasEventItem) => item.id === event.id) ?? event;
+        this.examColorEditing = false;
+      }
+    } finally {
+      this.savingExamColor = false;
+    }
+  }
+
+  private async saveRemoteExamColor(item: EasExamItem, color: number): Promise<void> {
+    const colors: Map<string, number> = new Map<string, number>(this.remoteColors);
+    colors.set(ExamPage.remoteKey(item), color);
+    this.remoteColors = colors;
+    this.examColorEditing = false;
   }
 
   private closeSheet(): void {
@@ -271,10 +384,12 @@ struct ExamPage {
     this.selectedRemote = undefined;
     this.sheetEventId = '';
     this.targetTimetableId = '';
+    this.examColorEditing = false;
   }
 
   private async confirmDeleteExam(event: EasEventItem): Promise<void> {
-    if (this.pendingDeleteId.length > 0 || this.examSheetMode === 2 || this.openingEditor) {
+    if (this.pendingDeleteId.length > 0 || this.examSheetMode === 2 ||
+      this.openingEditor || this.savingExamColor) {
       return;
     }
     this.pendingDeleteId = event.id;
@@ -357,7 +472,8 @@ struct ExamPage {
           if (this.queryMsg.length > 0) {
             Text(this.queryMsg)
               .fontSize(12)
-              .fontColor($r('app.color.hita_error'))
+              .fontColor(this.queryWarning ? $r('app.color.hita_error') :
+                $r('app.color.hita_text_secondary_808080'))
               .width('100%')
               .textAlign(TextAlign.Center)
               .margin({ top: 12 })
@@ -375,11 +491,20 @@ struct ExamPage {
               .width('100%')
               .height(HEADER_HEIGHT)
           }
-          if (this.queryMsg.length > 0) {
+          if (this.queryContext.length > 0) {
+            ListItem() {
+              Text(this.queryContext)
+                .fontSize(12)
+                .fontColor($r('app.color.hita_text_secondary_72809a'))
+                .width('100%')
+            }
+          }
+          if (this.queryWarning && this.queryMsg.length > 0) {
             ListItem() {
               Text(this.queryMsg)
                 .fontSize(12)
-                .fontColor($r('app.color.hita_success_2e7d32'))
+                .fontColor(this.queryWarning ? $r('app.color.hita_error') :
+                  $r('app.color.hita_text_secondary_72809a'))
                 .width('100%')
             }
           }
@@ -408,21 +533,12 @@ struct ExamPage {
             ListItem() {
               this.examCard(it)
             }
-          }, (it: EasEventItem) => it.id)
-          if (this.remoteExams.length > 0) {
-            ListItem() {
-              Text('教务查询')
-                .fontSize(13)
-                .fontWeight(FontWeight.Medium)
-                .fontColor($r('app.color.hita_text_secondary_72809a'))
-            }
-          }
+          }, (it: EasEventItem) => it.id + '|' + it.color.toString())
           ForEach(this.remoteExams, (remote: EasExamItem) => {
             ListItem() {
               this.remoteExamCard(remote)
             }
-          }, (remote: EasExamItem) => remote.courseName + '|' + remote.examDate + '|' + remote.examTime +
-            '|' + remote.examLocation)
+          }, (remote: EasExamItem) => ExamPage.remoteKey(remote) + '|' + this.remoteExamColor(remote).toString())
           if (this.past.length > 0) {
             ListItem() {
               Text('已结束')
@@ -435,7 +551,7 @@ struct ExamPage {
             ListItem() {
               this.examCard(it)
             }
-          }, (it: EasEventItem) => it.id)
+          }, (it: EasEventItem) => it.id + '|' + it.color.toString())
         }
         .width('100%')
         .height('100%')
@@ -444,6 +560,15 @@ struct ExamPage {
         .onDidScroll(() => {
           this.fadeOpacity = HeaderFade.opacity(this.pageScroller.currentOffset().yOffset);
         })
+      }
+
+      if (this.queryContext.length > 0 && this.exams.length === 0 && this.remoteExams.length === 0) {
+        Text(this.queryContext)
+          .fontSize(12)
+          .fontColor($r('app.color.hita_text_secondary_72809a'))
+          .width('100%')
+          .padding({ left: 16, right: 16 })
+          .margin({ top: HEADER_HEIGHT + 12 })
       }
 
       HeaderFadeMask({
@@ -469,7 +594,7 @@ struct ExamPage {
           !this.querying && this.pendingDeleteId.length === 0, () => {
             this.queryEasExams();
           })
-        this.headerAction('添加考试',
+        this.headerAction('添加',
           !this.openingEditor && this.pendingDeleteId.length === 0, () => {
             this.openAddExam();
           })
@@ -505,7 +630,7 @@ struct ExamPage {
         .width(18)
         .height(54)
         .borderRadius(9)
-        .backgroundColor($r('app.color.hita_error_fill'))
+        .backgroundColor(ExamPage.colorCss(ExamPage.examColor(it)))
       Column() {
         Row() {
           Text(it.name)
@@ -560,7 +685,7 @@ struct ExamPage {
         .width(18)
         .height(54)
         .borderRadius(9)
-        .backgroundColor($r('app.color.hita_primary_fill'))
+        .backgroundColor(ExamPage.colorCss(this.remoteExamColor(remote)))
       Column() {
         Row() {
           Text(remote.courseName)
@@ -637,15 +762,12 @@ struct ExamPage {
   private examDetailSheet(event: EasEventItem) {
     Column() {
       Row() {
-        HeaderBackButton({
-          onBack: () => this.closeSheet()
-        })
-          .margin({ right: 12 })
-        Row()
-          .width(7)
-          .height(50)
-          .borderRadius(4)
-          .backgroundColor($r('app.color.hita_error_fill'))
+        Circle()
+          .width(DETAIL_ICON_SIZE)
+          .height(DETAIL_ICON_SIZE)
+          .flexShrink(0)
+          .attributeModifier(new CirclePaintModifier(ExamPage.colorCss(
+            this.examColorEditing ? this.examColorPreview : ExamPage.examColor(event))))
         Column() {
           Text(event.name)
             .fontSize(21)
@@ -660,45 +782,58 @@ struct ExamPage {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-        .margin({ left: 12, right: 8 })
-        Text('编辑')
-          .fontSize(14)
-          .fontColor($r('app.color.hita_primary_3390ec'))
-          .fontWeight(FontWeight.Medium)
-          .padding({ left: 8, right: 8, top: 8, bottom: 8 })
-          .flexShrink(0)
-          .enabled(this.pendingDeleteId.length === 0)
-          .onClick(() => this.openEditExam(event))
+        .margin({ left: DETAIL_TEXT_GAP })
+        this.examColorButton(ExamPage.examColor(event))
+        if (!this.examColorEditing) {
+          Text('编辑')
+            .fontSize(14)
+            .fontColor($r('app.color.hita_primary_3390ec'))
+            .fontWeight(FontWeight.Medium)
+            .padding({ left: 8, right: 8, top: 8, bottom: 8 })
+            .flexShrink(0)
+            .enabled(this.pendingDeleteId.length === 0)
+            .onClick(() => this.openEditExam(event))
+        }
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
       .margin({ bottom: 14 })
 
-      this.examDetailRow($r('sys.symbol.person_crop_circle_fill'), '老师',
-        event.teacher.trim().length > 0 ? event.teacher : '未填写')
-      this.examDetailRow($r('sys.symbol.pin'), '考场',
-        event.place.trim().length > 0 ? event.place : '待定')
-      this.examDetailRow($r('sys.symbol.clock'), '时间',
-        ExamPage.timeOf(event.from) + ' - ' + ExamPage.timeOf(event.to))
-      this.examDetailRow($r('sys.symbol.calendar'), '日期',
-        ExamPage.dateOf(event.from) + ' · ' + DOW_FULL[EasTimeTools.getDow(event.from)])
-      this.examDetailRow($r('sys.symbol.checkmark'), '状态',
-        ExamSchedule.remainingLabel(event.from, event.to, Date.now()))
+      if (this.examColorEditing) {
+        CourseColorEditor({
+          initialColor: ExamPage.examColor(event),
+          examMode: true,
+          onPreview: (color: number) => { this.examColorPreview = color; },
+          onSave: async (color: number) => { await this.saveExamColor(event, color); },
+          onCancel: () => { this.examColorEditing = false; }
+        })
+      } else {
+        this.examDetailRow($r('sys.symbol.person_crop_circle_fill'), '老师',
+          event.teacher.trim().length > 0 ? event.teacher : '未填写')
+        this.examDetailRow($r('sys.symbol.pin'), '考场',
+          event.place.trim().length > 0 ? event.place : '待定')
+        this.examDetailRow($r('sys.symbol.clock'), '时间',
+          ExamPage.timeOf(event.from) + ' - ' + ExamPage.timeOf(event.to))
+        this.examDetailRow($r('sys.symbol.calendar'), '日期',
+          ExamPage.dateOf(event.from) + ' · ' + DOW_FULL[EasTimeTools.getDow(event.from)])
+        this.examDetailRow($r('sys.symbol.checkmark'), '状态',
+          ExamSchedule.remainingLabel(event.from, event.to, Date.now()))
 
-      Row() {
-        Blank()
-        Text('删除考试')
-          .fontSize(14)
-          .fontColor($r('app.color.hita_error'))
-          .fontWeight(FontWeight.Medium)
-          .padding({ left: 14, right: 14, top: 9, bottom: 9 })
-          .backgroundColor($r('app.color.hita_error_surface_fdecec'))
-          .borderRadius(18)
-          .enabled(this.pendingDeleteId.length === 0)
-          .onClick(() => this.confirmDeleteExam(event))
+        Row() {
+          Blank()
+          Text('删除考试')
+            .fontSize(14)
+            .fontColor($r('app.color.hita_error'))
+            .fontWeight(FontWeight.Medium)
+            .padding({ left: 14, right: 14, top: 9, bottom: 9 })
+            .backgroundColor($r('app.color.hita_error_surface_fdecec'))
+            .borderRadius(18)
+            .enabled(this.pendingDeleteId.length === 0)
+            .onClick(() => this.confirmDeleteExam(event))
+        }
+        .width('100%')
+        .margin({ top: 6 })
       }
-      .width('100%')
-      .margin({ top: 6 })
     }
     .width('100%')
     .padding({ left: 20, right: 20, top: 4, bottom: 20 })
@@ -708,15 +843,12 @@ struct ExamPage {
   private remoteDetailSheet(item: EasExamItem) {
     Column() {
       Row() {
-        HeaderBackButton({
-          onBack: () => this.closeSheet()
-        })
-          .margin({ right: 12 })
-        Row()
-          .width(7)
-          .height(50)
-          .borderRadius(4)
-          .backgroundColor($r('app.color.hita_primary_fill'))
+        Circle()
+          .width(DETAIL_ICON_SIZE)
+          .height(DETAIL_ICON_SIZE)
+          .flexShrink(0)
+          .attributeModifier(new CirclePaintModifier(ExamPage.colorCss(
+            this.examColorEditing ? this.examColorPreview : this.remoteExamColor(item))))
         Column() {
           Text(item.courseName)
             .fontSize(21)
@@ -731,42 +863,71 @@ struct ExamPage {
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
-        .margin({ left: 12, right: 8 })
+        .margin({ left: DETAIL_TEXT_GAP })
+        this.examColorButton(this.remoteExamColor(item))
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
       .margin({ bottom: 14 })
 
-      this.examDetailRow($r('sys.symbol.clock'), '时间',
-        item.examTime.length > 0 ? item.examTime : '待定')
-      this.examDetailRow($r('sys.symbol.calendar'), '日期',
-        item.examDate.length > 0 ? item.examDate : '待定')
-      this.examDetailRow($r('sys.symbol.pin'), '地点',
-        item.examLocation.length > 0 ? item.examLocation : '待定')
-      this.examDetailRow($r('sys.symbol.checkmark'), '类型',
-        item.examType.length > 0 ? item.examType : '未填写')
-      this.examDetailRow($r('sys.symbol.doc_plaintext'), '学期',
-        item.termName.length > 0 ? item.termName : '未填写')
-      this.examDetailRow($r('sys.symbol.magnifyingglass'), '校区',
-        item.campusName.length > 0 ? item.campusName : '未填写')
+      if (this.examColorEditing) {
+        CourseColorEditor({
+          initialColor: this.remoteExamColor(item),
+          examMode: true,
+          onPreview: (color: number) => { this.examColorPreview = color; },
+          onSave: async (color: number) => { await this.saveRemoteExamColor(item, color); },
+          onCancel: () => { this.examColorEditing = false; }
+        })
+      } else {
+        this.examDetailRow($r('sys.symbol.clock'), '时间',
+          item.examTime.length > 0 ? item.examTime : '待定')
+        this.examDetailRow($r('sys.symbol.calendar'), '日期',
+          item.examDate.length > 0 ? item.examDate : '待定')
+        this.examDetailRow($r('sys.symbol.pin'), '地点',
+          item.examLocation.length > 0 ? item.examLocation : '待定')
+        this.examDetailRow($r('sys.symbol.checkmark'), '类型',
+          item.examType.length > 0 ? item.examType : '未填写')
+        this.examDetailRow($r('sys.symbol.doc_plaintext'), '学期',
+          item.termName.length > 0 ? item.termName : '未填写')
+        this.examDetailRow($r('sys.symbol.magnifyingglass'), '校区',
+          item.campusName.length > 0 ? item.campusName : '未填写')
 
-      Row() {
-        Blank()
-        Text('导入到课表')
-          .fontSize(14)
-          .fontColor('#FFFFFF')
-          .fontWeight(FontWeight.Medium)
-          .padding({ left: 14, right: 14, top: 9, bottom: 9 })
-          .backgroundColor($r('app.color.hita_primary_fill'))
-          .borderRadius(18)
-          .enabled(!this.openingEditor)
-          .onClick(() => this.importRemoteExam(item))
+        Row() {
+          Blank()
+          Text('导入到课表')
+            .fontSize(14)
+            .fontColor('#FFFFFF')
+            .fontWeight(FontWeight.Medium)
+            .padding({ left: 14, right: 14, top: 9, bottom: 9 })
+            .backgroundColor($r('app.color.hita_primary_fill'))
+            .borderRadius(18)
+            .enabled(!this.openingEditor)
+            .onClick(() => this.importRemoteExam(item))
+        }
+        .width('100%')
+        .margin({ top: 6 })
       }
-      .width('100%')
-      .margin({ top: 6 })
     }
     .width('100%')
     .padding({ left: 20, right: 20, top: 4, bottom: 20 })
+  }
+
+  @Builder
+  private examColorButton(color: number) {
+    Button({ type: ButtonType.Circle }) {
+      SymbolGlyph($r('sys.symbol.paintpalette'))
+        .fontSize(22)
+        .fontColor([$r('app.color.hita_primary_3390ec')])
+    }
+    .width(44)
+    .height(44)
+    .padding(0)
+    .margin({ left: 8 })
+    .flexShrink(0)
+    .backgroundColor($r('app.color.hita_selected_e4f0ff'))
+    .accessibilityText('修改考试颜色')
+    .enabled(!this.savingExamColor && !this.openingEditor && this.pendingDeleteId.length === 0)
+    .onClick(() => this.toggleExamColor(color))
   }
 
   @Builder
@@ -777,9 +938,10 @@ struct ExamPage {
           .fontSize(20)
           .fontColor([$r('app.color.hita_primary_3390ec')])
       }
-      .width(38)
-      .height(38)
-      .borderRadius(19)
+      .width(DETAIL_ICON_SIZE)
+      .height(DETAIL_ICON_SIZE)
+      .borderRadius(DETAIL_ICON_SIZE / 2)
+      .flexShrink(0)
       .backgroundColor($r('app.color.hita_selected_e4f0ff'))
       .alignContent(Alignment.Center)
       Column() {
@@ -796,7 +958,7 @@ struct ExamPage {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      .margin({ left: 12 })
+      .margin({ left: DETAIL_TEXT_GAP })
     }
     .width('100%')
     .padding({ top: 8, bottom: 8 })

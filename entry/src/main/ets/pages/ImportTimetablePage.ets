@@ -277,9 +277,6 @@ struct ImportTimetablePage {
           Text(this.error)
             .fontSize(16)
             .fontColor(TEXT_PRIMARY);
-          Button('返回')
-            .margin({ top: 18 })
-            .onClick(() => this.getUIContext().getRouter().back());
         }
         .width('100%')
         .height('100%')
@@ -334,13 +331,17 @@ struct ImportTimetablePage {
           .layoutWeight(1)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis });
-        Button(this.importing ? '导入中' : '导入')
-          .fontSize(14)
-          .fontColor('#FFFFFF')
-          .backgroundColor(this.importing ? $r('app.color.hita_disabled') : HitaColors.primaryFill)
-          .borderRadius(18)
-          .height(36)
-          .padding({ left: 16, right: 16 })
+        Text(this.importing ? '导入中' : '导入')
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.hita_primary_3390ec'))
+          .height(32)
+          .padding({ left: 12, right: 12 })
+          .borderRadius(16)
+          .backgroundColor($r('app.color.hita_selected_ebf4fc'))
+          .textAlign(TextAlign.Center)
+          .margin({ left: 8 })
+          .flexShrink(0)
           .enabled(!this.importing && !this.loading && !this.detailsLoading &&
             this.startTime > 0 && this.selectedTerm() !== undefined)
           .onClick(() => this.import());

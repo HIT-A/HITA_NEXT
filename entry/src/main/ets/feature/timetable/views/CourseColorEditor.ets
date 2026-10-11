@@ -1,4 +1,5 @@
 import { TimetableTheme } from '../../../common/theme/TimetableTheme';
+import { CirclePaintModifier } from '../../../common/theme/CirclePaintModifier';
 import { CourseColorModel } from './CourseColorModel';
 import { timetableBlockColor } from './TimetableWeekDraw';
 
@@ -7,6 +8,7 @@ export struct CourseColorEditor {
   @Prop previewDark: boolean = false;
   @Prop previewWallpaper: boolean = false;
   @Prop textMode: boolean = false;
+  @Prop examMode: boolean = false;
   @Prop initialColor: number = 0xFF2E86E8;
   @Prop textColor: string = '#FFFFFF';
   @State hue: number = 0;
@@ -19,6 +21,7 @@ export struct CourseColorEditor {
   @State saving: boolean = false;
   @State error: string = '';
   onSave: (color: number) => Promise<void> = async () => {};
+  onPreview: (color: number) => void = () => {};
   onCancel: () => void = () => {};
 
   aboutToAppear(): void { this.selectColor(this.initialColor); }
@@ -28,12 +31,14 @@ export struct CourseColorEditor {
     this.hue = hsv.hue;
     this.saturation = hsv.saturation;
     this.colorBrightness = hsv.brightness;
+    this.onPreview(this.color());
   }
 
   private pickAt(x: number, y: number): void {
     if (this.saving) { return; }
     this.saturation = Math.max(0, Math.min(1, x / this.panelWidth));
     this.colorBrightness = 1 - Math.max(0, Math.min(1, y / this.panelHeight));
+    this.onPreview(this.color());
   }
 
   private dragColor(event: GestureEvent): void {
@@ -65,13 +70,16 @@ export struct CourseColorEditor {
 
   build() {
     Column({ space: 8 }) {
-      Text(this.textMode ? '时间表文字颜色' : '课程颜色').fontSize(20).fontWeight(FontWeight.Bold)
+      Text(this.textMode ? '时间表文字颜色' : (this.examMode ? '考试颜色' : '课程颜色'))
+        .fontSize(20).fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.hita_text')).width('100%');
-      Text(this.textMode ? '调整标题、日期和时间刻度的颜色。' : '应用到这门课程的所有课块；过亮颜色会自动压暗。')
+      Text(this.textMode ? '调整标题、日期和时间刻度的颜色。' :
+        (this.examMode ? '仅应用到这场考试；过亮颜色会自动压暗。' :
+          '应用到这门课程的所有课块；过亮颜色会自动压暗。'))
         .fontSize(13).fontColor($r('app.color.hita_text_secondary')).width('100%');
       Row({ space: 12 }) {
         Text(this.hex()).fontColor($r('app.color.hita_text')).layoutWeight(1);
-        Text(this.textMode ? '周一 08:00' : '课块预览')
+        Text(this.textMode ? '周一 08:00' : (this.examMode ? '考试预览' : '课块预览'))
           .fontColor(this.textMode ? TimetableTheme.resolveText(this.hex(), this.previewDark, this.previewWallpaper) : '#FFFFFF').fontSize(15)
           .padding(16).borderRadius(12)
           .backgroundColor(this.textMode ? $r('app.color.hita_page') : timetableBlockColor(this.color()));
@@ -85,10 +93,10 @@ export struct CourseColorEditor {
           .linearGradient({ direction: GradientDirection.Bottom,
             colors: [['#00000000', 0], ['#FF000000', 1]] });
         Stack() {
-          Circle().width(18).height(18).fill(Color.Transparent)
-            .stroke('#99000000').strokeWidth(4);
-          Circle().width(18).height(18).fill(Color.Transparent)
-            .stroke(Color.White).strokeWidth(2);
+          Circle().width(18).height(18)
+            .attributeModifier(new CirclePaintModifier(Color.Transparent, '#99000000')).strokeWidth(4);
+          Circle().width(18).height(18)
+            .attributeModifier(new CirclePaintModifier(Color.Transparent, Color.White)).strokeWidth(2);
         }.width(20).height(20)
           .position({ x: Math.max(0, Math.min(this.panelWidth - 20,
             this.saturation * this.panelWidth - 10)),
@@ -120,7 +128,10 @@ export struct CourseColorEditor {
         Slider({ value: this.hue, min: 0, max: 360, step: 1 })
           .width('100%').trackColor(Color.Transparent).selectedColor(Color.Transparent)
           .blockColor(Color.White).enabled(!this.saving).accessibilityText('彩虹色相')
-          .onChange((value: number) => { this.hue = value; });
+          .onChange((value: number) => {
+            this.hue = value;
+            this.onPreview(this.color());
+          });
       }.width('100%').height(36);
       Row() {
         ForEach(this.presets, (color: number) => {

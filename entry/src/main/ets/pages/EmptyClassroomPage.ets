@@ -348,17 +348,8 @@ struct EmptyClassroomPage {
         Text(this.cacheLabel()).fontSize(12).fontColor(SECONDARY).padding({ left: 8, right: 8 }).width('100%')
       }
       if (this.error.length > 0) {
-        Column({ space: 10 }) {
-          Text(this.error).fontSize(14).fontColor(SECONDARY).textAlign(TextAlign.Center)
-          Row({ space: 12 }) {
-            Button('重试').fontSize(14).enabled(!this.loading && !this.querying)
-              .onClick(async () => {
-                if (this.terms.length > 0 && this.buildings.length > 0) { await this.query(); }
-                else { await this.loadOptions(true); }
-              })
-            Button(this.loginNeeded ? '登录教务' : '教务账号').fontSize(14).onClick(() => this.openLogin())
-          }
-        }.width('100%').padding(20)
+        Text(this.error).fontSize(14).fontColor(SECONDARY).textAlign(TextAlign.Center)
+          .width('100%').padding(20)
       }
       Stack({ alignContent: Alignment.Center }) {
         Grid() {

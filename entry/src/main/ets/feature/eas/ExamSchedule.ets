@@ -51,12 +51,10 @@ export class ExamSchedule {
       return undefined;
     }
     const clocks: number[] | undefined = ExamSchedule.parseClocks(combined);
-    const startMin: number = clocks === undefined ? 9 * 60 : clocks[0];
-    let endMin: number = clocks === undefined ? 11 * 60 : clocks[1];
-    if (endMin <= startMin) {
-      endMin = startMin + 120;
+    if (clocks === undefined || clocks[1] <= clocks[0]) {
+      return undefined;
     }
-    return [day + startMin * 60 * 1000, day + endMin * 60 * 1000];
+    return [day + clocks[0] * 60 * 1000, day + clocks[1] * 60 * 1000];
   }
 
   static sameAsEvent(item: EasExamItem, event: EasEventItem): boolean {
@@ -119,23 +117,24 @@ export class ExamSchedule {
     if (month < 1 || month > 12 || day < 1 || day > 31) {
       return undefined;
     }
-    return new Date(year, month - 1, day, 0, 0, 0, 0).getTime();
+    const parsed: Date = new Date(year, month - 1, day, 0, 0, 0, 0);
+    return parsed.getFullYear() === year && parsed.getMonth() === month - 1 && parsed.getDate() === day ?
+      parsed.getTime() : undefined;
   }
 
   private static parseClocks(text: string): number[] | undefined {
     const range: RegExpExecArray | null =
-      /(\d{1,2})\s*[:：]\s*(\d{2})\s*[-~—～至到]+\s*(\d{1,2})\s*[:：]\s*(\d{2})/.exec(text);
+      /(\d{1,2})\s*[:：]\s*(\d{2})\s*[-~—–－～至到]+\s*(\d{1,2})\s*[:：]\s*(\d{2})/.exec(text);
     if (range !== null) {
+      if (Number(range[1]) > 23 || Number(range[3]) > 23 ||
+        Number(range[2]) > 59 || Number(range[4]) > 59) {
+        return undefined;
+      }
       return [
         Number(range[1]) * 60 + Number(range[2]),
         Number(range[3]) * 60 + Number(range[4])
       ];
     }
-    const single: RegExpExecArray | null = /(\d{1,2})\s*[:：]\s*(\d{2})/.exec(text);
-    if (single === null) {
-      return undefined;
-    }
-    const start: number = Number(single[1]) * 60 + Number(single[2]);
-    return [start, start + 120];
+    return undefined;
   }
 }

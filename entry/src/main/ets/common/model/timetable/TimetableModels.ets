@@ -291,7 +291,7 @@ export class EasTermSubject {
   }
 }
 
-/** 事件/课程实例（EventItem.kt 直迁；color 不落库）。 */
+/** 事件/课程实例（EventItem.kt 直迁）。 */
 export class EasEventItem {
   id: string = newId();
   type: EasEventType = EasEventType.CLASS;
@@ -305,7 +305,7 @@ export class EasEventItem {
   fromNumber: number = 0;
   lastNumber: number = 0;
   createdAt: number = Date.now();
-  /** 科目颜色（UI 层填充，不落库）。 */
+  /** 课程颜色由科目填充；考试颜色按事件保存，0 表示使用默认颜色。 */
   color: number = 0;
 
   static getTagInstance(name: string): EasEventItem {
