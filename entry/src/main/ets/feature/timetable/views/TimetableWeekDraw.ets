@@ -76,6 +76,7 @@ export class TimetableDrawStyle {
 
 class TimetableBlockLayout {
   event: EasEventItem;
+  eventIds: string[];
   from: number;
   to: number;
   lane: number = 0;
@@ -84,6 +85,7 @@ class TimetableBlockLayout {
 
   constructor(event: EasEventItem, from: number, to: number) {
     this.event = event;
+    this.eventIds = [event.id];
     this.from = from;
     this.to = to;
     this.place = event.place.trim();
@@ -91,9 +93,11 @@ class TimetableBlockLayout {
 
   /** 同名课程的重叠课次（如多位教师同时段授课）合并为一张卡片，而不是左右分栏。 */
   absorb(event: EasEventItem, from: number, to: number): boolean {
-    if (event.name.trim() !== this.event.name.trim() || from >= this.to || to <= this.from) {
+    if (event.type !== this.event.type || event.name.trim() !== this.event.name.trim() ||
+      from >= this.to || to <= this.from) {
       return false;
     }
+    this.eventIds.push(event.id);
     this.from = Math.min(this.from, from);
     this.to = Math.max(this.to, to);
     const place: string = event.place.trim();
@@ -165,10 +169,83 @@ export class TimetablePlaceLabel {
   }
 }
 
+/** Native backgrounds and canvas labels share the very same block geometry. */
+export class TimetableCardSurface {
+  key: string = '';
+  eventIds: string[] = [];
+  left: number = 0;
+  top: number = 0;
+  width: number = 0;
+  height: number = 0;
+  radius: number = 0;
+  color: number = 0;
+  titleLines: string[] = [];
+  titleFont: string = '';
+  titleY: number = 0;
+  titleLineHeight: number = 0;
+  place: TimetablePlaceLabel | undefined = undefined;
+
+  tint(): number {
+    // Retain the course hue, with enough transparency for the system material.
+    return (0xE6000000 | (this.color & 0x00FFFFFF)) >>> 0;
+  }
+
+  renderKey(): string {
+    return this.key + ':' + this.eventIds.join(',') + ':' + this.left + ':' + this.top + ':' + this.width + ':' +
+      this.height + ':' + this.radius + ':' + this.color + ':' +
+      this.titleLines.join('\n') + ':' + this.titleFont + ':' + this.titleY + ':' +
+      this.titleLineHeight + ':' + (this.place === undefined ? '' : this.place.text);
+  }
+}
+
+export class TimetableCardLayer {
+  surfaces: TimetableCardSurface[] = [];
+}
+
+/** This canvas is a child of the material card, so native deformation moves its text too. */
+export function drawTimetableCardText(ctx: CanvasRenderer, card: TimetableCardSurface): void {
+  ctx.clearRect(0, 0, card.width, card.height);
+  ctx.font = card.titleFont;
+  ctx.fillStyle = TimetableDrawStyle.blockText;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let i: number = 0; i < card.titleLines.length; i++) {
+    ctx.fillText(card.titleLines[i], card.width / 2, card.titleY + i * card.titleLineHeight);
+  }
+  const place: TimetablePlaceLabel | undefined = card.place;
+  if (place !== undefined && place.textWidth <= place.width) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(place.left, place.top, place.width, place.height);
+    ctx.clip();
+    ctx.font = place.font;
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(place.text, card.width / 2, place.baseline);
+    ctx.restore();
+  }
+}
+
+/** Material backgrounds may be absent from component snapshots; paint the course's own pixels. */
+export function drawTimetableCardSnapshot(ctx: CanvasRenderer, card: TimetableCardSurface,
+  elapsedMs: number): void {
+  drawTimetableCardText(ctx, card);
+  if (card.place !== undefined && card.place.textWidth > card.place.width) {
+    drawTimetablePlaces(ctx, card.width, card.height, [card.place], elapsedMs, false);
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-over';
+  ctx.fillStyle = argbToCss(card.color, 1);
+  roundedRectPath(ctx, 0, 0, card.width, card.height, card.radius);
+  ctx.fill();
+  ctx.restore();
+}
+
 /** Only the transparent classroom layer changes on animation frames. */
-export function drawTimetablePlaces(ctx: CanvasRenderingContext2D, w: number, h: number,
-  labels: TimetablePlaceLabel[], elapsedMs: number): number {
-  ctx.clearRect(0, 0, w, h);
+export function drawTimetablePlaces(ctx: CanvasRenderer, w: number, h: number,
+  labels: TimetablePlaceLabel[], elapsedMs: number, clear: boolean = true): number {
+  if (clear) {
+    ctx.clearRect(0, 0, w, h);
+  }
   ctx.fillStyle = TimetableDrawStyle.blockText;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
@@ -259,7 +336,7 @@ export function timetableBlockColor(argb: number): number {
 }
 
 /** 圆角矩形路径（不依赖 roundRect，用 moveTo/lineTo/quadraticCurveTo 拼角）。 */
-function roundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number,
+function roundedRectPath(ctx: CanvasRenderer, x: number, y: number, w: number, h: number,
   r: number): void {
   const rr: number = Math.max(0, Math.min(r, Math.min(w, h) / 2));
   ctx.beginPath();
@@ -347,9 +424,13 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   timetable: EasTimetable, events: EasEventItem[], weekNumber: number,
   isCurrentWeek: boolean, hourHeightOverride: number = 0,
   headerHeightOverride: number = 0, drawHeader: boolean = true,
-  fillPage: boolean = true, labelColor: string = '', darkMode: boolean = false): TimetablePlaceLabel[] {
+  fillPage: boolean = true, labelColor: string = '', darkMode: boolean = false,
+  cardLayer: TimetableCardLayer | undefined = undefined): TimetablePlaceLabel[] {
   const surface: TimetableSurfaceColors = new TimetableSurfaceColors(darkMode);
   const scrollingPlaces: TimetablePlaceLabel[] = [];
+  if (cardLayer !== undefined) {
+    cardLayer.surfaces = [];
+  }
   if (w <= 0 || h <= 0) {
     return scrollingPlaces;
   }
@@ -508,15 +589,29 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     const bw: number = Math.max(12, laneW - m * 2);
     const radius: number = Math.max(8, Math.min(18, bw * 0.22));
     const eventColor: number = timetableBlockColor(ev.color);
-    // Opaque cards keep their contrast even over bright or detailed wallpapers.
-    const color: string = argbToCss(eventColor, 1);
-    ctx.fillStyle = color;
-    roundedRectPath(ctx, x, y, bw, bh, radius);
-    ctx.fill();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
-    roundedRectPath(ctx, x, y, bw, bh, radius);
-    ctx.stroke();
+    let card: TimetableCardSurface | undefined = undefined;
+    if (cardLayer === undefined) {
+      // Older systems retain the original opaque, high-contrast canvas cards.
+      const color: string = argbToCss(eventColor, 1);
+      ctx.fillStyle = color;
+      roundedRectPath(ctx, x, y, bw, bh, radius);
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      roundedRectPath(ctx, x, y, bw, bh, radius);
+      ctx.stroke();
+    } else {
+      card = new TimetableCardSurface();
+      card.key = ev.id + ':' + layout.from + ':' + i;
+      card.eventIds = layout.eventIds.slice();
+      card.left = x;
+      card.top = y;
+      card.width = bw;
+      card.height = bh;
+      card.radius = Math.min(radius, bw / 2, bh / 2);
+      card.color = eventColor;
+      cardLayer.surfaces.push(card);
+    }
     const cardWidthScreen: number = bw;
     const cardHeightScreen: number = bh;
     const textScale: number = layout.lanes > 1 ? 0.9 : 1;
@@ -564,6 +659,10 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.fillStyle = TimetableDrawStyle.blockText;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    if (card !== undefined) {
+      card.titleFont = 'bold ' + titleFont.toString() + fontUnit;
+      card.titleLineHeight = titleLineHeight;
+    }
     if (titleLines.length > 0) {
       const titleAreaBottom: number = canShowPlace ?
         y + bh - placeHeight - 2 : y + bh - 8;
@@ -571,12 +670,19 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
       const titleHeight: number = titleLines.length * titleLineHeight;
       let titleY: number = titleAreaTop +
         Math.max(0, (titleAreaBottom - titleAreaTop - titleHeight) / 2) + titleLineHeight / 2;
+      if (card !== undefined) {
+        card.titleY = titleY - y;
+      }
       for (let line = 0; line < titleLines.length; line++) {
         if (titleY + titleLineHeight / 2 > titleAreaBottom ||
           titleY - titleLineHeight / 2 < titleAreaTop) {
           break;
         }
-        ctx.fillText(titleLines[line], x + bw / 2, titleY);
+        if (card === undefined) {
+          ctx.fillText(titleLines[line], x + bw / 2, titleY);
+        } else {
+          card.titleLines.push(titleLines[line]);
+        }
         titleY += titleLineHeight;
       }
     }
@@ -591,26 +697,40 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
       const placeTextWidth: number = ctx.measureText(placeText).width;
       const placeTop: number = y + bh - placeHeight;
       const placeY: number = y + bh - Math.max(4, placeHeight * 0.28);
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(x + titlePaddingScreen, placeTop, placeAvailableWidth, placeHeight);
-      ctx.clip();
+      const label: TimetablePlaceLabel = new TimetablePlaceLabel();
+      label.text = placeText;
+      // ArkUI may normalize the font getter to px; preserve the requested vp size.
+      label.font = placeFont.toString() + fontUnit;
+      label.left = x + titlePaddingScreen;
+      label.top = placeTop;
+      label.width = placeAvailableWidth;
+      label.height = placeHeight;
+      label.textWidth = placeTextWidth;
+      label.baseline = placeY;
+      if (card !== undefined) {
+        const localPlace: TimetablePlaceLabel = new TimetablePlaceLabel();
+        localPlace.text = label.text;
+        localPlace.font = label.font;
+        localPlace.left = titlePaddingScreen;
+        localPlace.top = placeTop - y;
+        localPlace.width = label.width;
+        localPlace.height = label.height;
+        localPlace.textWidth = label.textWidth;
+        localPlace.baseline = placeY - y;
+        card.place = localPlace;
+      }
       if (placeTextWidth <= placeAvailableWidth) {
-        ctx.fillText(placeText, x + bw / 2, placeY);
+        if (card === undefined) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(label.left, label.top, label.width, label.height);
+          ctx.clip();
+          ctx.fillText(placeText, x + bw / 2, placeY);
+          ctx.restore();
+        }
       } else {
-        const label: TimetablePlaceLabel = new TimetablePlaceLabel();
-        label.text = placeText;
-        // ArkUI may normalize the font getter to px; preserve the requested vp size.
-        label.font = placeFont.toString() + fontUnit;
-        label.left = x + titlePaddingScreen;
-        label.top = placeTop;
-        label.width = placeAvailableWidth;
-        label.height = placeHeight;
-        label.textWidth = placeTextWidth;
-        label.baseline = placeY;
         scrollingPlaces.push(label);
       }
-      ctx.restore();
       ctx.textAlign = 'start';
     }
   }

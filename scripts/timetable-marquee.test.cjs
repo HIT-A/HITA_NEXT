@@ -24,8 +24,10 @@ function load(file) {
 const { placeMarqueeFrame, PLACE_MARQUEE_PAUSE_MS, PLACE_MARQUEE_SPEED } =
   load('feature/timetable/views/PlaceMarquee.ets');
 const { drawTimetableWeek, drawTimetablePlaces, TimetablePlaceLabel, timetableEventSpan,
-  timetableBlockColor, argbToCss, TimetableDrawStyle } =
+  timetableBlockColor, argbToCss, TimetableDrawStyle, TimetableCardLayer, drawTimetableCardText,
+  drawTimetableCardSnapshot } =
   load('feature/timetable/views/TimetableWeekDraw.ets');
+const { TimetableCardPainter } = load('feature/timetable/views/TimetableCardPainter.ets');
 const { EasEventItem, EasTimetable } = load('common/model/timetable/TimetableModels.ets');
 const { TimetableTheme } = load('common/theme/TimetableTheme.ets');
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 0.0001, `${actual} != ${expected}`);
@@ -286,16 +288,17 @@ test('the next wake-up is the earliest label pause ending, or the next vsync whi
 
 test('the host uses cancellable-by-generation vsync callbacks and a non-interactive overlay', () => {
   const home = fs.readFileSync(path.join(root, 'pages/Home.ets'), 'utf8');
-  const loop = home.slice(home.indexOf('  private startTimetableMarquee()'), home.indexOf('  async refreshSummaries()'));
+  const loop = home.slice(home.indexOf('  private startTimetableMarquee()'), home.indexOf('  async refreshSummaries('));
   assert.match(home, /frameTimeInNano \/ 1000000/);
   assert.match(loop, /postFrameCallback\(callback\)/);
   assert.match(loop, /postDelayedFrameCallback\(callback, Math\.ceil\(nextDelay\)\)/);
   assert.match(loop, /generation !== this\.timetableMarqueeGeneration/);
-  assert.match(loop, /drawTimetablePlaces/);
+  assert.match(loop, /timetableCardPainter\.drawPlaces/);
   assert.doesNotMatch(loop, /drawTimetableNow|drawTimetableWeek\(|eventsOfWeek/);
   assert.doesNotMatch(home, /timetableMarqueeTimer|timetableMarqueeOffset/);
   assert.match(home, /onPageHide\(\): void \{[\s\S]*?this\.stopTimetableMarquee\(\)/);
-  assert.match(home, /Canvas\(this\.timetablePlaceCanvas\)[\s\S]*?\.hitTestBehavior\(HitTestMode\.None\)/);
+  const cards = fs.readFileSync(path.join(root, 'feature/timetable/views/TimetableCardMaterials.ets'), 'utf8');
+  assert.match(cards, /Canvas\(this\.placeCanvas\)[\s\S]*?\.hitTestBehavior\(HitTestMode\.None\)/);
 });
 
 test('timetable taps open detail for exams as well as classes', () => {
@@ -308,4 +311,228 @@ test('timetable taps open detail for exams as well as classes', () => {
   assert.match(home, /event\.type === EasEventType\.EXAM \? '考场' : '教室'/);
   assert.match(home, /if \(event\.type !== EasEventType\.EXAM\) \{[\s\S]*?Home\.coursePeriodText\(event\)/);
   assert.match(home, /'类型', '考试'/);
+});
+
+test('native card surfaces match legacy bounds and preserve all title and classroom positions', () => {
+  const { timetable, events } = fixture();
+  const add = (id, name, day, hour, duration, color) => {
+    const event = new EasEventItem();
+    Object.assign(event, { id, name, place: 'Classroom-long-name-118', color,
+      from: timetable.startTime + (day - 1) * 86400000 + hour * 3600000 });
+    event.to = duration === 0 ? 0 : event.from + duration * 60000;
+    events.push(event);
+  };
+  add('short', 'One period', 3, 8, 45, 0xFFFFB74D);
+  add('missing-end', 'One hour', 4, 9, 0, 0xFF81C784);
+  add('overlap-a', 'Course C', 5, 10, 120, 0xFF3949AB);
+  add('overlap-b', 'Course D', 5, 10, 60, 0xFF8E24AA);
+  add('merge', 'Course C', 5, 10.5, 60, 0xFF3949AB);
+  add('sunday', 'Sunday exam', 7, 18, 90, 0xFF8A2E42);
+  add('clip', 'Early class', 2, 7.5, 60, 0xFF546E7A);
+  const saved = events.map(event => JSON.stringify(event));
+  for (const width of [320, 380, 600]) {
+    for (const dark of [false, true]) {
+      for (const fillPage of [false, true]) {
+        const legacy = canvas(), grid = canvas();
+        const layer = new TimetableCardLayer();
+        const args = [width, 830, timetable, events, 1, true, 50, 0, false, fillPage, '', dark];
+        const previousLabels = drawTimetableWeek(legacy, ...args);
+        const labels = drawTimetableWeek(grid, ...args, layer);
+        assert.deepEqual(labels, previousLabels);
+        assert.equal(layer.surfaces.length, events.length - 1, 'merged courses have one surface');
+        const normalize = paints => paints.map(p => ({ ...p,
+          args: p.args.map(value => typeof value === 'number' ? Math.round(value * 1e8) / 1e8 : value) }));
+        const nativeText = layer.surfaces.flatMap(card => {
+          const text = canvas();
+          drawTimetableCardText(text, card);
+          assert.ok(text.paints.every(p => p.method === 'fillText'), 'text canvas must remain transparent');
+          return text.paints.map(p => ({ ...p, args: [p.args[0], p.args[1] + card.left, p.args[2] + card.top] }));
+        });
+        assert.deepEqual(normalize(nativeText),
+          normalize(legacy.paints.filter(p => p.method === 'fillText' && p.color === '#FFFFFF')));
+        assert.ok(grid.paints.every(p => p.method !== 'fill' &&
+          !(p.method === 'fillText' && p.color === '#FFFFFF')), 'grid cannot cover the material or duplicate card text');
+        const bounds = [];
+        let path = [];
+        for (const call of legacy.calls) {
+          if (call[0] === 'beginPath') path = [];
+          if (['moveTo', 'lineTo', 'quadraticCurveTo'].includes(call[0])) path.push(call);
+          if (call[0] === 'fill') bounds.push(path);
+        }
+        layer.surfaces.forEach((card, index) => {
+          close(card.left + card.radius, bounds[index][0][1]);
+          close(card.top, bounds[index][0][2]);
+          close(card.left + card.width, bounds[index][2][1]);
+          close(card.top + card.height, bounds[index][4][2]);
+          assert.ok(card.left >= 48 && card.left + card.width <= width);
+          assert.ok(card.top >= 24 && card.top + card.height <= 774);
+          assert.equal(argbToCss(card.color, 1), legacy.paints.filter(p => p.method === 'fill')[index].color);
+          assert.equal(card.tint() & 0xFFFFFF, card.color & 0xFFFFFF);
+          assert.ok(card.tint() >>> 24 > 0 && card.tint() >>> 24 < 255);
+        });
+        const keys = layer.surfaces.map(card => card.renderKey());
+        assert.equal(new Set(keys).size, keys.length);
+        drawTimetableWeek(grid, ...args, layer);
+        assert.deepEqual(layer.surfaces.map(card => card.renderKey()), keys, 'redraws do not recreate unchanged materials');
+        assert.deepEqual(events.map(event => JSON.stringify(event)), saved, 'rendering cannot change saved course colors or times');
+      }
+    }
+  }
+});
+
+test('refreshing to an empty week removes native cards and their text together', () => {
+  const { timetable, events } = fixture();
+  const grid = canvas(), layer = new TimetableCardLayer();
+  drawTimetableWeek(grid, 380, 830, timetable, events, 1, false, 50, 0, false, true, '', false, layer);
+  assert.equal(layer.surfaces.length, 2);
+  drawTimetableWeek(grid, 380, 830, timetable, [], 2, false, 50, 0, false, true, '', false, layer);
+  assert.equal(layer.surfaces.length, 0);
+});
+
+test('course color edits and resizing invalidate native geometry without changing the saved palette', () => {
+  const { timetable, events } = fixture();
+  const grid = canvas(), layer = new TimetableCardLayer();
+  const draw = width => drawTimetableWeek(grid, width, 830, timetable, events, 1,
+    false, 50, 0, false, false, '', false, layer);
+  draw(380);
+  const oldKeys = layer.surfaces.map(card => card.renderKey());
+  events[0].color = 0xFF8E24AA;
+  draw(380);
+  assert.notEqual(layer.surfaces[0].renderKey(), oldKeys[0]);
+  assert.equal(layer.surfaces[1].renderKey(), oldKeys[1]);
+  assert.equal(events[0].color, 0xFF8E24AA);
+  events[1].name = 'Updated title';
+  draw(380);
+  assert.notEqual(layer.surfaces[1].renderKey(), oldKeys[1], 'title edits invalidate the card text canvas');
+  events[1].name = 'Course B';
+  draw(600);
+  assert.notEqual(layer.surfaces[1].renderKey(), oldKeys[1]);
+});
+
+test('card-local classroom canvases share the page clock and retain the loop pause', () => {
+  const { timetable, events } = fixture();
+  const layer = new TimetableCardLayer();
+  const labels = drawTimetableWeek(canvas(), 380, 830, timetable, events, 1,
+    false, 50, 0, false, false, '', false, layer);
+  const painter = new TimetableCardPainter();
+  assert.equal(painter.drawPlaces(labels, 0), 1200, 'animation starts even before card canvases mount');
+  const ctx = canvas(), card = layer.surfaces[0];
+  painter.attach(card, ctx);
+  assert.equal(ctx.calls.filter(call => call[0] === 'fillText').length, 2);
+  const legacy = canvas();
+  assert.equal(painter.drawPlaces(labels, 1600), 0);
+  drawTimetablePlaces(legacy, 380, 830, labels, 1600);
+  const moved = ctx.paints.slice(-2);
+  legacy.paints.forEach((paint, i) => {
+    assert.equal(moved[i].args[0], paint.args[0]);
+    close(moved[i].args[1] + card.left, paint.args[1]);
+    close(moved[i].args[2] + card.top, paint.args[2]);
+  });
+  assert.ok(ctx.paints.every(p => p.method === 'fillText' && p.args[0] === card.place.text));
+  assert.ok(!ctx.calls.some(call => ['measureText', 'stroke', 'fillRect'].includes(call[0])));
+  const cycle = 1200 + (card.place.textWidth + card.place.width / 3) / 30 * 1000;
+  close(painter.drawPlaces(labels, cycle + 600), 600);
+  painter.detach(ctx);
+  const count = ctx.calls.length;
+  painter.drawPlaces(labels, cycle + 800);
+  assert.equal(ctx.calls.length, count, 'removed or hidden cards stop receiving drawing calls');
+  painter.attach(card, ctx);
+  close(ctx.paints.at(-2).args[1], card.place.left);
+});
+
+test('replacing a course canvas cannot leave duplicate frames or unregister the replacement', () => {
+  const { timetable, events } = fixture();
+  const layer = new TimetableCardLayer();
+  const labels = drawTimetableWeek(canvas(), 380, 830, timetable, events, 1,
+    false, 50, 0, false, false, '', false, layer);
+  const painter = new TimetableCardPainter(), old = canvas(), current = canvas();
+  painter.attach(layer.surfaces[0], old);
+  painter.attach(layer.surfaces[0], current);
+  painter.detach(old);
+  const oldCalls = old.calls.length, currentCalls = current.calls.length;
+  painter.drawPlaces(labels, 1800);
+  assert.equal(old.calls.length, oldCalls);
+  assert.equal(current.calls.length - currentCalls, 8, 'exactly one clipped two-copy classroom frame');
+});
+
+test('both title and scrolling classroom are inside the material card so native press movement includes text', () => {
+  const source = fs.readFileSync(path.join(root, 'feature/timetable/views/TimetableCardMaterials.ets'), 'utf8');
+  const card = source.slice(source.indexOf('struct TimetableMaterialCard'), source.indexOf('export struct'));
+  assert.match(card, /Stack\(\{ alignContent: Alignment\.TopStart \}\) \{\s*Canvas\(this\.textCanvas\)/);
+  assert.match(card, /Canvas\(this\.placeCanvas\)[\s\S]*\.attributeModifier\(new CompatibleMaterialModifier/);
+  const home = fs.readFileSync(path.join(root, 'pages/Home.ets'), 'utf8');
+  assert.doesNotMatch(home, /timetableTextCanvas/);
+  assert.match(home, /TimetableCardMaterials\(\{[\s\S]*?painter: this\.timetableCardPainter/);
+  assert.match(home, /timetableCardPainter\.drawPlaces\(this\.timetablePlaceLabels, this\.timetableMarqueeElapsedMs\)/);
+});
+
+test('merged lesson cards retain occurrence IDs, while same-name exams remain separate', () => {
+  const { timetable, events } = fixture();
+  const first = events[0];
+  first.type = 'CLASS';
+  const duplicate = Object.assign(new EasEventItem(), first, { id: 'second-teacher' });
+  const exam = Object.assign(new EasEventItem(), first, { id: 'same-name-exam', type: 'EXAM' });
+  const layer = new TimetableCardLayer();
+  drawTimetableWeek(canvas(), 380, 830, timetable, [first, duplicate, exam], 1, false,
+    50, 0, false, false, '', false, layer);
+  assert.equal(layer.surfaces.length, 2);
+  assert.deepEqual(layer.surfaces[0].eventIds, [first.id, duplicate.id]);
+  assert.deepEqual(layer.surfaces[1].eventIds, [exam.id]);
+});
+
+test('dissolve source includes the full course fill, original title and current classroom position', () => {
+  const { timetable, events } = fixture();
+  const layer = new TimetableCardLayer();
+  const labels = drawTimetableWeek(canvas(), 380, 830, timetable, events, 1,
+    false, 50, 0, false, false, '', false, layer);
+  for (const card of layer.surfaces) {
+    const source = canvas(), title = canvas();
+    drawTimetableCardSnapshot(source, card, 1900);
+    drawTimetableCardText(title, card);
+    assert.deepEqual(source.paints.slice(0, title.paints.length), title.paints);
+    assert.equal(source.calls.filter(call => call[0] === 'clearRect').length, 1,
+      'adding the classroom cannot clear the title or background');
+    assert.equal(source.paints.at(-1).method, 'fill');
+    assert.equal(source.paints.at(-1).color, argbToCss(card.color, 1));
+    if (card.place.textWidth > card.place.width) {
+      const painter = new TimetableCardPainter(), live = canvas();
+      painter.drawPlaces(labels, 1900);
+      painter.attach(card, live);
+      assert.deepEqual(source.paints.slice(-3, -1), live.paints);
+    }
+  }
+});
+
+test('offscreen course capture follows the same vp geometry and bounds bitmap allocation', async () => {
+  const { timetable, events } = fixture();
+  const layer = new TimetableCardLayer();
+  drawTimetableWeek(canvas(), 380, 830, timetable, events, 1,
+    false, 50, 0, false, false, '', false, layer);
+  const originalCanvas = global.OffscreenCanvasRenderingContext2D;
+  const originalSettings = global.RenderingContextSettings;
+  const captured = [];
+  global.RenderingContextSettings = class {};
+  global.OffscreenCanvasRenderingContext2D = class {
+    constructor(w, h) {
+      const ctx = canvas();
+      ctx.scale = (...args) => ctx.calls.push(['scale', ...args]);
+      ctx.getPixelMap = (...bounds) => ({ w, h, bounds });
+      captured.push(ctx);
+      return ctx;
+    }
+  };
+  try {
+    const painter = new TimetableCardPainter();
+    const small = await painter.capture(layer.surfaces[0], 3.25);
+    assert.equal(small.w, layer.surfaces[0].width);
+    assert.equal(small.h, layer.surfaces[0].height);
+    assert.deepEqual(captured[0].calls[0], ['scale', 1, 1]);
+    const bigCard = Object.assign(layer.surfaces[0], { width: 200, height: 1500 });
+    const big = await painter.capture(bigCard, 4);
+    assert.ok(big.w * big.h * 16 <= 360001);
+    assert.equal(captured[1].paints.at(-1).color, argbToCss(bigCard.color, 1));
+  } finally {
+    global.OffscreenCanvasRenderingContext2D = originalCanvas;
+    global.RenderingContextSettings = originalSettings;
+  }
 });

@@ -49,7 +49,7 @@ export struct FrostedDock {
           .borderRadius(24)
           .backgroundColor(this.darkMode ? '#18FFFFFF' : '#10000000')
           .translate({ x: this.selectedIndex * 68 })
-          .animation({ duration: 200, curve: Curve.FastOutSlowIn })
+          .animation({ duration: 300, curve: Curve.FastOutSlowIn })
           .hitTestBehavior(HitTestMode.None)
         Row() {
           this.item($r('sys.symbol.calendar'), '今日', 0)

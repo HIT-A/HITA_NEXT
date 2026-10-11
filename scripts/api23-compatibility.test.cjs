@@ -52,7 +52,7 @@ test('older dock keeps three actions, reactive selection, safe-area spacing and 
   const item = dock.slice(dock.indexOf('  item('), dock.indexOf('  build()'));
   assert.doesNotMatch(item, /\.blendMode|\.backgroundColor/);
   assert.match(dock, /\.width\(68\)[\s\S]*?\.translate\(\{ x: this\.selectedIndex \* 68 \}\)/);
-  assert.match(dock, /\.animation\(\{ duration: 200, curve: Curve\.FastOutSlowIn \}\)/);
+  assert.match(dock, /\.animation\(\{ duration: 300, curve: Curve\.FastOutSlowIn \}\)/);
   assert.doesNotMatch(dock, /\.invert\(|\.shadow\(|\.opacity\(/);
   assert.match(dock, /\.backgroundEffect\(\{/);
   assert.match(dock, /\.margin\(\{ bottom: 12 \+ this\.bottomInset \}\)/);

@@ -132,7 +132,8 @@ test('calendar confirmation uses the guarded sheet material without changing exp
   assert.match(sheet, /onClick\(\(\) => this.cancelCalendarExport\(\)\)/);
   assert.match(sheet, /onClick\(\(\) => this.exportToCalendar\(\)\)/);
   assert.equal((sheet.match(/\.enabled\(!this.calendarExporting\)/g) || []).length, 2);
-  assert.doesNotMatch(sheet, /\.backgroundColor\(COLOR_SURFACE\)|systemMaterial|attributeModifier/);
+  assert.doesNotMatch(sheet, /\.backgroundColor\(COLOR_SURFACE\)|systemMaterial/);
+  assert.match(sheet, /ImmersiveHeader\(\{ barHeight: 46 \}\)/);
 });
 
 test('course palette button keeps a stable circle host, original preview and toggle callbacks', () => {

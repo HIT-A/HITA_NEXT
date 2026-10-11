@@ -34,7 +34,9 @@ test('timetable photo picker copies a gallery image and covers the page without 
   assert.match(tab, /backgroundColor\(Color\.Transparent\)/);
   assert.match(tab, /accessibilityText\('选择时间表字体颜色'\)/);
   assert.match(home, /CourseColorEditor\([\s\S]*textMode: true,[\s\S]*TimetableTheme\.PALETTE/);
-  assert.match(home, /drawTimetableWeek\([\s\S]*!this\.hasTimetableBackground\(\), this\.timetableInk\(\), this\.darkMode\)/);
+  assert.match(home, /drawTimetableWeek\([\s\S]*hourHeight, 0, false, false, this\.timetableInk\(\), this\.darkMode, cardLayer\)/);
+  assert.match(tab, /\.backgroundColor\(COLOR_SURFACE\)/,
+    'heading and grid share one theme resource instead of independently painted backgrounds');
   assert.match(tab, /timetableDateHeader\(\)/);
   assert.match(tab, /timetableDateHeader\(\)[\s\S]*backgroundColor\(Color\.Transparent\)/);
   assert.match(tab, /Text\(this\.timetableCampusTerm\(\)\)[\s\S]*?\.backgroundColor\(Color\.Transparent\)/);

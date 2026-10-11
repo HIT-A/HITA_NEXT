@@ -5,17 +5,22 @@ export class CompatibleMaterialModifier implements AttributeModifier<CommonAttri
   private fallbackColor: ResourceColor;
   private blueSurface: boolean;
   private enabled: boolean;
+  private tint: ResourceColor | undefined;
+  private shadow: boolean | undefined;
 
-  constructor(fallbackColor: ResourceColor, blueSurface: boolean = false, enabled: boolean = true) {
+  constructor(fallbackColor: ResourceColor, blueSurface: boolean = false, enabled: boolean = true,
+    tint: ResourceColor | undefined = undefined, shadow: boolean | undefined = undefined) {
     this.fallbackColor = fallbackColor;
     this.blueSurface = blueSurface;
     this.enabled = enabled;
+    this.tint = tint;
+    this.shadow = shadow;
   }
 
   applyNormalAttribute(instance: CommonAttribute): void {
     if (deviceInfo.apiAvailable('26.0.0')) {
       if (this.enabled) {
-        HeaderMaterial.apply(instance, this.fallbackColor, this.blueSurface);
+        HeaderMaterial.apply(instance, this.fallbackColor, this.blueSurface, this.tint, this.shadow);
       }
     }
   }

@@ -22,7 +22,10 @@ import { CompatibleSheetMaterial } from '../common/theme/CompatibleSheetMaterial
 import { CirclePaintModifier } from '../common/theme/CirclePaintModifier';
 import { FrostedDock } from '../common/components/FrostedDock';
 import { DockNavigationGuard } from '../common/util/DockNavigationGuard';
+import { DeleteEffectController } from '../common/util/DeleteEffectController';
 import { CourseColorEditor } from '../feature/timetable/views/CourseColorEditor';
+import { TimetableCardMaterials } from '../feature/timetable/views/TimetableCardMaterials';
+import { TimetableCardPainter } from '../feature/timetable/views/TimetableCardPainter';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTermSubject, EasTimetable } from '../common/model/timetable/TimetableModels';
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
@@ -44,9 +47,10 @@ import {
   TIMETABLE_GRID_TOP_PADDING,
   TIMETABLE_HEADER_HEIGHT,
   TIMETABLE_HOUR_HEIGHT,
+  TimetableCardLayer,
+  TimetableCardSurface,
   TimetablePlaceLabel,
   DOW_NAMES,
-  drawTimetablePlaces,
   drawTimetableWeek,
   eventsOfWeek,
   timetableBlockColor,
@@ -76,7 +80,8 @@ const COLOR_SURFACE_RGB: string = '244,247,252';
 const TIMETABLE_SWIPE_RATIO: number = 0.08;
 const TIMETABLE_FLING_VELOCITY: number = 400;
 const TIMETABLE_FLING_MIN_OFFSET: number = 12;
-const TAB_SWIPE_MS: number = 280;
+const TAB_SWIPE_MS: number = 300;
+const TIMETABLE_SLIDE_MS: number = 220;
 const COURSE_DETAIL_ICON_SIZE: number = 38;
 const COURSE_DETAIL_TEXT_GAP: number = 12;
 
@@ -138,6 +143,12 @@ struct Home {
   @State courseColorEditing: boolean = false;
   @State courseColorPreview: number = 0;
   @State selectedCourse: EasEventItem | undefined = undefined;
+  @State skippingCourse: boolean = false;
+  private courseSkipAnimating: boolean = false;
+  private courseDeleteEffects: DeleteEffectController = new DeleteEffectController();
+  private courseSheetDismissed: (() => void) | undefined = undefined;
+  private courseSheetDismissTimer: number = -1;
+  private summaryRequestGeneration: number = 0;
   @State classReminderEnabled: boolean = false;
   private reminderBusy: boolean = false;
   @State timetableEvents: EasEventItem[] = [];
@@ -160,8 +171,8 @@ struct Home {
   private dayKey: string = EasTimeTools.printDate(Date.now());
   private timetableCanvas: CanvasRenderingContext2D =
     new CanvasRenderingContext2D(new RenderingContextSettings(true));
-  private timetablePlaceCanvas: CanvasRenderingContext2D =
-    new CanvasRenderingContext2D(new RenderingContextSettings(true));
+  private timetableCardPainter: TimetableCardPainter = new TimetableCardPainter();
+  @State private timetableCardSurfaces: TimetableCardSurface[] = [];
   private timetableAreaW: number = 0;
   private timetableAreaH: number = 0;
   @State private timetableCanvasHeight: number = 0;
@@ -218,6 +229,7 @@ struct Home {
 
   async onPageShow(): Promise<void> {
     this.pageVisible = true;
+    this.courseDeleteEffects.resume();
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
     this.startClock();
     await this.refreshSummaries();
@@ -226,6 +238,8 @@ struct Home {
   onPageHide(): void {
     this.pageVisible = false;
     this.closeActiveSheet();
+    this.courseDeleteEffects.pause();
+    this.finishCourseSheetDismissal();
     this.tabTransitionRunning = false;
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.OFFSET);
     this.stopTimetableMarquee();
@@ -256,6 +270,8 @@ struct Home {
   aboutToDisappear(): void {
     this.pageVisible = false;
     this.closeActiveSheet();
+    this.courseDeleteEffects.pause();
+    this.finishCourseSheetDismissal();
     this.stopTimetableMarquee();
     if (this.clockTimer >= 0) {
       clearInterval(this.clockTimer);
@@ -307,9 +323,7 @@ struct Home {
         this.timetableMarqueeElapsedMs += Math.max(0, timeMs - this.timetableMarqueeLastFrameMs);
       }
       this.timetableMarqueeLastFrameMs = timeMs;
-      const nextDelay: number = drawTimetablePlaces(this.timetablePlaceCanvas,
-        this.timetableAreaW, this.timetableCanvasHeight, this.timetablePlaceLabels,
-        this.timetableMarqueeElapsedMs);
+      const nextDelay: number = this.drawTimetablePlaceFrame();
       if (nextDelay < 0) {
         this.stopTimetableMarquee();
       } else if (nextDelay > 0) {
@@ -322,17 +336,23 @@ struct Home {
     this.getUIContext().postFrameCallback(callback);
   }
 
-  async refreshSummaries(): Promise<void> {
+  private drawTimetablePlaceFrame(): number {
+    return this.timetableCardPainter.drawPlaces(this.timetablePlaceLabels, this.timetableMarqueeElapsedMs);
+  }
+
+  async refreshSummaries(preserveWeek: boolean = false): Promise<void> {
+    if (this.skippingCourse) {
+      return;
+    }
+    const generation: number = ++this.summaryRequestGeneration;
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     const rdb: RdbHelper = RdbHelper.getInstance();
     await rdb.init(ctx);
 
     const found: EasSession | undefined = await EasSessionStore.getInstance().loadPreferred();
-    this.sessionInfo = found;
 
     const allTimetables: EasTimetable[] = await rdb.getTimetables();
-    this.timetableCount = allTimetables.length;
-    this.recentTimetable = await TimetableResolver.getRecent(rdb, this.nowTick);
+    const recent: EasTimetable | undefined = await TimetableResolver.getRecent(rdb, this.nowTick);
     const selectedId: string = await TimetableSelectionStore.getInstance().load();
     let selected: EasTimetable | undefined = undefined;
     if (selectedId.length > 0) {
@@ -342,6 +362,9 @@ struct Home {
       }
     }
     const real: EasTimetable | undefined = await TimetableResolver.getReal(rdb);
+    if (generation !== this.summaryRequestGeneration || this.skippingCourse) {
+      return;
+    }
     if (found !== undefined && real === undefined && selected === undefined &&
       !this.importing && !this.importRequested) {
       await this.importTimetable(false);
@@ -350,9 +373,6 @@ struct Home {
 
     const display: EasTimetable | undefined = selected !== undefined ? selected :
       (real !== undefined ? real : await TimetableResolver.getForDisplay(rdb));
-    this.hasTimetable = display !== undefined;
-    this.currentTimetable = display;
-
     const now0: number = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
     let allEvents: EasEventItem[] = [];
     if (display !== undefined) {
@@ -371,12 +391,20 @@ struct Home {
           allEvents[i].color = color === undefined ? Home.defaultCanvasColor(allEvents[i].type) : color;
         }
       }
-      this.timetableEvents = allEvents;
-      const currentWeek: number = display.getWeekNumber(this.nowTick);
+    }
+    if (generation !== this.summaryRequestGeneration || this.skippingCourse) {
+      return;
+    }
+    const keepWeek: boolean = preserveWeek && this.currentTimetable?.id === display?.id;
+    this.sessionInfo = found;
+    this.timetableCount = allTimetables.length;
+    this.recentTimetable = recent;
+    this.hasTimetable = display !== undefined;
+    this.currentTimetable = display;
+    this.timetableEvents = allEvents;
+    if (!keepWeek) {
+      const currentWeek: number = display?.getWeekNumber(this.nowTick) ?? 1;
       this.timetableWeek = currentWeek > 0 ? currentWeek : 1;
-    } else {
-      this.timetableEvents = [];
-      this.timetableWeek = 1;
     }
     const today: EasEventItem[] = allEvents.filter((event: EasEventItem): boolean =>
       event.from >= now0 && event.from < now0 + DAY_MS);
@@ -460,6 +488,9 @@ struct Home {
   }
 
   private drawTimetableNow(): void {
+    if (this.courseSkipAnimating) {
+      return;
+    }
     if (this.timetableAreaW <= 0 || this.timetableAreaH <= 0 || this.currentTimetable === undefined) {
       this.stopTimetableMarquee();
       return;
@@ -476,10 +507,18 @@ struct Home {
     if (this.timetableCanvasHeight !== canvasHeight) {
       this.timetableCanvasHeight = canvasHeight;
     }
+    const cardLayer: TimetableCardLayer = new TimetableCardLayer();
+    // The grid shares the page's resource-backed background with the heading.
     const labels: TimetablePlaceLabel[] = drawTimetableWeek(this.timetableCanvas,
       this.timetableAreaW, canvasHeight,
       this.currentTimetable, weekEvents, this.timetableWeek, current === this.timetableWeek,
-      hourHeight, 0, false, !this.hasTimetableBackground(), this.timetableInk(), this.darkMode);
+      hourHeight, 0, false, false, this.timetableInk(), this.darkMode, cardLayer);
+    const cards: TimetableCardSurface[] = cardLayer.surfaces;
+    if (cards.length !== this.timetableCardSurfaces.length ||
+      cards.some((card: TimetableCardSurface, index: number): boolean =>
+        card.renderKey() !== this.timetableCardSurfaces[index].renderKey())) {
+      this.timetableCardSurfaces = cards;
+    }
     if (labels.length !== this.timetablePlaceLabels.length ||
       labels.some((label: TimetablePlaceLabel, index: number): boolean =>
         !label.matches(this.timetablePlaceLabels[index]))) {
@@ -487,8 +526,7 @@ struct Home {
       this.timetableMarqueeElapsedMs = 0;
     }
     this.timetablePlaceLabels = labels;
-    drawTimetablePlaces(this.timetablePlaceCanvas, this.timetableAreaW, canvasHeight,
-      labels, this.timetableMarqueeElapsedMs);
+    this.drawTimetablePlaceFrame();
     this.startTimetableMarquee();
   }
 
@@ -532,34 +570,121 @@ struct Home {
       x <= 0 || y < TIMETABLE_GRID_TOP_PADDING) {
       return;
     }
-    const gutterWidth: number = Math.max(48, this.timetableAreaW * 0.11);
-    if (x < gutterWidth || x > this.timetableAreaW) {
-      return;
-    }
-    const columnWidth: number = (this.timetableAreaW - gutterWidth) / 7;
-    const day: number = Math.max(1, Math.min(7, Math.floor((x - gutterWidth) / columnWidth) + 1));
-    const minuteOfDay: number = AXIS_START_HOUR * 60 +
-      (y - TIMETABLE_GRID_TOP_PADDING) / this.timetableHourHeight() * 60;
-    if (minuteOfDay < AXIS_START_HOUR * 60 || minuteOfDay > AXIS_END_HOUR * 60) {
-      return;
-    }
-    const weekMonday: number = this.currentTimetable.startTime +
-      (this.timetableWeek - 1) * 7 * DAY_MS;
-    const tappedTime: number = weekMonday + (day - 1) * DAY_MS + minuteOfDay * 60000;
-    const weekEvents: EasEventItem[] = eventsOfWeek(this.currentTimetable,
-      this.timetableEvents, this.timetableWeek);
-    for (let i: number = weekEvents.length - 1; i >= 0; i--) {
-      const event: EasEventItem = weekEvents[i];
-      const span = timetableEventSpan(this.currentTimetable, event, this.timetableWeek);
-      const isCourseOrExam: boolean = event.type === EasEventType.CLASS || event.type === EasEventType.EXAM;
-      if (isCourseOrExam && event.getDow() === day && span !== undefined &&
-        span.from <= tappedTime && span.to >= tappedTime) {
+    for (let i: number = this.timetableCardSurfaces.length - 1; i >= 0; i--) {
+      const card: TimetableCardSurface = this.timetableCardSurfaces[i];
+      if (x < card.left || x > card.left + card.width || y < card.top || y > card.top + card.height) {
+        continue;
+      }
+      const event: EasEventItem | undefined = this.timetableEvents.find((item: EasEventItem): boolean =>
+        item.id === card.eventIds[0]);
+      if (event !== undefined && (event.type === EasEventType.CLASS || event.type === EasEventType.EXAM)) {
         this.courseColorEditing = false;
         this.selectedCourse = event;
         this.courseSheetOpen = true;
         this.activeSheetVisible = true;
         return;
       }
+    }
+  }
+
+  private async confirmSkipCourse(event: EasEventItem): Promise<void> {
+    if (this.skippingCourse || !this.pageVisible || this.currentTab !== TAB_TIMETABLE ||
+      !this.activeSheetVisible || !this.courseSheetOpen || this.selectedCourse?.id !== event.id ||
+      event.type !== EasEventType.CLASS) {
+      return;
+    }
+    const card: TimetableCardSurface | undefined = this.timetableCardSurfaces.find(
+      (item: TimetableCardSurface): boolean => item.eventIds.indexOf(event.id) >= 0);
+    if (card === undefined) {
+      return;
+    }
+    this.skippingCourse = true;
+    this.summaryRequestGeneration++;
+    const sheetGeneration: number = this.sheetRequestGeneration;
+    const week: number = this.timetableWeek;
+    const ids: string[] = card.eventIds.slice();
+    let confirmed: boolean = false;
+    let deleted: boolean = false;
+    try {
+      const result = await this.getUIContext().getPromptAction().showDialog({
+        title: '确定要翘掉这节课吗？',
+        buttons: [
+          { text: '我去上课', color: $r('app.color.hita_text_secondary') },
+          { text: '我意已决', color: '#E84040' }
+        ]
+      });
+      if (result.index !== 1 || sheetGeneration !== this.sheetRequestGeneration ||
+        !this.pageVisible || this.currentTab !== TAB_TIMETABLE || !this.activeSheetVisible ||
+        this.currentTimetable?.id !== event.timetableId || this.timetableWeek !== week) {
+        return;
+      }
+      confirmed = true;
+      await RdbHelper.getInstance().deleteClassOccurrences(ids, event.timetableId);
+      deleted = true;
+      this.courseSkipAnimating = true;
+      // Keep the rendered card alive until its snapshot has finished dissolving.
+      this.timetableEvents = this.timetableEvents.filter((item: EasEventItem): boolean => ids.indexOf(item.id) < 0);
+      this.todayItems = this.todayItems.filter((item: EasEventItem): boolean => ids.indexOf(item.id) < 0);
+      this.updateTodayHighlights();
+      this.timelineText = this.todayItems.length === 0 ? '今日暂无安排' :
+        '今日 ' + this.todayItems.length.toString() + ' 项安排';
+      await this.closeCourseSheetBeforeSkip();
+      if (this.pageVisible && this.currentTab === TAB_TIMETABLE && this.timetableWeek === week &&
+        this.currentTimetable?.id === event.timetableId) {
+        await this.courseDeleteEffects.play([card.key]);
+      }
+      this.courseSkipAnimating = false;
+      this.drawTimetableNow();
+      if (this.pageVisible) {
+        const name: string = event.name.trim().length === 0 || event.name === 'NULL' ? '未命名课程' : event.name;
+        this.getUIContext().getPromptAction().showToast({
+          message: '这节' + name + '如奶油般化开了。', duration: 3500
+        });
+      }
+    } catch (_) {
+      // Dismissing the dialog is cancellation; only a confirmed write can fail.
+      if (confirmed && this.pageVisible && !deleted && this.activeSheetVisible &&
+        sheetGeneration === this.sheetRequestGeneration) {
+        this.getUIContext().getPromptAction().showToast({ message: '未能翘掉这节课，请重试' });
+      }
+    } finally {
+      this.courseSkipAnimating = false;
+      this.skippingCourse = false;
+      if (deleted) {
+        this.drawTimetableNow();
+        if (this.classReminderEnabled) {
+          try {
+            const host: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+            await ClassReminderScheduler.sync(host, this.timetableEvents);
+          } catch (_) {
+            console.warn('Failed to update class reminders after skipping a lesson');
+          }
+        }
+      }
+      if (this.pageVisible) {
+        await this.refreshSummaries(true).catch(() => {});
+      }
+    }
+  }
+
+  private closeCourseSheetBeforeSkip(): Promise<void> {
+    if (!this.courseSheetOpen || !this.pageVisible) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve: () => void) => {
+      this.courseSheetDismissed = resolve;
+      this.courseSheetDismissTimer = setTimeout(() => this.finishCourseSheetDismissal(), 650);
+      this.closeActiveSheet();
+    });
+  }
+
+  private finishCourseSheetDismissal(): void {
+    clearTimeout(this.courseSheetDismissTimer);
+    this.courseSheetDismissTimer = -1;
+    const finish: (() => void) | undefined = this.courseSheetDismissed;
+    this.courseSheetDismissed = undefined;
+    if (finish !== undefined) {
+      finish();
     }
   }
 
@@ -642,11 +767,11 @@ struct Home {
 
   private animateTimetableSnapBack(): void {
     this.timetableAnimating = true;
-    this.timetableAnimationDuration = 150;
+    this.timetableAnimationDuration = TIMETABLE_SLIDE_MS;
     this.timetableDragOffset = 0;
     this.timetableAnimationTimer = setTimeout(() => {
       this.resetTimetableAnimationState();
-    }, 170);
+    }, TIMETABLE_SLIDE_MS + 20);
   }
 
   private animateTimetableWeek(delta: number): void {
@@ -657,28 +782,28 @@ struct Home {
     const exitOffset: number = delta > 0 ? -width : width;
     const entryOffset: number = -exitOffset;
     this.timetableAnimating = true;
-    this.timetableAnimationDuration = 150;
+    this.timetableAnimationDuration = TIMETABLE_SLIDE_MS;
     this.timetableDragOffset = exitOffset;
 
     // Swap the week after the outgoing page has left, then bring the new page
     // in from the opposite edge. A zero-duration reposition prevents a reverse
-    // animation through the center between the two 150ms legs.
+    // animation through the center between the outgoing and incoming legs.
     this.timetableAnimationTimer = setTimeout(() => {
       this.timetableAnimationDuration = 0;
       this.shiftTimetableWeek(delta);
       this.timetableDragOffset = entryOffset;
       this.timetableAnimationTimer = setTimeout(() => {
-        this.timetableAnimationDuration = 150;
+        this.timetableAnimationDuration = TIMETABLE_SLIDE_MS;
         this.timetableDragOffset = 0;
         this.timetableAnimationTimer = setTimeout(() => {
           this.resetTimetableAnimationState();
-        }, 170);
+        }, TIMETABLE_SLIDE_MS + 20);
       }, 20);
-    }, 160);
+    }, TIMETABLE_SLIDE_MS + 10);
   }
 
   private handleTimetablePanUpdate(event: GestureEvent): void {
-    if (this.timetableAnimating) {
+    if (this.timetableAnimating || this.skippingCourse) {
       return;
     }
     const width: number = this.timetableDragLimit();
@@ -687,7 +812,7 @@ struct Home {
   }
 
   private handleTimetablePanEnd(event: GestureEvent): void {
-    if (this.timetableAnimating) {
+    if (this.timetableAnimating || this.skippingCourse) {
       return;
     }
     const width: number = this.timetableDragLimit();
@@ -714,8 +839,12 @@ struct Home {
     this.stopTimetableMarquee();
     this.currentTab = index;
     if (index === TAB_TIMETABLE) {
+      this.courseDeleteEffects.resume();
       // Tabs keeps the canvas alive. Reuse it until data, date or layout changes.
       this.startTimetableMarquee();
+    } else {
+      this.courseDeleteEffects.pause();
+      this.finishCourseSheetDismissal();
     }
   }
 
@@ -849,7 +978,7 @@ struct Home {
   }
 
   private canOpenSheet(): boolean {
-    return this.pageVisible && !this.tabTransitionRunning && !this.activeSheetVisible &&
+    return !this.skippingCourse && this.pageVisible && !this.tabTransitionRunning && !this.activeSheetVisible &&
       !this.sessionSheetOpen && !this.loginSheetOpen && !this.courseSheetOpen &&
       !this.calendarExportSheetOpen && !this.timetablePaletteOpen;
   }
@@ -1172,7 +1301,7 @@ struct Home {
     if (info.tag !== 'timetable-week') {
       return GestureJudgeResult.CONTINUE;
     }
-    return this.weekGestureActive ? GestureJudgeResult.CONTINUE : GestureJudgeResult.REJECT;
+    return this.weekGestureActive && !this.skippingCourse ? GestureJudgeResult.CONTINUE : GestureJudgeResult.REJECT;
   }
 
   private judgePagePan(current: GestureRecognizer, fromDock: boolean = false): GestureJudgeResult {
@@ -1312,6 +1441,7 @@ struct Home {
         this.selectedCourse = undefined;
         this.calendarExportSheetOpen = false;
         this.calendarExportTimetable = undefined;
+        this.finishCourseSheetDismissal();
       }
     }, this.loginSheetOpen || this.sessionSheetOpen || this.courseSheetOpen || this.timetablePaletteOpen ||
       this.calendarExportSheetOpen));
@@ -1408,29 +1538,35 @@ struct Home {
         .width('100%')
         .margin({ top: 8, bottom: 24 });
 
-      Row({ space: 12 }) {
-        Button('取消')
-          .fontSize(15)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(COLOR_TEXT_SECONDARY)
-          .backgroundColor($r('app.color.hita_control'))
-          .height(46)
-          .layoutWeight(1)
-          .borderRadius(23)
-          .enabled(!this.calendarExporting)
-          .onClick(() => this.cancelCalendarExport());
-        Button('确认导出')
-          .fontSize(15)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#FFFFFF')
-          .backgroundColor($r('app.color.hita_primary_fill'))
-          .height(46)
-          .layoutWeight(1)
-          .borderRadius(23)
-          .enabled(!this.calendarExporting)
-          .onClick(() => this.exportToCalendar());
+      ImmersiveHeader({ barHeight: 46 }) {
+        Row({ space: 12 }) {
+          Button('取消', { type: ButtonType.Capsule })
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(CompatibleMaterialModifier.foreground(COLOR_TEXT_SECONDARY))
+            .backgroundColor($r('app.color.hita_control'))
+            .height(46)
+            .width(0)
+            .layoutWeight(1)
+            .borderRadius(23)
+            .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_control')))
+            .enabled(!this.calendarExporting)
+            .onClick(() => this.cancelCalendarExport());
+          Button('确认导出', { type: ButtonType.Capsule })
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(CompatibleMaterialModifier.foreground('#FFFFFF'))
+            .backgroundColor($r('app.color.hita_primary_fill'))
+            .height(46)
+            .width(0)
+            .layoutWeight(1)
+            .borderRadius(23)
+            .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_primary_fill')))
+            .enabled(!this.calendarExporting)
+            .onClick(() => this.exportToCalendar());
+        }
+        .width('100%');
       }
-      .width('100%');
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -1926,24 +2062,23 @@ struct Home {
                   .width('100%')
                   .height('100%')
                   .backgroundColor(Color.Transparent)
-                  .onReady(() => {
-                    this.drawTimetableNow();
-                  })
-                  .onClick((event: ClickEvent) => {
-                    this.openCourseAt(event.x, event.y);
-                  })
-                Canvas(this.timetablePlaceCanvas)
-                  .width('100%')
-                  .height('100%')
-                  .backgroundColor(Color.Transparent)
                   .hitTestBehavior(HitTestMode.None)
                   .onReady(() => {
                     this.drawTimetableNow();
                   })
+                TimetableCardMaterials({
+                  cards: this.timetableCardSurfaces,
+                  contentHeight: this.timetableCanvasHeight,
+                  painter: this.timetableCardPainter,
+                  deleteEffects: this.courseDeleteEffects
+                })
               }
               .width('100%')
               .height(this.timetableCanvasHeight)
               .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+              .onClick((event: ClickEvent) => {
+                this.openCourseAt(event.x, event.y);
+              })
               .onDisAppear(() => {
                 this.stopTimetableMarquee();
               })
@@ -2091,7 +2226,7 @@ struct Home {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(Color.Transparent)
+    .backgroundColor(COLOR_SURFACE)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
@@ -2304,7 +2439,7 @@ struct Home {
       .alignItems(VerticalAlign.Center)
       .accessibilityDescription(this.appearanceExpanded ? '已展开' : '已收起')
       .onClick(() => {
-        this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseInOut }, () => {
+        this.getUIContext().animateTo({ duration: 300, curve: Curve.EaseInOut }, () => {
           this.appearanceExpanded = !this.appearanceExpanded;
         });
       });
@@ -2491,6 +2626,30 @@ struct Home {
         this.courseDetailRow($r('sys.symbol.checkmark'), '类型', '考试');
       } else {
         this.courseDetailRow($r('sys.symbol.repeat_1'), '课程进度', this.courseProgressText(event));
+      }
+      if (event.type === EasEventType.CLASS) {
+        Column() {
+          ImmersiveHeader({ barHeight: 40, materialEnabled: CompatibleSheetMaterial.isEnabled() }) {
+            Row() {
+              Button('翘课', { type: ButtonType.Capsule })
+                .height(32)
+                .padding({ left: 12, right: 12 })
+                .fontSize(13)
+                .fontWeight(FontWeight.Medium)
+                .fontColor('#FFFFFF')
+                .backgroundColor('#E84040')
+                .attributeModifier(new CompatibleMaterialModifier('#E84040', true,
+                  CompatibleSheetMaterial.isEnabled(), '#EBE84040', false))
+                .enabled(!this.skippingCourse)
+                .onClick(() => { this.confirmSkipCourse(event); });
+            }
+            .width('100%')
+            .height(40)
+            .justifyContent(FlexAlign.End);
+          }
+        }
+        .width('100%')
+        .margin({ top: 12 });
       }
       }
     }

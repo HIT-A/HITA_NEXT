@@ -42,6 +42,7 @@ function harness() {
       courseSheetOpen = false;
       sheetRequestGeneration = 0;
       getUIContext() { return context; }
+      finishCourseSheetDismissal() {}
       dismissSheet() { ${disappear[1]} }
       ${slice('  private canOpenSheet()', '  private async importIcsTimetable()')}
     }

@@ -2,6 +2,8 @@
 import { common } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { CirclePaintModifier } from '../common/theme/CirclePaintModifier';
+import { DeleteParticleCard } from '../common/components/DeleteParticleCard';
+import { DeleteEffectController } from '../common/util/DeleteEffectController';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
 import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
@@ -37,9 +39,19 @@ struct TimetableManagerPage {
   @State activeTimetableId: string = '';
   @State fadeOpacity: number = 0;
   private pageScroller: Scroller = new Scroller();
+  private deleteEffects: DeleteEffectController = new DeleteEffectController();
 
   async onPageShow(): Promise<void> {
+    this.deleteEffects.resume();
     await this.load();
+  }
+
+  onPageHide(): void {
+    this.deleteEffects.pause();
+  }
+
+  aboutToDisappear(): void {
+    this.deleteEffects.pause();
   }
 
   private async load(): Promise<void> {
@@ -57,6 +69,9 @@ struct TimetableManagerPage {
   }
 
   private toggleSelection(id: string): void {
+    if (this.deleting) {
+      return;
+    }
     const next: string[] = [];
     let found: boolean = false;
     for (let i: number = 0; i < this.selectedIds.length; i++) {
@@ -74,6 +89,9 @@ struct TimetableManagerPage {
   }
 
   private async openTimetable(timetable: EasTimetable): Promise<void> {
+    if (this.deleting) {
+      return;
+    }
     if (this.selectionMode) {
       this.toggleSelection(timetable.id);
       return;
@@ -206,6 +224,10 @@ struct TimetableManagerPage {
       hilog.info(DOMAIN, TAG, 'delete timetables start count=%{public}d', ids.length);
       await RdbHelper.getInstance().deleteTimetablesCascade(ids);
       hilog.info(DOMAIN, TAG, 'delete timetables rows done');
+      await this.deleteEffects.play(ids);
+      this.getUIContext().animateTo({ duration: 300, curve: Curve.EaseInOut }, () => {
+        this.timetables = this.timetables.filter((item: EasTimetable): boolean => ids.indexOf(item.id) < 0);
+      });
       for (let i: number = 0; i < ids.length; i++) {
         await TimetableSelectionStore.getInstance().clearIf(ids[i]);
       }
@@ -366,8 +388,14 @@ struct TimetableManagerPage {
         Grid(this.pageScroller) {
           ForEach(this.timetables, (timetable: EasTimetable) => {
             GridItem() {
-              this.timetableCard(timetable)
+              DeleteParticleCard({
+                controller: this.deleteEffects,
+                effectId: timetable.id
+              }) {
+                this.timetableCard(timetable)
+              }
             }
+            .transition(TransitionEffect.OPACITY)
           }, (timetable: EasTimetable) => timetable.id)
           if (!this.selectionMode) {
             GridItem() {
@@ -382,6 +410,7 @@ struct TimetableManagerPage {
         .height('100%')
         .padding({ left: 16, right: 16, top: HEADER_HEIGHT + 8, bottom: 28 })
         .scrollBar(BarState.Off)
+        .enabled(!this.deleting)
         .onDidScroll(() => {
           this.fadeOpacity = HeaderFade.opacity(this.pageScroller.currentOffset().yOffset);
         })

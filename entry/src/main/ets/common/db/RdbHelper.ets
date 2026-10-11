@@ -497,6 +497,18 @@ export class RdbHelper {
     await this.del(new relationalStore.RdbPredicates('events').equalTo('id', id));
   }
 
+  /** Remove only the occurrences represented by one timetable card, never its subject or exams. */
+  async deleteClassOccurrences(ids: string[], timetableId: string): Promise<void> {
+    if (ids.length === 0 || ids.some((id: string): boolean => id.length === 0) || timetableId.length === 0) {
+      throw new Error('Missing class occurrence identity');
+    }
+    const removed: number = await this.s().delete(new relationalStore.RdbPredicates('events')
+      .equalTo('timetableId', timetableId).equalTo('type', EasEventType.CLASS).in('id', ids));
+    if (removed === 0) {
+      throw new Error('Class occurrence no longer exists');
+    }
+  }
+
   /** 删除某科目全部课程事件。 */
   async deleteEventsOfSubject(subjectId: string): Promise<void> {
     await this.del(new relationalStore.RdbPredicates('events').equalTo('subjectId', subjectId));

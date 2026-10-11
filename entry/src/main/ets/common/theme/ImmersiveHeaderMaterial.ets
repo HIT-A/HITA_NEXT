@@ -3,9 +3,10 @@ import { Available } from '@kit.BasicServicesKit';
 
 @Available({ minApiVersion: 'HarmonyOS 26.0.0' })
 export class HeaderMaterial {
-  static apply(instance: CommonAttribute, fallbackColor: ResourceColor, blueSurface: boolean): void {
+  static apply(instance: CommonAttribute, fallbackColor: ResourceColor, blueSurface: boolean,
+    tint: ResourceColor | undefined = undefined, shadow: boolean | undefined = undefined): void {
     try {
-      const material: uiMaterial.ImmersiveMaterial | undefined = HeaderMaterial.create(blueSurface);
+      const material: uiMaterial.ImmersiveMaterial | undefined = HeaderMaterial.create(blueSurface, tint, shadow);
       if (material === undefined) {
         return;
       }
@@ -17,16 +18,18 @@ export class HeaderMaterial {
     }
   }
 
-  static create(blueSurface: boolean = false): uiMaterial.ImmersiveMaterial | undefined {
+  static create(blueSurface: boolean = false,
+    tint: ResourceColor | undefined = undefined, shadow: boolean | undefined = undefined): uiMaterial.ImmersiveMaterial | undefined {
     try {
       if (!uiMaterial.isImmersiveMaterialSupported()) {
         return undefined;
       }
       return new uiMaterial.ImmersiveMaterial({
         style: blueSurface ? uiMaterial.ImmersiveStyle.REGULAR : HeaderMaterial.controlStyle(),
-        materialColor: blueSurface ? $r('app.color.hita_immersive_hero_tint') : Color.Transparent,
+        materialColor: blueSurface ?
+          (tint === undefined ? $r('app.color.hita_immersive_hero_tint') : tint) : Color.Transparent,
         colorInvert: !blueSurface,
-        applyShadow: blueSurface,
+        applyShadow: shadow === undefined ? blueSurface : shadow,
         interactive: true,
         lightEffect: { color: Color.White }
       });

@@ -7,6 +7,7 @@
 import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
+import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
 import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
@@ -541,15 +542,20 @@ export struct EventEditorForm {
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .margin({ bottom: 6 })
         }
-        Button(this.loading ? '正在读取' : (this.saving ? '正在保存' : '保存'))
-          .width('100%')
-          .height(44)
-          .backgroundColor($r('app.color.hita_primary_fill'))
-          .borderRadius(22)
-          .enabled(!this.loading && !this.loadFailed && !this.saving && !this.saved)
-          .onClick(() => {
-            this.save();
-          })
+        ImmersiveHeader({ barHeight: 44 }) {
+          Button(this.loading ? '正在读取' : (this.saving ? '正在保存' : '保存'), { type: ButtonType.Capsule })
+            .width('100%')
+            .height(44)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(CompatibleMaterialModifier.foreground('#FFFFFF'))
+            .backgroundColor($r('app.color.hita_primary_fill'))
+            .borderRadius(22)
+            .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_primary_fill')))
+            .enabled(!this.loading && !this.loadFailed && !this.saving && !this.saved)
+            .onClick(() => {
+              this.save();
+            })
+        }
       }
       .width('100%')
       .padding({

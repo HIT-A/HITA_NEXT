@@ -3,7 +3,9 @@
  * 顶部抬头与功能中心相同：Scroll 占位 + 渐隐遮罩 + 覆盖标题。
  */
 import { common } from '@kit.AbilityKit';
+import { deviceInfo } from '@kit.BasicServicesKit';
 import { KeyboardAvoidMode } from '@kit.ArkUI';
+import lazy { ImmersiveAssistantProviders } from '../common/components/ImmersiveAssistantProviders';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
 import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
@@ -296,15 +298,25 @@ struct AssistantPage {
         .fontColor(COLOR_TEXT_SECONDARY)
         .lineHeight(18)
         .margin({ top: 4 });
-      Row({ space: 4 }) {
-        this.providerOption(AssistantProvider.DEEPSEEK);
-        this.providerOption(AssistantProvider.ZHIPU);
+      if (deviceInfo.apiAvailable('26.0.0')) {
+        ImmersiveAssistantProviders({
+          selectedIndex: this.provider === AssistantProvider.ZHIPU ? 1 : 0,
+          onSelect: (index: number) => {
+            this.provider = index === 1 ? AssistantProvider.ZHIPU : AssistantProvider.DEEPSEEK;
+          }
+        })
+          .margin({ top: 12 });
+      } else {
+        Row({ space: 4 }) {
+          this.providerOption(AssistantProvider.DEEPSEEK);
+          this.providerOption(AssistantProvider.ZHIPU);
+        }
+        .width('100%')
+        .padding(4)
+        .backgroundColor($r('app.color.hita_control_eaf0f7'))
+        .borderRadius(14)
+        .margin({ top: 12 });
       }
-      .width('100%')
-      .padding(4)
-      .backgroundColor($r('app.color.hita_control_eaf0f7'))
-      .borderRadius(14)
-      .margin({ top: 12 });
       TextInput({ placeholder: this.provider === AssistantProvider.ZHIPU ? '智谱开放平台 API Key' : 'DeepSeek API Key',
         text: this.apiKeyDraft, controller: this.settingsKeyController })
         .type(InputType.Password)
@@ -315,26 +327,34 @@ struct AssistantPage {
         .onChange((value: string) => {
           this.apiKeyDraft = value;
         });
-      Row({ space: 10 }) {
-        Button('取消')
-          .layoutWeight(1)
-          .height(40)
-          .fontColor(COLOR_PRIMARY)
-          .backgroundColor(COLOR_NAV_ACTIVE)
-          .onClick(() => {
-            this.settingsOpen = false;
-          });
-        Button('保存')
-          .layoutWeight(1)
-          .height(40)
-          .fontColor('#FFFFFF')
-          .backgroundColor($r('app.color.hita_primary_fill'))
-          .onClick(() => {
-            this.saveSettings();
-          });
+      ImmersiveHeader({ barHeight: 52 }) {
+        Row({ space: 10 }) {
+          Button('取消', { type: ButtonType.Capsule })
+            .width(0)
+            .layoutWeight(1)
+            .height(40)
+            .fontColor(CompatibleMaterialModifier.foreground(COLOR_PRIMARY))
+            .backgroundColor(COLOR_NAV_ACTIVE)
+            .attributeModifier(new CompatibleMaterialModifier(COLOR_NAV_ACTIVE))
+            .onClick(() => {
+              this.settingsOpen = false;
+            });
+          Button('保存', { type: ButtonType.Capsule })
+            .width(0)
+            .layoutWeight(1)
+            .height(40)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(CompatibleMaterialModifier.foreground('#FFFFFF'))
+            .backgroundColor($r('app.color.hita_primary_fill'))
+            .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_primary_fill')))
+            .onClick(() => {
+              this.saveSettings();
+            });
+        }
+        .width('100%')
+        .height(52)
+        .padding({ top: 12 });
       }
-      .width('100%')
-      .margin({ top: 12 });
     }
     .alignItems(HorizontalAlign.Start)
     .padding(16)

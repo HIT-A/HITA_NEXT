@@ -61,6 +61,8 @@ function harness() {
       sessionInfo;
       selectedCourse;
       calendarExportTimetable;
+      courseDeleteEffects = { resume() {}, pause() {} };
+      finishCourseSheetDismissal() {}
       getUIContext() { return context; }
       stopTimetableMarquee() {}
       startTimetableMarquee() {}

@@ -12,6 +12,8 @@ import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialMo
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
 import { CirclePaintModifier } from '../common/theme/CirclePaintModifier';
+import { DeleteParticleCard } from '../common/components/DeleteParticleCard';
+import { DeleteEffectController } from '../common/util/DeleteEffectController';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTimetable } from '../common/model/timetable/TimetableModels';
@@ -69,13 +71,19 @@ struct ExamPage {
   private pageScroller: Scroller = new Scroller();
   private session: EasSession | undefined = undefined;
   private queryGeneration: number = 0;
+  private deleteEffects: DeleteEffectController = new DeleteEffectController();
+  private deleteSheetDismissed: (() => void) | undefined = undefined;
+  private deleteSheetTimer: number = -1;
 
   async onPageShow(): Promise<void> {
+    this.deleteEffects.resume();
     await this.refreshSession();
     await this.loadExams();
   }
 
   onPageHide(): void {
+    this.deleteEffects.pause();
+    this.finishDeleteSheetDismissal();
     this.queryGeneration++;
     this.querying = false;
     this.closeSheet();
@@ -389,6 +397,27 @@ struct ExamPage {
     this.examColorEditing = false;
   }
 
+  private closeSheetBeforeDelete(): Promise<void> {
+    if (!this.sheetVisible) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve: () => void) => {
+      this.deleteSheetDismissed = resolve;
+      this.deleteSheetTimer = setTimeout(() => this.finishDeleteSheetDismissal(), 650);
+      this.closeSheet();
+    });
+  }
+
+  private finishDeleteSheetDismissal(): void {
+    clearTimeout(this.deleteSheetTimer);
+    this.deleteSheetTimer = -1;
+    const finish: (() => void) | undefined = this.deleteSheetDismissed;
+    this.deleteSheetDismissed = undefined;
+    if (finish !== undefined) {
+      finish();
+    }
+  }
+
   private async confirmDeleteExam(event: EasEventItem): Promise<void> {
     if (this.pendingDeleteId.length > 0 || this.examSheetMode === 2 ||
       this.openingEditor || this.savingExamColor) {
@@ -415,7 +444,13 @@ struct ExamPage {
     }
     try {
       await RdbHelper.getInstance().deleteEvent(event.id);
-      this.closeSheet();
+      await this.closeSheetBeforeDelete();
+      await this.deleteEffects.play([event.id]);
+      this.getUIContext().animateTo({ duration: 300, curve: Curve.EaseInOut }, () => {
+        this.exams = this.exams.filter((item: EasEventItem): boolean => item.id !== event.id);
+        this.upcoming = this.upcoming.filter((item: EasEventItem): boolean => item.id !== event.id);
+        this.past = this.past.filter((item: EasEventItem): boolean => item.id !== event.id);
+      });
       await this.loadExams();
       this.getUIContext().getPromptAction().showToast({ message: '考试已删除' });
     } catch (_) {
@@ -533,8 +568,15 @@ struct ExamPage {
           }
           ForEach(this.upcoming, (it: EasEventItem) => {
             ListItem() {
-              this.examCard(it)
+              DeleteParticleCard({
+                controller: this.deleteEffects,
+                effectId: it.id
+              }) {
+                this.examCard(it)
+              }
             }
+            .enabled(this.pendingDeleteId.length === 0)
+            .transition(TransitionEffect.OPACITY)
           }, (it: EasEventItem) => it.id + '|' + it.color.toString())
           ForEach(this.remoteExams, (remote: EasExamItem) => {
             ListItem() {
@@ -551,14 +593,22 @@ struct ExamPage {
           }
           ForEach(this.past, (it: EasEventItem) => {
             ListItem() {
-              this.examCard(it)
+              DeleteParticleCard({
+                controller: this.deleteEffects,
+                effectId: it.id
+              }) {
+                this.examCard(it)
+              }
             }
+            .enabled(this.pendingDeleteId.length === 0)
+            .transition(TransitionEffect.OPACITY)
           }, (it: EasEventItem) => it.id + '|' + it.color.toString())
         }
         .width('100%')
         .height('100%')
         .padding({ left: 16, right: 16, top: 12, bottom: 24 })
         .scrollBar(BarState.Off)
+        .enableScrollInteraction(this.pendingDeleteId.length === 0)
         .onDidScroll(() => {
           this.fadeOpacity = HeaderFade.opacity(this.pageScroller.currentOffset().yOffset);
         })
@@ -623,6 +673,7 @@ struct ExamPage {
       onDisappear: () => {
         this.sheetVisible = false;
         this.resetSheetState();
+        this.finishDeleteSheetDismissal();
       }
     })
   }
@@ -896,20 +947,25 @@ struct ExamPage {
         this.examDetailRow($r('sys.symbol.magnifyingglass'), '校区',
           item.campusName.length > 0 ? item.campusName : '未填写')
 
-        Row() {
-          Blank()
-          Text('导入到课表')
-            .fontSize(14)
-            .fontColor('#FFFFFF')
-            .fontWeight(FontWeight.Medium)
-            .padding({ left: 14, right: 14, top: 9, bottom: 9 })
-            .backgroundColor($r('app.color.hita_primary_fill'))
-            .borderRadius(18)
-            .enabled(!this.openingEditor)
-            .onClick(() => this.importRemoteExam(item))
+        ImmersiveHeader({ barHeight: 46 }) {
+          Row() {
+            Blank()
+            Button('导入到课表', { type: ButtonType.Capsule })
+              .fontSize(14)
+              .fontColor(CompatibleMaterialModifier.foreground('#FFFFFF'))
+              .fontWeight(FontWeight.Medium)
+              .height(36)
+              .padding({ left: 14, right: 14 })
+              .backgroundColor($r('app.color.hita_primary_fill'))
+              .borderRadius(18)
+              .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_primary_fill')))
+              .enabled(!this.openingEditor)
+              .onClick(() => this.importRemoteExam(item))
+          }
+          .width('100%')
+          .height(46)
+          .padding({ top: 6 })
         }
-        .width('100%')
-        .margin({ top: 6 })
       }
     }
     .width('100%')

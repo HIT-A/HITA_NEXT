@@ -47,8 +47,20 @@ test('API 26 and newer apply material to the actual UI node and use invertible f
     const instance = {};
     new Modifier('blue', true).applyNormalAttribute(instance);
     new Modifier('control').applyNormalAttribute(instance);
-    assert.deepEqual(calls, [[instance, 'blue', true], [instance, 'control', false]]);
+    assert.deepEqual(calls, [[instance, 'blue', true, undefined, undefined],
+      [instance, 'control', false, undefined, undefined]]);
     assert.equal(Modifier.foreground('blue'), 'sys.color.ohos_id_color_text_primary');
+  }
+});
+
+test('course tints reach the native material only on supported API levels', () => {
+  for (const api of [23, 24, 25, 26, 27]) {
+    const { Modifier, calls } = compatible(api);
+    const instance = {};
+    const base = 0xFF346541;
+    const tint = 0xE6346541;
+    new Modifier(base, true, true, tint).applyNormalAttribute(instance);
+    assert.deepEqual(calls, api >= 26 ? [[instance, base, true, tint, undefined]] : []);
   }
 });
 
@@ -108,6 +120,42 @@ test('the Today surface keeps a translucent blue tint and stable white text', ()
     const alpha = parseInt(tint.slice(1, 3), 16);
     assert.ok(alpha > 0 && alpha < 255, 'an opaque tint hides the native material');
   }
+});
+
+test('timetable materials keep each course hue without enabling background color inversion', () => {
+  for (const tint of [0xE62F56B0, 0xE6437654, 0xE68A2E42, 0xE68346A0]) {
+    const material = nativeMaterial().create(true, tint);
+    assert.equal(material.style, 'regular');
+    assert.equal(material.materialColor, tint);
+    assert.equal(material.colorInvert, false);
+    assert.equal(material.interactive, true);
+    assert.deepEqual(material.lightEffect, { color: 'white' });
+  }
+  let fill = 0xFF8346A0;
+  nativeMaterial({ isImmersiveMaterialSupported: () => false }).apply({
+    systemMaterial() { assert.fail('unavailable materials must keep the course fill'); },
+    backgroundColor: value => { fill = value; }
+  }, fill, true, 0xE68346A0);
+  assert.equal(fill, 0xFF8346A0);
+  nativeMaterial().apply({
+    systemMaterial() { throw new Error('native failure'); },
+    backgroundColor: value => { fill = value; }
+  }, 0xFF8346A0, true, 0xE68346A0);
+  assert.equal(fill, 0xFF8346A0);
+});
+
+test('compact colored actions can turn off native shadows without changing other colored cards', () => {
+  const { Modifier, calls } = compatible(26);
+  const instance = {};
+  new Modifier('#E84040', true, true, '#EBE84040', false).applyNormalAttribute(instance);
+  assert.deepEqual(calls, [[instance, '#E84040', true, '#EBE84040', false]]);
+  const red = nativeMaterial().create(true, '#EBE84040', false);
+  assert.equal(red.materialColor, '#EBE84040');
+  assert.equal(red.applyShadow, false);
+  assert.equal(red.interactive, true);
+  assert.equal(red.colorInvert, false);
+  assert.equal(nativeMaterial().create(true).applyShadow, true);
+  assert.equal(nativeMaterial().create(false).applyShadow, false);
 });
 
 test('unsupported devices and native failures preserve a usable legacy fill', () => {
@@ -336,4 +384,42 @@ test('news immersive selection stays below 20 percent opacity in both themes', (
     assert.ok(alpha > 0 && alpha < 0.2);
     assert.equal(fill.slice(3), theme === 'base' ? '000000' : 'FFFFFF');
   }
+});
+
+test('assistant provider segments keep selection callbacks and fallback fills when native material is unavailable', () => {
+  const source = read('common/components/ImmersiveAssistantProviders.ets')
+    .replace('@Component', '').replace('export struct', 'export class').replace(/@Prop /g, '');
+  for (const material of [undefined, { immersive: true }]) {
+    let options;
+    const mod = { exports: {} };
+    new Function('require', 'module', 'exports', '$r', 'Color', 'FontWeight', compile(source))(name => {
+      if (name === '@kit.ArkUI') return {
+        ColorMetrics: { resourceColor: color => color },
+        LengthMetrics: { vp: value => value, fp: value => value },
+        SegmentButtonV2Items: class { constructor(items) { return items; } },
+        TabSegmentButtonV2: config => { options = config; return { width() {} }; }
+      };
+      if (name === '@kit.BasicServicesKit') return { Available: () => value => value };
+      if (name.includes('ImmersiveHeaderMaterial')) return { HeaderMaterial: { create: () => material } };
+      throw Error('Unexpected import ' + name);
+    }, mod, mod.exports, name => name, { Transparent: 'transparent' },
+    { Regular: 'regular', Medium: 'medium' });
+    const picker = new mod.exports.ImmersiveAssistantProviders();
+    const selections = [];
+    picker.onSelect = index => { selections.push(index); };
+    for (const selected of [0, 1, 0]) {
+      picker.selectedIndex = selected;
+      picker.build();
+      assert.equal(options.selectedIndex, selected);
+      assert.equal(options.backgroundSystemMaterial, material);
+      assert.equal(options.buttonBackgroundColor, material ? 'transparent' : 'app.color.hita_control_eaf0f7');
+      assert.deepEqual(options.items.map(item => item.text), ['DeepSeek', '智谱 GLM']);
+      options.$selectedIndex(1 - selected);
+    }
+    assert.deepEqual(selections, [1, 0, 1]);
+  }
+  const page = read('pages/AssistantPage.ets');
+  assert.match(page, /import lazy \{ ImmersiveAssistantProviders \}/);
+  assert.match(page, /if \(deviceInfo\.apiAvailable\('26\.0\.0'\)\) \{\s*ImmersiveAssistantProviders/);
+  assert.match(page, /else \{\s*Row\(\{ space: 4 \}\) \{\s*this\.providerOption/);
 });

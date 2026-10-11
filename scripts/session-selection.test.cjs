@@ -128,5 +128,5 @@ test('home and timetable import share session selection; active timetable action
   for (const action of ['createEmptyTimetable', 'openImportPage', 'importIcs']) {
     assert.ok(card.includes(`this.${action}();`), action);
   }
-  assert.match(read('pages/TimetableDetailPage.ets'), /this\.confirmDeleteEvent\(event\)/);
+  assert.match(read('pages/TimetableDetailPage.ets'), /this\.confirmDeleteCourse\(row\)/);
 });

@@ -4,6 +4,9 @@ import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
 import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
 import { CompatibleSheetMaterial } from '../common/theme/CompatibleSheetMaterial';
+import { CirclePaintModifier } from '../common/theme/CirclePaintModifier';
+import { DeleteParticleCard } from '../common/components/DeleteParticleCard';
+import { DeleteEffectController } from '../common/util/DeleteEffectController';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
 import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
@@ -24,6 +27,8 @@ import { ClassReminderStore } from '../feature/timetable/data/ClassReminderStore
 import { ClassReminderScheduler } from '../feature/timetable/data/ClassReminderScheduler';
 
 const HEADER_HEIGHT: number = 64;
+const COURSE_DETAIL_ICON_SIZE: number = 38;
+const COURSE_DETAIL_TEXT_GAP: number = 12;
 const PAGE_BG: ResourceColor = $r('app.color.hita_page_f6f7fa');
 const PAGE_BG_RGB: string = '246,247,250';
 const DAY_MS: number = 24 * 60 * 60 * 1000;
@@ -56,6 +61,8 @@ struct TimetableDetailPage {
   /** 展开科目里“学分”输入框的草稿值。 */
   @State creditDraft: string = '';
   @State fadeOpacity: number = 0;
+  @State pendingDeleteCourseId: string = '';
+  private deleteEffects: DeleteEffectController = new DeleteEffectController();
   private detailScroller: ListScroller = new ListScroller();
   private timetableId: string = '';
 
@@ -71,9 +78,18 @@ struct TimetableDetailPage {
   }
 
   async onPageShow(): Promise<void> {
+    this.deleteEffects.resume();
     if (!this.loading) {
       await this.load();
     }
+  }
+
+  onPageHide(): void {
+    this.deleteEffects.pause();
+  }
+
+  aboutToDisappear(): void {
+    this.deleteEffects.pause();
   }
 
   private async load(): Promise<void> {
@@ -277,7 +293,7 @@ struct TimetableDetailPage {
 
   private toggleSubject(row: TimetableSubjectRow): void {
     this.detailScroller.closeAllSwipeActions();
-    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseInOut }, () => {
+    this.getUIContext().animateTo({ duration: 300, curve: Curve.EaseInOut }, () => {
       if (this.expandedSubjectId === row.subject.id) {
         this.expandedSubjectId = '';
       } else {
@@ -308,29 +324,13 @@ struct TimetableDetailPage {
     this.getUIContext().getPromptAction().showToast({ message: '学分已更新' });
   }
 
-  private confirmDeleteEvent(event: EasEventItem): void {
-    this.getUIContext().getPromptAction().showDialog({
-      title: '删除课程',
-      message: '确定删除「' + event.name + '」吗？',
-      buttons: [
-        { text: '取消', color: $r('app.color.hita_text_secondary_7b8190') },
-        { text: '删除', color: HitaColors.error }
-      ]
-    }).then(async (ret) => {
-      if (ret.index !== 1) {
-        return;
-      }
-      this.closeSheet();
-      await RdbHelper.getInstance().deleteEvent(event.id);
-      await this.load();
-      this.getUIContext().getPromptAction().showToast({ message: '课程已删除' });
-    }).catch(() => {
-    });
-  }
-
   private confirmDeleteCourse(row: TimetableSubjectRow): void {
+    if (this.pendingDeleteCourseId.length > 0) {
+      return;
+    }
     const subjectId: string = row.subject.id;
     const timetableId: string = row.subject.timetableId;
+    this.pendingDeleteCourseId = subjectId;
     this.detailScroller.closeAllSwipeActions();
     this.getUIContext().getPromptAction().showDialog({
       title: '删除整门课程',
@@ -345,7 +345,8 @@ struct TimetableDetailPage {
       }
       try {
         await RdbHelper.getInstance().deleteCourseWithClasses(subjectId, timetableId);
-        this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseInOut }, () => {
+        await this.deleteEffects.play([subjectId]);
+        this.getUIContext().animateTo({ duration: 300, curve: Curve.EaseInOut }, () => {
           this.subjectRows = this.subjectRows.filter((item: TimetableSubjectRow): boolean =>
             item.subject.id !== subjectId || item.subject.timetableId !== timetableId);
           this.eventRows = this.eventRows.filter((event: EasEventItem): boolean =>
@@ -365,6 +366,8 @@ struct TimetableDetailPage {
         this.getUIContext().getPromptAction().showToast({ message: '删除失败，请重试' });
       }
     }).catch(() => {
+    }).finally(() => {
+      this.pendingDeleteCourseId = '';
     });
   }
 
@@ -735,47 +738,43 @@ struct TimetableDetailPage {
   @Builder
   private courseDetailSheet(event: EasEventItem) {
     Column() {
-      ImmersiveHeader({ barHeight: 90 }) {
-        Row() {
-          HeaderBackButton({
-            onBack: () => this.closeSheet()
-          })
-            .margin({ right: 12 });
-          Row()
-            .width(7)
-            .height(50)
-            .borderRadius(4)
-            .backgroundColor(TimetableDetailPage.css(event.color === 0 ?
-              TimetableDetailPage.eventColor(event.type) : event.color));
-          Column() {
-            Text(event.name === 'NULL' || event.name.length === 0 ? '未命名课程' : event.name)
-              .fontSize(21)
-              .fontWeight(FontWeight.Bold)
-              .fontColor($r('app.color.hita_text_202b45'))
-              .maxLines(2)
-              .textOverflow({ overflow: TextOverflow.Ellipsis });
-            Text('课程详情')
-              .fontSize(13)
-              .fontColor($r('app.color.hita_text_secondary_72809a'))
-              .margin({ top: 4 });
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-          .margin({ left: 12, right: 8 });
-
-          Text('编辑')
-            .fontSize(14)
-            .fontColor(HitaColors.primary)
-            .fontWeight(FontWeight.Medium)
-            .padding({ left: 8, right: 8, top: 8, bottom: 8 })
-            .onClick(() => {
-              this.openEditEvent(event);
-            });
+      Row() {
+        Circle()
+          .width(COURSE_DETAIL_ICON_SIZE)
+          .height(COURSE_DETAIL_ICON_SIZE)
+          .flexShrink(0)
+          .attributeModifier(new CirclePaintModifier(TimetableDetailPage.css(event.color === 0 ?
+            TimetableDetailPage.eventColor(event.type) : event.color)));
+        Column() {
+          Text(event.name === 'NULL' || event.name.length === 0 ? '未命名课程' : event.name)
+            .fontSize(21)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.hita_text_202b45'))
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis });
+          Text('课程详情')
+            .fontSize(13)
+            .fontColor($r('app.color.hita_text_secondary_72809a'))
+            .margin({ top: 4 });
         }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-        .margin({ bottom: 14 });
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: COURSE_DETAIL_TEXT_GAP });
+
+        Text('编辑')
+          .fontSize(14)
+          .fontColor(HitaColors.primary)
+          .fontWeight(FontWeight.Medium)
+          .padding({ left: 8, right: 8, top: 8, bottom: 8 })
+          .margin({ left: 8 })
+          .flexShrink(0)
+          .onClick(() => {
+            this.openEditEvent(event);
+          });
       }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .margin({ bottom: 14 });
 
       this.courseDetailRow($r('sys.symbol.person_crop_circle_fill'), '老师',
         event.teacher.trim().length > 0 ? event.teacher : '无');
@@ -789,22 +788,6 @@ struct TimetableDetailPage {
         TimetableDetailPage.courseDateText(event.from));
       this.courseDetailRow($r('sys.symbol.repeat_1'), '课程进度',
         this.courseProgressText(event));
-
-      Row() {
-        Blank()
-        Text('删除课程')
-          .fontSize(14)
-          .fontColor(HitaColors.error)
-          .fontWeight(FontWeight.Medium)
-          .padding({ left: 14, right: 14, top: 9, bottom: 9 })
-          .backgroundColor($r('app.color.hita_error_surface_fdecec'))
-          .borderRadius(18)
-          .onClick(() => {
-            this.confirmDeleteEvent(event);
-          });
-      }
-      .width('100%')
-      .margin({ top: 6 });
     }
     .width('100%')
     .padding({ left: 20, right: 20, top: 4, bottom: 20 });
@@ -818,9 +801,10 @@ struct TimetableDetailPage {
           .fontSize(20)
           .fontColor([HitaColors.primary]);
       }
-      .width(38)
-      .height(38)
-      .borderRadius(19)
+      .width(COURSE_DETAIL_ICON_SIZE)
+      .height(COURSE_DETAIL_ICON_SIZE)
+      .borderRadius(COURSE_DETAIL_ICON_SIZE / 2)
+      .flexShrink(0)
       .backgroundColor($r('app.color.hita_selected_e4f0ff'))
       .alignContent(Alignment.Center);
       Column() {
@@ -837,7 +821,7 @@ struct TimetableDetailPage {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      .margin({ left: 12 });
+      .margin({ left: COURSE_DETAIL_TEXT_GAP });
     }
     .width('100%')
     .padding({ top: 8, bottom: 8 })
@@ -924,8 +908,14 @@ struct TimetableDetailPage {
           }
           ForEach(this.subjectRows, (row: TimetableSubjectRow) => {
             ListItem() {
-              this.courseGroupCard(row)
+              DeleteParticleCard({
+                controller: this.deleteEffects,
+                effectId: row.subject.id
+              }) {
+                this.courseGroupCard(row)
+              }
             }
+            .enabled(this.pendingDeleteCourseId.length === 0)
             .swipeAction({
               end: { builder: () => { this.courseDeleteAction(row) } },
               edgeEffect: SwipeEdgeEffect.None
@@ -950,7 +940,7 @@ struct TimetableDetailPage {
               .width('100%')
               .borderRadius(18)
               .clip(true)
-              Text('点击课程展开每次上课记录；点击具体课时查看详情、编辑或删除')
+              Text('点击课程展开课时，点击课时查看详情或编辑；左滑课程可删除整门课程')
                 .fontSize(12)
                 .fontColor($r('app.color.hita_text_hint_9aa2b1'))
                 .margin({ top: 14, bottom: 36 })
@@ -962,7 +952,7 @@ struct TimetableDetailPage {
         .width('100%')
         .height('100%')
         .padding({ left: 16, right: 16 })
-        .enableScrollInteraction(true)
+        .enableScrollInteraction(this.pendingDeleteCourseId.length === 0)
         .edgeEffect(EdgeEffect.None)
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
         .scrollBar(BarState.Off)

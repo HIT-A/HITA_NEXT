@@ -29,7 +29,9 @@ function harness() {
       timetablePlaceLabels = [{}];
       timetableAreaW = 380;
       timetableCanvasHeight = 800;
-      timetablePlaceCanvas = {};
+      timetableCardPainter = { drawPlaces: () => 1200 };
+      courseDeleteEffects = { resume() {}, pause() {} };
+      finishCourseSheetDismissal() {}
       clockTimer = -1;
       classReminderEnabled = false;
       dayKey = 'today';
@@ -42,7 +44,7 @@ function harness() {
       updateTodayHighlights() { this.highlights++; }
       refreshSummaries() { this.refreshes++; }
       ${slice('  private closeActiveSheet()', '  private requestCalendarExport()')}
-      ${slice('  private startClock()', '  async refreshSummaries()')}
+      ${slice('  private startClock()', '  async refreshSummaries(')}
       ${slice('  private selectTab(', '  private dockPageInset()')}
     }`;
   const output = ts.transpileModule(code, {
@@ -144,7 +146,7 @@ test('the clock updates Today without repainting a static grid and still refresh
 });
 
 test('data, appearance, wallpaper, week and geometry changes still repaint the timetable', () => {
-  assert.match(slice('  async refreshSummaries()', '  private classReminderSubtitle'),
+  assert.match(slice('  async refreshSummaries(', '  private classReminderSubtitle'),
     /this\.drawTimetableNow\(\)/);
   assert.match(slice('  private onAppearanceChanged()', '  private timetableInk'),
     /this\.drawTimetableNow\(\)/);

@@ -87,6 +87,50 @@ test('week paging commits on a shorter drag or a quick flick', () => {
   assert.match(panEnd, /width \* TIMETABLE_SWIPE_RATIO/);
 });
 
+test('slower week slides finish before swapping data or accepting another gesture', () => {
+  const home = read('pages/Home.ets');
+  const constant = home.match(/const TIMETABLE_SLIDE_MS: number = \d+;/)[0];
+  const methods = home.slice(home.indexOf('  private resetTimetableAnimationState()'),
+    home.indexOf('  private handleTimetablePanUpdate('));
+  const output = ts.transpileModule(`${constant}
+    class Host {
+      timetableWeek = 3;
+      timetableAnimating = false;
+      timetableDragOffset = -60;
+      timetableDragLimit() { return 360; }
+      shiftTimetableWeek(delta) { this.timetableWeek += delta; }
+      ${methods}
+    }`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+  const queued = [];
+  const page = new Function('setTimeout', output + '; return new Host();')(
+    (run, delay) => { queued.push({ run, delay }); return queued.length; });
+  page.animateTimetableWeek(1);
+  const exit = queued.shift();
+  assert.ok(exit.delay >= page.timetableAnimationDuration);
+  assert.equal(page.timetableWeek, 3);
+  page.animateTimetableWeek(1);
+  assert.equal(queued.length, 0, 'extra gestures must not queue a second transition');
+  exit.run();
+  assert.equal(page.timetableWeek, 4);
+  assert.equal(page.timetableAnimationDuration, 0);
+  assert.equal(page.timetableDragOffset, 360);
+  queued.shift().run();
+  const enter = queued.shift();
+  assert.ok(enter.delay >= page.timetableAnimationDuration);
+  assert.equal(page.timetableAnimating, true);
+  enter.run();
+  assert.equal(page.timetableAnimating, false);
+  assert.equal(page.timetableDragOffset, 0);
+  page.timetableDragOffset = 30;
+  page.animateTimetableSnapBack();
+  const snap = queued.shift();
+  assert.ok(snap.delay >= page.timetableAnimationDuration);
+  assert.equal(page.timetableAnimating, true);
+  snap.run();
+  assert.equal(page.timetableAnimating, false);
+  assert.equal(page.timetableWeek, 4);
+});
+
 test('latched grid drags reject native horizontal page gestures but retain vertical scrolling', () => {
   const home = read('pages/Home.ets');
   const method = home.slice(home.indexOf('  private judgeTimetableWeekPan'), home.indexOf('  @Builder\n  homeTabs()'));

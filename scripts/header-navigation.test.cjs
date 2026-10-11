@@ -109,5 +109,14 @@ test('manager selection cancel and course editor cancel keep their behavior', ()
   assert.match(editor, /HeaderBackButton\(\{\s*onBack: \(\) => this\.onCancel\(\)/);
   assert.match(editor, /HeaderBackButton\(\{\s*onBack: \(\) => this\.getUIContext\(\)\.getRouter\(\)\.back\(\)/);
   const detail = read('pages/TimetableDetailPage.ets');
-  assert.match(detail, /HeaderBackButton\(\{\s*onBack: \(\) => this\.closeSheet\(\)/);
+  const sheet = detail.slice(detail.indexOf('  private courseDetailSheet('),
+    detail.indexOf('  private courseProgressText('));
+  assert.doesNotMatch(sheet, /HeaderBackButton|confirmDeleteEvent|删除课程|\.width\(7\)|\.height\(50\)/);
+  assert.match(sheet, /Row\(\) \{\s*Circle\(\)/);
+  assert.equal((sheet.match(/\.width\(COURSE_DETAIL_ICON_SIZE\)/g) || []).length, 2);
+  assert.equal((sheet.match(/\.height\(COURSE_DETAIL_ICON_SIZE\)/g) || []).length, 2);
+  assert.equal((sheet.match(/\.margin\(\{ left: COURSE_DETAIL_TEXT_GAP \}\)/g) || []).length, 2);
+  assert.match(sheet, /CirclePaintModifier/);
+  assert.match(sheet, /this\.openEditEvent\(event\)/);
+  assert.match(detail, /\.bindSheet\(this\.sheetVisible,[\s\S]*?dragBar: true/);
 });

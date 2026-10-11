@@ -30,7 +30,7 @@ test('card material lives inside the supported title host, matches measured cont
   assert.doesNotMatch(card, /\.shadow\(/);
   assert.doesNotMatch(card, /\.height\(1[0-9][0-9]\)|\.height\(2[0-9][0-9]\)/);
   const material = read('common/theme/ImmersiveHeaderMaterial.ets');
-  assert.match(material, /applyShadow: blueSurface/);
+  assert.match(material, /applyShadow: shadow === undefined \? blueSurface : shadow/);
   assert.match(material, /interactive: true/);
   assert.match(material, /lightEffect: \{ color: Color\.White \}/);
 });

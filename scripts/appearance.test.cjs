@@ -250,7 +250,7 @@ test('appearance matches surrounding settings rows and reveals choices only when
   assert.match(setting, /SymbolGlyph\(\$r\('sys\.symbol\.moon'\)\)/);
   assert.match(setting, /this\.appearanceMode === AppearanceMode\.DARK \? '已开启'/);
   assert.match(setting, /this\.appearanceMode === AppearanceMode\.LIGHT \? '已关闭' : '跟随系统'/);
-  assert.match(setting, /animateTo\(\{ duration: 200, curve: Curve\.EaseInOut \}/);
+  assert.match(setting, /animateTo\(\{ duration: 300, curve: Curve\.EaseInOut \}/);
   assert.match(setting, /this\.appearanceExpanded = !this\.appearanceExpanded/);
   assert.match(setting, /if \(this\.appearanceExpanded\) \{\s*ImmersiveHeader\(\{ barHeight: 60, materialEnabled: CompatibleSheetMaterial\.isEnabled\(\) \}\) \{\s*Row[\s\S]*this\.appearanceOption\(AppearanceMode\.SYSTEM/);
   assert.match(setting, /\.padding\(\{ left: 16, right: 16, top: 4, bottom: 12 \}\)/);

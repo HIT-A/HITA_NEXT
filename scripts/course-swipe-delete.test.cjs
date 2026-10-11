@@ -114,7 +114,7 @@ async function confirmCourse(choice, fail = false, reminderFail = false) {
     compilerOptions: { target: ts.ScriptTarget.ES2020 }
   }).outputText;
   const mod = { exports: {} };
-  const calls = { deleted: [], closed: 0, animated: 0, reminders: 0, dialogs: [], toasts: [] };
+  const calls = { deleted: [], particles: [], closed: 0, animated: 0, reminders: 0, dialogs: [], toasts: [] };
   const rdb = { getInstance: () => ({ deleteCourseWithClasses: async (...ids) => {
     calls.deleted.push(ids);
     if (fail) throw Error('disk full');
@@ -122,6 +122,11 @@ async function confirmCourse(choice, fail = false, reminderFail = false) {
   new Function('RdbHelper', 'HitaColors', '$r', 'Curve', 'EasEventType', 'module', js)(
     rdb, { error: 'red' }, value => value, { EaseInOut: 'ease' }, { CLASS: 'CLASS' }, mod);
   const host = new mod.exports();
+  host.pendingDeleteCourseId = '';
+  host.deleteEffects = { play: async ids => {
+    assert.deepEqual(calls.deleted, [['course-a', 'table-a']], 'write must succeed before particles');
+    calls.particles.push(ids);
+  } };
   host.detailScroller = { closeAllSwipeActions() { calls.closed++; } };
   host.subjectRows = [
     { subject: { id: 'course-a', timetableId: 'table-a', name: '物理' }, classCount: 2 },
@@ -155,12 +160,15 @@ test('cancel and write failure leave the course visible; success removes only it
   assert.equal(cancelled.calls.closed, 1);
   assert.match(cancelled.calls.dialogs[0].message, /全部 2 次课/);
   assert.deepEqual(cancelled.calls.deleted, []);
+  assert.deepEqual(cancelled.calls.particles, []);
+  assert.equal(cancelled.host.pendingDeleteCourseId, '');
   assert.equal(cancelled.host.subjectRows.length, 2);
 
   const failed = await confirmCourse(1, true);
   assert.deepEqual(failed.calls.deleted, [['course-a', 'table-a']]);
   assert.equal(failed.host.subjectRows.length, 2);
   assert.equal(failed.calls.animated, 0);
+  assert.deepEqual(failed.calls.particles, []);
   assert.deepEqual(failed.calls.toasts, ['删除失败，请重试']);
 
   const saved = await confirmCourse(1);
@@ -168,6 +176,8 @@ test('cancel and write failure leave the course visible; success removes only it
   assert.deepEqual(saved.host.eventRows.map(row => row.type), ['EXAM', 'CLASS', 'CLASS']);
   assert.equal(saved.host.expandedSubjectId, '');
   assert.equal(saved.calls.animated, 1);
+  assert.deepEqual(saved.calls.particles, [['course-a']]);
+  assert.equal(saved.host.pendingDeleteCourseId, '');
   assert.equal(saved.calls.reminders, 1);
   assert.deepEqual(saved.calls.toasts, ['课程及全部课时已删除']);
 
@@ -184,13 +194,13 @@ test('detail page uses native left swipe, confirmation and animated expansion', 
   const deleteAction = source.slice(source.indexOf('  private courseDeleteAction('),
     source.indexOf('  private sessionRow('));
   assert.match(build, /List\(\{ scroller: this\.detailScroller \}\)/);
-  assert.match(build, /ListItem\(\) \{\s*this\.courseGroupCard\(row\)\s*\}\s*\.swipeAction\(\{\s*end:/);
+  assert.match(build, /ListItem\(\) \{\s*DeleteParticleCard\([\s\S]*?this\.courseGroupCard\(row\)[\s\S]*?\.swipeAction\(\{\s*end:/);
   assert.match(build, /edgeEffect: SwipeEdgeEffect\.None/);
   assert.match(source, /deleteCourseWithClasses\(subjectId, timetableId\)/);
   assert.match(source, /if \(ret\.index !== 1\)/);
   assert.match(source, /event\.type !== EasEventType\.CLASS/);
-  assert.match(source, /private confirmDeleteEvent\(event: EasEventItem\)/);
-  assert.match(toggle, /animateTo\(\{ duration: 220, curve: Curve\.EaseInOut \}/);
+  assert.doesNotMatch(source, /confirmDeleteEvent/);
+  assert.match(toggle, /animateTo\(\{ duration: 300, curve: Curve\.EaseInOut \}/);
   assert.match(source, /\.transition\(TransitionEffect\.OPACITY\)/);
   assert.match(deleteAction, /SymbolGlyph\(\$r\('sys\.symbol\.trash'\)\)/);
   assert.doesNotMatch(deleteAction, /\.shadow\(/);

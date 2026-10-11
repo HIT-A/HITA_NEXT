@@ -4,6 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 const ts = require('typescript');
 global.$r = name => ({ id: -1, type: 10001, params: [name] });
+global.Curve = { EaseInOut: 'ease' };
 
 const root = path.resolve(__dirname, '../entry/src/main/ets');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -100,6 +101,7 @@ function setup(seeds = [exam('a'), exam('b', 'current')], extras = {}) {
     showDialog: async options => { calls.dialogs.push(options); return { index: 0 }; }
   };
   const ui = {
+    animateTo: (_options, callback) => callback(),
     getHostContext: () => ({}),
     getRouter: () => ({ getParams: () => ({ id: 'unrelated-route-id' }), back: () => {} }),
     getPromptAction: () => prompt
@@ -191,6 +193,44 @@ test('confirmed deletion removes only the chosen ID, even with duplicate names a
   assert.deepEqual(page.exams.map(e => e.id), ['b']);
   assert.equal(page.pendingDeleteId, '');
   assert.equal(page.sheetVisible, false);
+});
+
+test('exam particles wait for sheet dismissal and are skipped after leaving the page', async () => {
+  const { page, rows, prompt } = setup();
+  await page.onPageShow();
+  page.openExamDetail(exam('a'));
+  prompt.showDialog = async () => ({ index: 1 });
+  let finishEffect;
+  page.deleteEffects.register('a', {
+    start: finish => {
+      assert.equal(rows.has('a'), false, 'the database deletion already succeeded');
+      assert.equal(page.sheetVisible, false);
+      finishEffect = finish;
+    },
+    stop: () => {}
+  });
+  const deletion = page.confirmDeleteExam(exam('a'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(finishEffect, undefined, 'particles must not start underneath the sheet');
+  assert.equal(page.exams.length, 2, 'keep the visible card until the effect completes');
+  page.finishDeleteSheetDismissal();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(typeof finishEffect, 'function');
+  page.onPageHide();
+  await deletion;
+  assert.deepEqual(page.exams.map(e => e.id), ['b']);
+  assert.equal(page.pendingDeleteId, '');
+  assert.equal(page.deleteSheetTimer, -1);
+});
+
+test('a failed refresh after deletion cannot resurrect the deleted exam card', async () => {
+  const { page, db, prompt } = setup();
+  await page.onPageShow();
+  prompt.showDialog = async () => ({ index: 1 });
+  db.getTimetables = async () => { throw Error('read failed'); };
+  await page.confirmDeleteExam(exam('a'));
+  assert.deepEqual(page.exams.map(e => e.id), ['b']);
+  assert.equal(page.loadError, true);
 });
 
 test('delete failure keeps the entry and displays an error; overlapping confirmations are blocked', async () => {
