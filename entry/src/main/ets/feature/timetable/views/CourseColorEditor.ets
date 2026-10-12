@@ -83,10 +83,12 @@ export struct CourseColorEditor {
         .fontSize(13).fontColor($r('app.color.hita_text_secondary')).width('100%');
       Row({ space: 12 }) {
         Text(this.hex()).fontColor($r('app.color.hita_text')).layoutWeight(1);
-        Text(this.textMode ? '周一 08:00' : (this.examMode ? '考试预览' : '课块预览'))
-          .fontColor(this.textMode ? TimetableTheme.resolveText(this.hex(), this.previewDark, this.previewWallpaper) : '#FFFFFF').fontSize(15)
-          .padding(16).borderRadius(12)
-          .backgroundColor(this.textMode ? $r('app.color.hita_page') : timetableBlockColor(this.color()));
+        if (this.textMode || this.examMode) {
+          Text(this.textMode ? '周一 08:00' : '考试预览')
+            .fontColor(this.textMode ? TimetableTheme.resolveText(this.hex(), this.previewDark, this.previewWallpaper) : '#FFFFFF').fontSize(15)
+            .padding(16).borderRadius(12)
+            .backgroundColor(this.textMode ? $r('app.color.hita_page') : timetableBlockColor(this.color()));
+        }
       }.width('100%').margin({ top: 8, bottom: 4 });
       Stack({ alignContent: Alignment.TopStart }) {
         Row().width('100%').height('100%')

@@ -18,13 +18,16 @@ function deferred() {
   return { promise, resolve };
 }
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+const Status = { CHECKING: 'checking', CONNECTED: 'connected', EXPIRED: 'expired', UNKNOWN: 'unknown' };
 
 function harness() {
   const state = {
     lastReads: 0, reads: 0, toasts: [],
     loadLast: async () => 'WEIHAI',
     load: async campus => ({ campus, name: 'Current session' }),
-    clear: async () => {}
+    clear: async () => {},
+    checks: [],
+    verify: async () => Status.CONNECTED
   };
   const store = {
     async loadLastCampus() { state.lastReads++; return state.loadLast(); },
@@ -58,6 +61,7 @@ function harness() {
       sheetRequestGeneration = 0;
       sessionSheetCampus = 'WEIHAI';
       sessionSheetInfo;
+      sessionSheetStatus = Status.UNKNOWN;
       sessionInfo;
       selectedCourse;
       calendarExportTimetable;
@@ -80,9 +84,13 @@ function harness() {
     compilerOptions: { target: ts.ScriptTarget.ES2020 }
   }).outputText;
   const page = new Function('context', 'EasSessionStore', 'EasCampus', 'KeyboardAvoidMode',
-    'TAB_TIMETABLE', compiled + '; return new Home();')(
+    'TAB_TIMETABLE', 'EasSessionStatus', 'EasDataProvider', 'EasApiClient', 'Status',
+    compiled + '; return new Home();')(
     context, { getInstance: () => store },
-    { WEIHAI: 'WEIHAI', BENBU: 'BENBU', SHENZHEN: 'SHENZHEN' }, { OFFSET: 0 }, 1);
+    { WEIHAI: 'WEIHAI', BENBU: 'BENBU', SHENZHEN: 'SHENZHEN' }, { OFFSET: 0 }, 1,
+    Status, class {
+      async checkSessionStatus(session) { state.checks.push(session); return state.verify(session); }
+    }, class {}, Status);
   return { page, state };
 }
 
@@ -262,4 +270,69 @@ test('text palette keeps its close guard until dismissal finishes', () => {
   page.didDisappear();
   assert.equal(page.timetablePaletteOpen, false);
   assert.equal(page.canOpenSheet(), true);
+});
+
+test('a saved session is checked when the sheet opens, and expiry does not delete offline data', async () => {
+  const { page, state } = harness();
+  const check = deferred();
+  let clears = 0;
+  state.clear = async () => { clears++; };
+  state.verify = () => check.promise;
+  await page.openSessionSheet();
+  assert.equal(page.activeSheetVisible, true, 'verification must not delay the sheet opening');
+  assert.equal(page.sessionSheetStatus, Status.CHECKING);
+  assert.equal(state.checks.length, 1);
+  check.resolve(Status.EXPIRED);
+  await flush();
+  assert.equal(page.sessionSheetStatus, Status.EXPIRED);
+  assert.equal(page.sessionSheetInfo.name, 'Current session');
+  assert.equal(clears, 0);
+});
+
+test('switching campus ignores a late verification result from the previous campus', async () => {
+  const { page, state } = harness();
+  const old = deferred();
+  state.verify = () => old.promise;
+  await page.openSessionSheet();
+  state.verify = async () => Status.CONNECTED;
+  await page.selectSessionCampus('BENBU');
+  await flush();
+  assert.equal(page.sessionSheetStatus, Status.CONNECTED);
+  old.resolve(Status.EXPIRED);
+  await flush();
+  assert.equal(page.sessionSheetCampus, 'BENBU');
+  assert.equal(page.sessionSheetStatus, Status.CONNECTED);
+});
+
+test('dismissal and relogin discard stale verification; reopening verifies again', async () => {
+  for (const leave of [page => page.willDisappear(), page => page.beginSessionLogin()]) {
+    const { page, state } = harness();
+    const old = deferred();
+    state.verify = () => old.promise;
+    await page.openSessionSheet();
+    leave(page);
+    old.resolve(Status.EXPIRED);
+    await flush();
+    assert.equal(page.sessionSheetStatus, Status.CHECKING);
+    page.willDisappear();
+    page.didDisappear();
+    state.verify = async () => Status.CONNECTED;
+    await page.openSessionSheet();
+    await flush();
+    assert.equal(state.checks.length, 2);
+    assert.equal(page.sessionSheetStatus, Status.CONNECTED);
+  }
+});
+
+test('verification failure shows unknown; an empty saved session does not trigger network verification', async () => {
+  const { page, state } = harness();
+  state.verify = async () => { throw Error('offline'); };
+  await page.openSessionSheet();
+  await flush();
+  assert.equal(page.sessionSheetStatus, Status.UNKNOWN);
+  assert.deepEqual(state.toasts, []);
+  state.load = async () => undefined;
+  await page.selectSessionCampus('SHENZHEN');
+  assert.equal(page.sessionSheetInfo, undefined);
+  assert.equal(state.checks.length, 1);
 });

@@ -7,6 +7,7 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { EasCampus, EasSession } from './EasSession';
 import { EasApiClient, EasApiClientOptions, EasApiResponse, EasHttpMethod } from './EasApiClient';
+import { EasSessionStatus, isExpiredEasResponse } from './EasSessionStatus';
 import { EasCourseItem, EasCourseScoreItem, EasExamItem, EasTermItem } from './model/EasModels';
 import { EasTimePeriodInDay } from '../../common/model/timetable/TimetableModels';
 import { easWebLoginConfigFor, EasCampusConfig, EasCampusUrls } from './webLogin/EasWebLoginConfig';
@@ -94,6 +95,68 @@ export class EasDataProvider {
 
   constructor(api: EasApiClient) {
     this.api = api;
+  }
+
+  async checkSessionStatus(session: EasSession, timeoutMs: number = 10000): Promise<EasSessionStatus> {
+    if (EasSession.buildCookieHeader(session.webCookies).length === 0) {
+      return EasSessionStatus.EXPIRED;
+    }
+    let timer: number = -1;
+    try {
+      return await Promise.race([
+        this.querySessionStatus(session, Math.min(timeoutMs, 6000)),
+        new Promise<EasSessionStatus>((resolve) => {
+          timer = setTimeout(() => resolve(EasSessionStatus.UNKNOWN), timeoutMs);
+        })
+      ]);
+    } catch (_) {
+      return EasSessionStatus.UNKNOWN;
+    } finally {
+      if (timer !== -1) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  private async querySessionStatus(session: EasSession, timeoutMs: number): Promise<EasSessionStatus> {
+    if (session.campus === EasCampus.BENBU && session.getStudentType() === '2') {
+      // The graduate portal has a separate schema; do not claim its cookie is valid without verification.
+      const response: EasApiResponse = await this.getHtml(session, '/xs/index', timeoutMs, false);
+      return isExpiredEasResponse(response) ? EasSessionStatus.EXPIRED : EasSessionStatus.UNKNOWN;
+    }
+    const shenzhen: boolean = session.campus === EasCampus.SHENZHEN;
+    if (shenzhen && session.webBaseUrl.length === 0) {
+      return EasSessionStatus.UNKNOWN;
+    }
+    const paths: string[] = shenzhen ?
+      [EasShenzhenEndpoints.termsPath, '/component/queryxnxqdata'] :
+      [EasDataProvider.timetableTermsPathOf(session), EasDataProvider.scoreTermsPathOf(session)];
+    for (let i: number = 0; i < paths.length; i++) {
+      let response: EasApiResponse;
+      if (shenzhen) {
+        const options: EasApiClientOptions = EasDataProvider.shenzhenFormOptions(session, '', timeoutMs,
+          i === 0 ? '/Xsxk/query/1' : '/authentication/main');
+        options.useCache = false;
+        options.extraHeaders.set('Cache-Control', 'no-cache');
+        response = await this.api.request(session,
+          easWebLoginConfigFor(session.campus, session.getStudentType()), paths[i], options);
+      } else {
+        response = await this.getHtml(session, paths[i], timeoutMs, false);
+      }
+      if (isExpiredEasResponse(response)) {
+        return EasSessionStatus.EXPIRED;
+      }
+      if (EasDataProvider.isHttpOk(response)) {
+        const terms: EasTermItem[] = shenzhen ? parseShenzhenWebTerms(response.body) :
+          EasLegacyTimetableParser.parseTermsBySelect(response.body, i === 0 ? 'xnxq' : 'pageXnxq');
+        if (terms.length > 0) {
+          return EasSessionStatus.CONNECTED;
+        }
+      } else if (response.statusCode !== 404) {
+        return EasSessionStatus.UNKNOWN;
+      }
+    }
+    return EasSessionStatus.UNKNOWN;
   }
 
   async getAllTerms(session: EasSession): Promise<EasTermItem[]> {
@@ -323,10 +386,15 @@ export class EasDataProvider {
     return await this.api.request(session, cfg, path, opts);
   }
 
-  private async getHtml(session: EasSession, path: string, timeoutMs: number = 20000): Promise<EasApiResponse> {
+  private async getHtml(session: EasSession, path: string, timeoutMs: number = 20000,
+    useCache: boolean = true): Promise<EasApiResponse> {
     const opts: EasApiClientOptions = new EasApiClientOptions();
     opts.method = EasHttpMethod.GET;
     opts.timeoutMs = timeoutMs;
+    opts.useCache = useCache;
+    if (!useCache) {
+      opts.extraHeaders.set('Cache-Control', 'no-cache');
+    }
     opts.extraHeaders.set('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
     opts.extraHeaders.set('Accept-Language', 'zh-CN,zh-Hans;q=0.9');
     if (session.campus === EasCampus.WEIHAI) {

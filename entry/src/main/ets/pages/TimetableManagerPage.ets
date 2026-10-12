@@ -307,18 +307,26 @@ struct TimetableManagerPage {
       )
 
       if (!this.selectionMode && this.activeTimetableId === timetable.id) {
-        Row() {
-          Text('当前')
-            .fontSize(11)
-            .fontWeight(FontWeight.Medium)
-            .fontColor('#FFFFFF')
+        Column() {
+          ImmersiveHeader({ barHeight: 26 }) {
+            Row() {
+              Text('当前')
+                .fontSize(11)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(CompatibleMaterialModifier.foreground(HitaColors.primary))
+            }
+            .width('100%')
+            .height(26)
+            .justifyContent(FlexAlign.Center)
+            .backgroundColor($r('app.color.hita_control'))
+            .borderRadius(13)
+            .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_control')))
+          }
         }
+        .width(48)
         .height(26)
-        .padding({ left: 10, right: 10 })
-        .justifyContent(FlexAlign.Center)
-        .backgroundColor($r('app.color.hita_primary_fill'))
-        .borderRadius(13)
         .margin({ top: 12, right: 12 })
+        .hitTestBehavior(HitTestMode.BLOCK_DESCENDANTS)
       }
 
       if (this.selectionMode) {

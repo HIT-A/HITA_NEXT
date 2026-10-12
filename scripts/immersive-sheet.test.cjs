@@ -148,10 +148,11 @@ test('course palette button keeps a stable circle host, original preview and tog
   assert.match(course, /onCancel: \(\) => \{ this.courseColorEditing = false/);
 });
 
-test('course color actions opt in without changing other editor call sites or the legacy footer', () => {
+test('course and timetable text color actions share the material footer while retaining the legacy fallback', () => {
   const home = read('ets/pages/Home.ets');
-  assert.equal((home.match(/immersiveControls: true/g) || []).length, 1);
+  assert.equal((home.match(/immersiveControls: true/g) || []).length, 2);
   assert.match(home, /initialColor: event.color,\s*immersiveControls: true/);
+  assert.match(home, /textMode: true,\s*immersiveControls: true/);
   assert.doesNotMatch(read('ets/pages/ExamPage.ets'), /immersiveControls/);
   const editor = read('ets/feature/timetable/views/CourseColorEditor.ets');
   assert.match(editor, /@Prop immersiveControls: boolean = false/);

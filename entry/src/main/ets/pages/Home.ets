@@ -31,6 +31,9 @@ import { EasEventItem, EasEventType, EasTermSubject, EasTimetable } from '../com
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
+import { EasApiClient } from '../feature/eas/EasApiClient';
+import { EasDataProvider } from '../feature/eas/EasDataProvider';
+import { EasSessionStatus } from '../feature/eas/EasSessionStatus';
 import { EasImportResult, EasTimetableImporter } from '../feature/eas/EasTimetableImporter';
 import { EasUserMessages } from '../feature/eas/EasUserMessages';
 import { EasLoginPage } from '../feature/eas/webLogin/EasLoginPage';
@@ -135,6 +138,7 @@ struct Home {
   @State sessionSheetOpen: boolean = false;
   @State sessionSheetCampus: string = 'WEIHAI';
   @State sessionSheetInfo: EasSession | undefined = undefined;
+  @State sessionSheetStatus: EasSessionStatus = EasSessionStatus.UNKNOWN;
   private sheetRequestGeneration: number = 0;
   private sessionSheetLoading: boolean = false;
   @State loginSheetOpen: boolean = false;
@@ -575,15 +579,27 @@ struct Home {
       if (x < card.left || x > card.left + card.width || y < card.top || y > card.top + card.height) {
         continue;
       }
-      const event: EasEventItem | undefined = this.timetableEvents.find((item: EasEventItem): boolean =>
-        item.id === card.eventIds[0]);
-      if (event !== undefined && (event.type === EasEventType.CLASS || event.type === EasEventType.EXAM)) {
-        this.courseColorEditing = false;
-        this.selectedCourse = event;
-        this.courseSheetOpen = true;
-        this.activeSheetVisible = true;
-        return;
-      }
+      this.openCourseCard(card.key);
+      return;
+    }
+  }
+
+  private openCourseCard(key: string): void {
+    if (!this.canOpenSheet() || this.currentTimetable === undefined || this.timetableAnimating) {
+      return;
+    }
+    const card: TimetableCardSurface | undefined = this.timetableCardSurfaces.find(
+      (item: TimetableCardSurface): boolean => item.key === key);
+    if (card === undefined) {
+      return;
+    }
+    const event: EasEventItem | undefined = this.timetableEvents.find((item: EasEventItem): boolean =>
+      item.id === card.eventIds[0] && item.timetableId === this.currentTimetable?.id);
+    if (event !== undefined && (event.type === EasEventType.CLASS || event.type === EasEventType.EXAM)) {
+      this.courseColorEditing = false;
+      this.selectedCourse = event;
+      this.courseSheetOpen = true;
+      this.activeSheetVisible = true;
     }
   }
 
@@ -766,6 +782,10 @@ struct Home {
   }
 
   private animateTimetableSnapBack(): void {
+    // A tap can cancel the pan recognizer without ever moving the week.
+    if (this.timetableAnimating || this.timetableDragOffset === 0) {
+      return;
+    }
     this.timetableAnimating = true;
     this.timetableAnimationDuration = TIMETABLE_SLIDE_MS;
     this.timetableDragOffset = 0;
@@ -1227,8 +1247,10 @@ struct Home {
       }
       this.sessionSheetCampus = campus.toString();
       this.sessionSheetInfo = session;
+      this.sessionSheetStatus = EasSessionStatus.CHECKING;
       this.sessionSheetOpen = true;
       this.activeSheetVisible = true;
+      this.verifySessionSheet(session, generation);
     } catch (_) {
       if (generation === this.sheetRequestGeneration && this.canOpenSheet()) {
         this.getUIContext().getPromptAction().showToast({ message: '教务会话读取失败，请重试' });
@@ -1247,10 +1269,12 @@ struct Home {
     const generation: number = ++this.sheetRequestGeneration;
     this.sessionSheetCampus = code;
     this.sessionSheetInfo = undefined;
+    this.sessionSheetStatus = EasSessionStatus.CHECKING;
     try {
       const session: EasSession | undefined = await EasSessionStore.getInstance().load(Home.campusFromCode(code));
       if (generation === this.sheetRequestGeneration && this.activeSheetVisible && this.sessionSheetOpen) {
         this.sessionSheetInfo = session;
+        this.verifySessionSheet(session, generation);
       }
     } catch (_) {
       if (generation === this.sheetRequestGeneration && this.activeSheetVisible && this.sessionSheetOpen) {
@@ -1259,10 +1283,27 @@ struct Home {
     }
   }
 
+  private async verifySessionSheet(session: EasSession | undefined, generation: number): Promise<void> {
+    if (session === undefined) {
+      return;
+    }
+    let status: EasSessionStatus = EasSessionStatus.UNKNOWN;
+    try {
+      status = await new EasDataProvider(new EasApiClient()).checkSessionStatus(session);
+    } catch (_) {
+      status = EasSessionStatus.UNKNOWN;
+    }
+    if (generation === this.sheetRequestGeneration && this.activeSheetVisible && this.sessionSheetOpen &&
+      this.sessionSheetCampus === session.campus.toString()) {
+      this.sessionSheetStatus = status;
+    }
+  }
+
   private beginSessionLogin(): void {
     if (!this.activeSheetVisible || !this.sessionSheetOpen) {
       return;
     }
+    this.sheetRequestGeneration++;
     this.loginCampusCode = this.sessionSheetCampus;
     this.sessionSheetOpen = false;
     this.loginSheetOpen = true;
@@ -1491,6 +1532,7 @@ struct Home {
         CourseColorEditor({
           initialColor: (0xFF000000 | parseInt(this.timetableTextColor.substring(1), 16)) >>> 0,
           textMode: true,
+          immersiveControls: true,
           previewDark: this.darkMode,
           previewWallpaper: this.hasTimetableBackground(),
           presets: TimetableTheme.PALETTE.map((color: string): number =>
@@ -2070,12 +2112,14 @@ struct Home {
                   cards: this.timetableCardSurfaces,
                   contentHeight: this.timetableCanvasHeight,
                   painter: this.timetableCardPainter,
-                  deleteEffects: this.courseDeleteEffects
+                  deleteEffects: this.courseDeleteEffects,
+                  onCardClick: (key: string) => this.openCourseCard(key)
                 })
               }
               .width('100%')
               .height(this.timetableCanvasHeight)
               .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
+              // Keep the grid hit target when a native material host does not dispatch its card's click.
               .onClick((event: ClickEvent) => {
                 this.openCourseAt(event.x, event.y);
               })
@@ -2769,7 +2813,7 @@ struct Home {
           .alignContent(Alignment.Center);
           Column() {
             Text(this.sessionSheetInfo.name.length > 0 ? this.sessionSheetInfo.name :
-              (this.sessionSheetInfo.stuId.length > 0 ? this.sessionSheetInfo.stuId : '已登录教务'))
+              (this.sessionSheetInfo.stuId.length > 0 ? this.sessionSheetInfo.stuId : '教务账号'))
               .fontSize(17)
               .fontWeight(FontWeight.Bold)
               .fontColor(COLOR_TEXT_PRIMARY)
@@ -2785,12 +2829,17 @@ struct Home {
           .alignItems(HorizontalAlign.Start)
           .margin({ left: 12 });
 
-          Text('已连接')
+          Text(this.sessionSheetStatus)
             .fontSize(12)
             .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.hita_success'))
+            .fontColor(this.sessionSheetStatus === EasSessionStatus.CONNECTED ? $r('app.color.hita_success') :
+              this.sessionSheetStatus === EasSessionStatus.EXPIRED ? $r('app.color.hita_error') :
+                COLOR_TEXT_SECONDARY)
             .padding({ left: 9, right: 9, top: 5, bottom: 5 })
-            .backgroundColor($r('app.color.hita_success_surface'))
+            .backgroundColor(this.sessionSheetStatus === EasSessionStatus.CONNECTED ?
+              $r('app.color.hita_success_surface') : this.sessionSheetStatus === EasSessionStatus.EXPIRED ?
+                $r('app.color.hita_error_surface') : $r('app.color.hita_control'))
+            .flexShrink(0)
             .borderRadius(12);
         }
         .width('100%')

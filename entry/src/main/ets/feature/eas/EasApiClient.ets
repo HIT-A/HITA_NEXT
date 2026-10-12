@@ -29,6 +29,8 @@ export class EasApiClientOptions {
   extraHeaders: Map<string, string> = new Map<string, string>();
   /** 超时 ms。 */
   timeoutMs: number = 20000;
+  /** Session probes must reach the server rather than reuse a cached business page. */
+  useCache: boolean = true;
   /** 是否跟随重定向（http 模块默认跟随，保留开关以便抓包期关闭）。 */
   followRedirects: boolean = true;
 }
@@ -79,7 +81,7 @@ export class EasApiClient {
         }
       }
       const resp: EasApiResponse = await EasApiClient.doHttp(url, options.method, header, options.body,
-        options.timeoutMs);
+        options.timeoutMs, options.useCache);
       if (resp.statusCode === 401 || this.isSessionInvalidResponse(resp, cfg)) {
         if (this.reloginHandler !== undefined && i + 1 < attempts) {
           const ok: boolean = await this.reloginHandler('session invalid on ' + path);
@@ -151,13 +153,14 @@ export class EasApiClient {
   }
 
   static async doHttp(url: string, method: EasHttpMethod, header: Map<string, string>, body: string,
-    timeoutMs: number): Promise<EasApiResponse> {
+    timeoutMs: number, useCache: boolean = true): Promise<EasApiResponse> {
     const httpRequest: http.HttpRequest = http.createHttp();
     const opts: http.HttpRequestOptions = {
       method: method === EasHttpMethod.POST ? http.RequestMethod.POST : http.RequestMethod.GET,
       header: EasApiClient.headerToObject(header),
       connectTimeout: timeoutMs,
       readTimeout: timeoutMs,
+      usingCache: useCache,
       expectDataType: http.HttpDataType.STRING
     };
     if (body.length > 0) {

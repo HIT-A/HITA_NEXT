@@ -39,6 +39,7 @@ function harness() {
   };
   const binding = slice(home, '.bindSheet($$this.activeSheetVisible,', '\n  @Builder\n  compatibleDock()');
   const disappear = binding.match(/onDisappear: \(\) => \{([\s\S]*?)\n      \}/)[1];
+  const panCancel = home.match(/\.onActionCancel\(\(\) => \{([\s\S]*?)\n            \}\)/)[1];
   const code = `class Home {
     pageVisible = true; currentTab = 1; timetableWeek = 6;
     currentTimetable = { id: 'table' };
@@ -46,6 +47,7 @@ function harness() {
     courseSheetOpen = true; activeSheetVisible = true; courseColorEditing = false;
     sheetRequestGeneration = 0; summaryRequestGeneration = 0;
     classReminderEnabled = true; courseSheetDismissTimer = -1;
+    timetableAnimating = false; timetableDragOffset = 0; timetableAnimationTimer = -1;
     timetableCardSurfaces = [{ key: 'card', eventIds: ['lesson'], left: 10, top: 24, width: 40, height: 90 }];
     timetableEvents = [course, nextWeek, exam]; todayItems = [course, exam]; selectedCourse = course;
     getUIContext() { return context; }
@@ -54,6 +56,8 @@ function harness() {
     async refreshSummaries(preserve) { state.refreshes.push(preserve); }
     canOpenSheet() { return !this.activeSheetVisible && !this.skippingCourse; }
     disappear() { ${disappear} }
+    cancelWeekPan() { ${panCancel} }
+    ${slice(home, '  private resetTimetableAnimationState()', '  private animateTimetableWeek(')}
     ${slice(home, '  private openCourseAt(', '  private async saveCourseColor(')}
     ${slice(home, '  private closeActiveSheet()', '  private requestCalendarExport()')}
   }`;
@@ -66,9 +70,10 @@ function harness() {
   const reminders = { sync: async (_ctx, events) => state.syncs.push(events.map(event => event.id)) };
   const page = new Function('course', 'nextWeek', 'exam', 'context', 'state', 'RdbHelper',
     'EasEventType', 'ClassReminderScheduler', '$r', 'TAB_TIMETABLE', 'TIMETABLE_GRID_TOP_PADDING',
+    'TIMETABLE_SLIDE_MS',
     compile(code) + '; return new Home();')(
     course, nextWeek, exam, context, state, rdb, { CLASS: 'CLASS', EXAM: 'EXAM' },
-    reminders, value => value, 1, 24);
+    reminders, value => value, 1, 24, 220);
   page.courseDeleteEffects = { play: async ids => {
     assert.equal(page.courseSheetOpen, false, 'particles must wait for actual sheet dismissal');
     assert.equal(state.writes.length, 1, 'persist before animating');
@@ -192,6 +197,67 @@ test('side-by-side overlapping cards select by actual horizontal bounds, and gap
   page.activeSheetVisible = false;
   page.openCourseAt(52, 50);
   assert.equal(page.activeSheetVisible, false);
+});
+
+test('material clicks open courses and exams by identity without depending on scrolled or transformed coordinates', () => {
+  const { page, course, exam } = harness();
+  page.timetableCardSurfaces.push({ key: 'exam-card', eventIds: ['exam'],
+    left: 55, top: 900, width: 40, height: 90 });
+  for (const [key, expected] of [['card', course], ['exam-card', exam]]) {
+    page.activeSheetVisible = false;
+    page.openCourseCard(key);
+    assert.equal(page.activeSheetVisible, true);
+    assert.equal(page.selectedCourse, expected);
+  }
+});
+
+test('bubbling a material click into the grid does not replace or reopen the active detail sheet', () => {
+  const { page, course, exam } = harness();
+  page.activeSheetVisible = false;
+  page.timetableCardSurfaces.push({ key: 'exam-card', eventIds: ['exam'],
+    left: 55, top: 24, width: 40, height: 90 });
+  page.openCourseCard('card');
+  page.openCourseAt(75, 50);
+  page.openCourseCard('exam-card');
+  assert.equal(page.selectedCourse, course);
+  assert.notEqual(page.selectedCourse, exam);
+  assert.equal(page.activeSheetVisible, true);
+});
+
+test('stale cards and clicks during a week change or dissolve cannot open details', () => {
+  const { page } = harness();
+  page.activeSheetVisible = false;
+  page.openCourseCard('removed-card');
+  assert.equal(page.activeSheetVisible, false);
+  page.timetableAnimating = true;
+  page.openCourseAt(30, 50);
+  page.openCourseCard('card');
+  assert.equal(page.activeSheetVisible, false);
+  page.timetableAnimating = false;
+  page.skippingCourse = true;
+  page.openCourseCard('card');
+  assert.equal(page.activeSheetVisible, false);
+  page.skippingCourse = false;
+  page.currentTimetable = { id: 'another-table' };
+  page.openCourseCard('card');
+  assert.equal(page.activeSheetVisible, false);
+});
+
+test('cancelling an unstarted pan never locks out a light tap, regardless of native callback order', () => {
+  for (const cancelFirst of [true, false]) {
+    for (const material of [true, false]) {
+      const { page, course } = harness();
+      page.activeSheetVisible = false;
+      if (cancelFirst) page.cancelWeekPan();
+      if (material) page.openCourseCard('card');
+      else page.openCourseAt(30, 50);
+      if (!cancelFirst) page.cancelWeekPan();
+      assert.equal(page.timetableAnimating, false);
+      assert.equal(page.timetableAnimationTimer, -1, 'a tap must not schedule a 240 ms animation lock');
+      assert.equal(page.activeSheetVisible, true);
+      assert.equal(page.selectedCourse, course);
+    }
+  }
 });
 
 test('skip UI exists only in timetable class details and uses the red material host', () => {

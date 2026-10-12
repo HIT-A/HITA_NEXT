@@ -10,6 +10,7 @@ import { image } from '@kit.ImageKit';
 struct TimetableMaterialCard {
   @Prop card: TimetableCardSurface = new TimetableCardSurface();
   painter: TimetableCardPainter = new TimetableCardPainter();
+  onCardClick: (key: string) => void = () => {};
   private textCanvas: CanvasRenderingContext2D =
     new CanvasRenderingContext2D(new RenderingContextSettings(true));
   private placeCanvas: CanvasRenderingContext2D =
@@ -39,6 +40,8 @@ struct TimetableMaterialCard {
     .borderRadius(this.card.radius)
     .backgroundColor(this.card.color)
     .attributeModifier(new CompatibleMaterialModifier(this.card.color, true, true, this.card.tint()))
+    // Register the click on the material itself so native press light/deformation can track the finger.
+    .onClick(() => this.onCardClick(this.card.key))
     .onAppear(() => {
       if (this.placeReady) {
         this.painter.attach(this.card, this.placeCanvas);
@@ -55,6 +58,7 @@ export struct TimetableCardMaterials {
   @State hiddenCardKeys: string[] = [];
   painter: TimetableCardPainter = new TimetableCardPainter();
   deleteEffects: DeleteEffectController = new DeleteEffectController();
+  onCardClick: (key: string) => void = () => {};
 
   private onCardsChanged(): void {
     this.hiddenCardKeys = this.hiddenCardKeys.filter((key: string): boolean =>
@@ -67,7 +71,7 @@ export struct TimetableCardMaterials {
       ImmersiveHeader({ barHeight: this.contentHeight }) {
         Stack({ alignContent: Alignment.TopStart }) {
           ForEach(this.cards, (card: TimetableCardSurface) => {
-            TimetableMaterialCard({ card: card, painter: this.painter })
+            TimetableMaterialCard({ card: card, painter: this.painter, onCardClick: this.onCardClick })
               .position({ x: card.left, y: card.top })
               .opacity(this.hiddenCardKeys.indexOf(card.key) >= 0 ? 0 : 1)
           }, (card: TimetableCardSurface) => card.renderKey());
@@ -102,7 +106,8 @@ export struct TimetableCardMaterials {
       .width('100%')
       .height(this.contentHeight)
       .clip(false)
-      .hitTestBehavior(HitTestMode.None);
+      // None excludes only this Stack: snapshot containers would still cover the live material.
+      .hitTestBehavior(HitTestMode.BLOCK_DESCENDANTS);
     }
     .width('100%')
     .height(this.contentHeight)

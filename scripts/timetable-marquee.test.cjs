@@ -466,6 +466,34 @@ test('both title and scrolling classroom are inside the material card so native 
   assert.match(home, /timetableCardPainter\.drawPlaces\(this\.timetablePlaceLabels, this\.timetableMarqueeElapsedMs\)/);
 });
 
+test('material taps select by card identity and the grid retains its coordinate hit target', () => {
+  const source = fs.readFileSync(path.join(root, 'feature/timetable/views/TimetableCardMaterials.ets'), 'utf8');
+  const card = source.slice(source.indexOf('struct TimetableMaterialCard'), source.indexOf('export struct'));
+  assert.match(card, /\.attributeModifier\(new CompatibleMaterialModifier[\s\S]*?\.onClick\(/);
+  const handler = card.match(/\.onClick\(\(\) => (this\.onCardClick\([^\n]+)\)/)[1];
+  const clicks = [];
+  new Function(handler).call({
+    card: { key: 'scrolled-course', left: 51, top: 240 }, onCardClick: key => clicks.push(key)
+  });
+  assert.deepEqual(clicks, ['scrolled-course']);
+  const home = fs.readFileSync(path.join(root, 'pages/Home.ets'), 'utf8');
+  const timetable = home.slice(home.indexOf('  tabTimetable()'), home.indexOf('  timetableToolbar()'));
+  assert.match(timetable, /onCardClick: \(key: string\) => this\.openCourseCard\(key\)/);
+  assert.match(timetable, /\.onClick\(\(event: ClickEvent\) => \{\s*this\.openCourseAt\(event\.x, event\.y\)/);
+});
+
+test('the particle overlay excludes its entire subtree so hidden snapshot containers cannot intercept material presses', () => {
+  const source = fs.readFileSync(path.join(root, 'feature/timetable/views/TimetableCardMaterials.ets'), 'utf8');
+  const overlay = source.slice(source.indexOf('      Stack(', source.indexOf('      ImmersiveHeader')),
+    source.indexOf("    .accessibilityLevel('no-hide-descendants')"));
+  assert.match(overlay, /DeleteParticleCard\(/);
+  assert.match(overlay, /captureSource:.*this\.painter\.capture/);
+  assert.match(overlay, /\.height\(this\.contentHeight\)\s*\.clip\(false\)\s*\/\/[^\n]*\s*\.hitTestBehavior\(HitTestMode\.BLOCK_DESCENDANTS\)/);
+  const materialCard = source.slice(source.indexOf('struct TimetableMaterialCard'), source.indexOf('export struct'));
+  assert.doesNotMatch(materialCard, /BLOCK_DESCENDANTS/);
+  assert.match(materialCard, /\.onClick\(\(\) => this\.onCardClick\(this\.card\.key\)\)/);
+});
+
 test('merged lesson cards retain occurrence IDs, while same-name exams remain separate', () => {
   const { timetable, events } = fixture();
   const first = events[0];
