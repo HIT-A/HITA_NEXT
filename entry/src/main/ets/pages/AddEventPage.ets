@@ -5,11 +5,20 @@
  * Weekly occurrences are committed atomically; editing still changes one occurrence only.
  */
 import { common } from '@kit.AbilityKit';
+import { LengthMetrics } from '@kit.ArkUI';
 import { CourseDateSelection } from '../feature/timetable/CourseDateSelection';
 import { CourseWeekPicker } from '../feature/timetable/views/CourseWeekPicker';
+import { CourseModeSegment } from '../feature/timetable/views/CourseModeSegment';
+import { CourseControlHost } from '../feature/timetable/views/CourseControlHost';
+import { CourseTimePickerDialog } from '../feature/timetable/views/CourseTimePickerDialog';
+import { CourseTextPickerDialog } from '../feature/timetable/views/CourseTextPickerDialog';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
 import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
+import { CompatibleSheetMaterial } from '../common/theme/CompatibleSheetMaterial';
+import { CompatiblePickerMaterial } from '../common/theme/CompatiblePickerMaterial';
+import { CompatibleLightModifier } from '../common/theme/CompatibleLightModifier';
+import { HeaderFade } from '../common/theme/HeaderFade';
 import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
@@ -57,6 +66,7 @@ export struct EventEditorForm {
   @State selectedWeekdays: number[] = [];
   @State weekChoices: number[] = [];
   @State choosingWeeks: boolean = false;
+  @State activeCourseControl: boolean = false;
   @State courseTimetable: EasTimetable | undefined = undefined;
   private initialWeek: number = 0;
   private todayBase: number = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
@@ -73,6 +83,8 @@ export struct EventEditorForm {
   private timetableId: string = '';
   private subjectId: string = '';
   private editorActive: boolean = false;
+  private timePicker: CustomDialogController | undefined = undefined;
+  private coursePicker: CustomDialogController | undefined = undefined;
 
   async aboutToAppear(): Promise<void> {
     this.editorActive = true;
@@ -88,6 +100,10 @@ export struct EventEditorForm {
 
   aboutToDisappear(): void {
     this.editorActive = false;
+    this.timePicker?.close();
+    this.timePicker = undefined;
+    this.coursePicker?.close();
+    this.coursePicker = undefined;
   }
 
   private async loadEvent(): Promise<void> {
@@ -243,7 +259,7 @@ export struct EventEditorForm {
   private choosePeriod(start: boolean): void {
     const timetable = this.courseTimetable;
     if (timetable === undefined || timetable.scheduleStructure.length === 0) return;
-    this.getUIContext().showTextPickerDialog({
+    this.showCourseTextPicker({
       range: timetable.scheduleStructure.map((period, index: number): string =>
         '第 ' + (index + 1).toString() + ' 节  ' + EventEditorForm.minuteLabel(period.from.hour * 60 + period.from.minute) +
         '–' + EventEditorForm.minuteLabel(period.to.hour * 60 + period.to.minute)),
@@ -297,13 +313,15 @@ export struct EventEditorForm {
       choices.sort((a: EasEventItem, b: EasEventItem): number => a.name.localeCompare(b.name));
       if (!this.editorActive) return;
       if (choices.length === 0) { this.hint = '当前课表还没有课程，请手动填写'; return; }
-      this.getUIContext().showTextPickerDialog({
+      this.showCourseTextPicker({
         range: choices.map((event: EasEventItem): string => [event.name, event.place, event.teacher]
           .filter((value: string): boolean => value.length > 0).join(' · ')),
         selected: Math.max(0, choices.findIndex((event: EasEventItem): boolean => event.subjectId === this.selectedSubjectId)),
         canLoop: false,
         onAccept: (result: TextPickerResult) => {
-          if (typeof result.index === 'number' && choices[result.index] !== undefined) this.selectExistingCourse(choices[result.index]);
+          if (this.editorActive && typeof result.index === 'number' && choices[result.index] !== undefined) {
+            this.selectExistingCourse(choices[result.index]);
+          }
         }
       });
     } catch (_) { this.hint = '读取已有课程失败，请重试'; }
@@ -328,6 +346,24 @@ export struct EventEditorForm {
     return '';
   }
 
+  private showCourseTextPicker(options: TextPickerDialogOptionsExt): void {
+    if (this.typeIdx !== 1 || !CompatiblePickerMaterial.isEnabled()) {
+      this.getUIContext().showTextPickerDialog(options);
+      return;
+    }
+    this.coursePicker?.close();
+    this.coursePicker = new CustomDialogController({
+      builder: CourseTextPickerDialog({ options: options }),
+      alignment: DialogAlignment.Bottom,
+      autoCancel: true,
+      backgroundColor: Color.Transparent,
+      systemMaterial: CompatiblePickerMaterial.dialogMaterial(true),
+      cornerRadius: 24,
+      cancel: () => options.onCancel?.()
+    });
+    this.coursePicker.open();
+  }
+
   private canSave(): boolean {
     return !this.loading && !this.loadFailed && !this.saving && !this.saved && !this.pickingExisting &&
       this.validationHint().length === 0;
@@ -346,39 +382,72 @@ export struct EventEditorForm {
       EventEditorForm.pad2(date.getMonth() + 1) + '-' + EventEditorForm.pad2(date.getDate());
   }
 
-  /** 与导入课表页一致：点击弹出系统时间选择器。 */
-  private pickStartTime(): void {
-    this.getUIContext().showTimePickerDialog({
-      selected: new Date(2000, 0, 1, this.hour, this.minute, 0, 0),
-      useMilitaryTime: true,
-      onAccept: (value: TimePickerResult) => {
-        const selectedMinutes: number = value.hour * 60 + value.minute;
-        const endMinutes: number = this.endHour * 60 + this.endMinute;
-        if (selectedMinutes >= endMinutes) {
-          this.getUIContext().getPromptAction().showToast({ message: '开始时间必须早于结束时间' });
-          return;
-        }
-        this.hour = value.hour;
-        this.minute = value.minute;
-      }
-    });
+  private acceptTime(start: boolean, hour: number, minute: number): boolean {
+    if (!this.editorActive) return false;
+    const selectedMinutes: number = hour * 60 + minute;
+    if ((start && selectedMinutes >= this.endHour * 60 + this.endMinute) ||
+      (!start && selectedMinutes <= this.hour * 60 + this.minute)) {
+      this.getUIContext().getPromptAction().showToast({
+        message: start ? '开始时间必须早于结束时间' : '结束时间必须晚于开始时间'
+      });
+      return false;
+    }
+    if (start) {
+      this.hour = hour;
+      this.minute = minute;
+    } else {
+      this.endHour = hour;
+      this.endMinute = minute;
+    }
+    this.hint = '';
+    return true;
   }
 
-  private pickEndTime(): void {
-    this.getUIContext().showTimePickerDialog({
-      selected: new Date(2000, 0, 1, this.endHour, this.endMinute, 0, 0),
-      useMilitaryTime: true,
-      onAccept: (value: TimePickerResult) => {
-        const selectedMinutes: number = value.hour * 60 + value.minute;
-        const startMinutes: number = this.hour * 60 + this.minute;
-        if (selectedMinutes <= startMinutes) {
-          this.getUIContext().getPromptAction().showToast({ message: '结束时间必须晚于开始时间' });
-          return;
-        }
-        this.endHour = value.hour;
-        this.endMinute = value.minute;
-      }
+  private pickTime(start: boolean): void {
+    if (this.typeIdx !== 1) {
+      this.getUIContext().showTimePickerDialog({
+        selected: new Date(2000, 0, 1, start ? this.hour : this.endHour, start ? this.minute : this.endMinute),
+        useMilitaryTime: true,
+        onAccept: (value: TimePickerResult) => { this.acceptTime(start, value.hour, value.minute); }
+      });
+      return;
+    }
+    this.timePicker?.close();
+    const material: SystemUiMaterial | undefined = CompatiblePickerMaterial.dialogMaterial(true);
+    // ArkUI only lowers the custom dialog builder inside a direct options literal.
+    this.timePicker = new CustomDialogController({
+      builder: CourseTimePickerDialog({
+        title: start ? '开始时间' : '结束时间',
+        initialHour: start ? this.hour : this.endHour,
+        initialMinute: start ? this.minute : this.endMinute,
+        immersive: true,
+        onAccept: (hour: number, minute: number): boolean => this.acceptTime(start, hour, minute)
+      }),
+      alignment: DialogAlignment.Bottom,
+      autoCancel: true,
+      backgroundColor: material === undefined ? $r('app.color.hita_surface') : Color.Transparent,
+      systemMaterial: material,
+      cornerRadius: 24
     });
+    this.timePicker.open();
+  }
+
+  private pickStartTime(): void { this.pickTime(true); }
+
+  private pickEndTime(): void { this.pickTime(false); }
+
+  private courseMaterialsEnabled(): boolean {
+    return this.typeIdx === 1 && CompatibleSheetMaterial.isEnabled();
+  }
+
+  private editorBackground(): ResourceColor {
+    return this.sheetMode && this.courseMaterialsEnabled() ? Color.Transparent :
+      (this.sheetMode ? $r('app.color.hita_surface_soft') : $r('app.color.hita_page_f5f6f8'));
+  }
+
+  private courseCardColor(): ResourceColor {
+    return this.courseMaterialsEnabled() ? CompatibleSheetMaterial.cardColor($r('app.color.hita_surface')) :
+      $r('app.color.hita_surface');
   }
 
   private async save(): Promise<void> {
@@ -734,13 +803,24 @@ export struct EventEditorForm {
             this.dateRow()
           }
         }
+        .clip(false)
+        .zIndex(this.activeCourseControl || this.choosingWeeks ? 3 : 1)
         if (this.typeIdx !== 1) {
           ListItem() { this.timeRow() }
         }
       }
       .width('100%')
       .layoutWeight(1)
-      .padding({ left: this.sheetMode ? 20 : 16, right: this.sheetMode ? 20 : 16, top: 8, bottom: 16 })
+      .padding({
+        left: this.sheetMode ? 20 : 16,
+        right: this.sheetMode ? 20 : 16,
+        top: this.typeIdx === 1 ? 0 : 8,
+        bottom: this.typeIdx === 1 ? 0 : 16
+      })
+      // Scroll the end spacing with the form so its first and last controls clear the fades.
+      .contentStartOffset(this.typeIdx === 1 ? HeaderFade.HEIGHT + 8 : 0)
+      .contentEndOffset(this.typeIdx === 1 ? HeaderFade.HEIGHT + 16 : 0)
+      .fadingEdge(this.typeIdx === 1, { fadingEdgeLength: LengthMetrics.vp(HeaderFade.HEIGHT) })
       .scrollBar(BarState.Off)
       .enableScrollInteraction(!this.choosingWeeks)
       .enabled(!this.loading && !this.loadFailed && !this.saving && !this.saved)
@@ -787,11 +867,12 @@ export struct EventEditorForm {
         top: 8,
         bottom: 10
       })
-      .backgroundColor(this.sheetMode ? $r('app.color.hita_surface_soft') : $r('app.color.hita_page_f5f6f8'))
+      .backgroundColor(this.editorBackground())
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.sheetMode ? $r('app.color.hita_surface_soft') : $r('app.color.hita_page_f5f6f8'))
+    .backgroundColor(this.editorBackground())
+    .attributeModifier(new CompatibleLightModifier(24, this.sheetMode && this.courseMaterialsEnabled(), true))
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
   }
 
@@ -812,22 +893,28 @@ export struct EventEditorForm {
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
       }
       if (this.editId.length === 0) {
-        Row({ space: 8 }) {
-          Button(this.pickingExisting ? '正在读取…' : '选择已有课程')
-            .layoutWeight(1).height(36).fontSize(13)
-            .backgroundColor($r('app.color.hita_surface_soft'))
-            .fontColor($r('app.color.hita_primary_3390ec'))
-            .enabled(!this.pickingExisting)
-            .onClick(() => { void this.chooseExistingCourse(); })
-          if (this.selectedSubjectId.length > 0) {
-            Button('手动填写').height(36).fontSize(13)
+        ImmersiveHeader({ barHeight: 36, materialEnabled: this.courseMaterialsEnabled() }) {
+          Row({ space: 8 }) {
+            Button(this.pickingExisting ? '正在读取…' : '选择已有课程')
+              .layoutWeight(1).height(36).fontSize(13)
               .backgroundColor($r('app.color.hita_surface_soft'))
-              .fontColor($r('app.color.hita_text_secondary_72809a'))
-              .onClick(() => {
-                this.selectedSubjectId = ''; this.name = ''; this.place = ''; this.teacher = ''; this.hint = '';
-              })
-          }
-        }.width('100%')
+              .fontColor($r('app.color.hita_primary_3390ec'))
+              .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_surface_soft'), false,
+                this.courseMaterialsEnabled()))
+              .enabled(!this.pickingExisting)
+              .onClick(() => { void this.chooseExistingCourse(); })
+            if (this.selectedSubjectId.length > 0) {
+              Button('手动填写').height(36).fontSize(13)
+                .backgroundColor($r('app.color.hita_surface_soft'))
+                .fontColor($r('app.color.hita_text_secondary_72809a'))
+                .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_surface_soft'), false,
+                  this.courseMaterialsEnabled()))
+                .onClick(() => {
+                  this.selectedSubjectId = ''; this.name = ''; this.place = ''; this.teacher = ''; this.hint = '';
+                })
+            }
+          }.width('100%')
+        }
       }
       TextInput({ placeholder: '课程名称，如高等数学', text: this.name })
         .enabled(this.selectedSubjectId.length === 0)
@@ -854,7 +941,7 @@ export struct EventEditorForm {
     }
     .width('100%').padding(16).borderRadius(20)
     .alignItems(HorizontalAlign.Start)
-    .backgroundColor($r('app.color.hita_surface'))
+    .backgroundColor(this.courseCardColor())
   }
 
   @Builder
@@ -890,18 +977,11 @@ export struct EventEditorForm {
     Column({ space: 12 }) {
       Text('上课日期').fontSize(15).fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.hita_text_202b45'))
-      Row({ space: 8 }) {
-        ForEach(['单日', '每周'], (label: string, index: number) => {
-          Button(label)
-            .layoutWeight(1)
-            .height(36)
-            .backgroundColor(this.dateMode === index ? $r('app.color.hita_primary_fill') :
-              $r('app.color.hita_surface_soft'))
-            .fontColor(this.dateMode === index ? '#FFFFFF' : $r('app.color.hita_text_202b45'))
-            .accessibilitySelected(this.dateMode === index)
-            .onClick(() => { this.dateMode = index; this.hint = ''; })
-        }, (label: string) => label)
-      }
+      CourseModeSegment({
+        labels: ['单日', '每周'], selectedIndex: this.dateMode,
+        onSelect: (index: number) => { this.dateMode = index; this.hint = ''; },
+        onControlPressingChanged: (pressing: boolean) => { this.activeCourseControl = pressing; }
+      })
       if (this.dateMode === 0) {
         this.dateRow()
       } else if (this.weekChoices.length === 0) {
@@ -912,46 +992,46 @@ export struct EventEditorForm {
           .fontColor($r('app.color.hita_text_202b45'))
         Row({ space: 4 }) {
           ForEach(['一', '二', '三', '四', '五', '六', '日'], (label: string, index: number) => {
-            Button(label)
-              .layoutWeight(1)
-              .height(38)
-              .padding(0)
-              .borderRadius(10)
-              .fontSize(14)
-              .backgroundColor(this.selectedWeekdays.includes(index + 1) ? $r('app.color.hita_primary_fill') :
-                $r('app.color.hita_surface_soft'))
-              .fontColor(this.selectedWeekdays.includes(index + 1) ? '#FFFFFF' : $r('app.color.hita_text_202b45'))
-              .accessibilityText('星期' + label)
-              .accessibilitySelected(this.selectedWeekdays.includes(index + 1))
-              .onClick(() => {
-                this.selectedWeekdays = CourseDateSelection.toggle(this.selectedWeekdays, index + 1,
-                  !this.selectedWeekdays.includes(index + 1));
-              })
+            CourseControlHost({
+              barHeight: 38, materialEnabled: this.courseMaterialsEnabled(), itemWeight: 1,
+              onPressingChanged: (pressing: boolean) => { this.activeCourseControl = pressing; }
+            }) {
+              this.weekdayButton(label, index);
+            }
           }, (label: string) => label)
-        }
+        }.width('100%').clip(false)
         Text('教学周（可多选）').fontSize(14).fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.hita_text_202b45'))
         Text(this.teachingWeekHint()).fontSize(12)
           .fontColor($r('app.color.hita_text_secondary_72809a'))
         Row({ space: 6 }) {
           ForEach(['全部', '单周', '双周', '清空'], (label: string, index: number) => {
-            Button(label)
-              .layoutWeight(1)
-              .height(32)
-              .fontSize(13)
+            CourseControlHost({
+              barHeight: 32, materialEnabled: this.courseMaterialsEnabled(), itemWeight: 1,
+              onPressingChanged: (pressing: boolean) => { this.activeCourseControl = pressing; }
+            }) {
+              this.weekPresetButton(label, index);
+            }
+          }, (label: string) => label)
+        }.width('100%').clip(false)
+        CourseControlHost({
+          barHeight: 32, materialEnabled: this.courseMaterialsEnabled(),
+          onPressingChanged: (pressing: boolean) => { this.activeCourseControl = pressing; }
+        }) {
+          Row() {
+            Button('增加 5 周')
+              .height(32).fontSize(13)
               .backgroundColor($r('app.color.hita_surface_soft'))
               .fontColor($r('app.color.hita_primary_3390ec'))
-              .onClick(() => this.selectWeekPreset(index))
-          }, (label: string) => label)
+              .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_surface_soft'), false,
+                this.courseMaterialsEnabled()))
+              .onClick(() => {
+                this.weekChoices = CourseDateSelection.numbers(this.weekChoices.length + 5);
+                this.hint = '';
+              })
+            Blank()
+          }.width('100%')
         }
-        Button('增加 5 周')
-          .height(32).fontSize(13)
-          .backgroundColor($r('app.color.hita_surface_soft'))
-          .fontColor($r('app.color.hita_primary_3390ec'))
-          .onClick(() => {
-            this.weekChoices = CourseDateSelection.numbers(this.weekChoices.length + 5);
-            this.hint = '';
-          })
         CourseWeekPicker({ weeks: this.weekChoices, chosen: $selectedWeeks,
           onChoosingChanged: (choosing: boolean) => { this.choosingWeeks = choosing; } })
         Text('已选 ' + this.selectedWeeks.length.toString() + ' 周 · ' +
@@ -968,8 +1048,47 @@ export struct EventEditorForm {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding(14)
-    .backgroundColor($r('app.color.hita_surface'))
+    .backgroundColor(this.courseCardColor())
     .borderRadius(16)
+    .clip(false)
+  }
+
+  @Builder
+  weekdayButton(label: string, index: number) {
+    Button(label)
+      .width('100%')
+      .height(38)
+      .padding(0)
+      .borderRadius(10)
+      .fontSize(14)
+      .backgroundColor(this.selectedWeekdays.includes(index + 1) ? $r('app.color.hita_primary_fill') :
+        $r('app.color.hita_surface_soft'))
+      .fontColor(this.selectedWeekdays.includes(index + 1) ?
+        (this.courseMaterialsEnabled() ? $r('app.color.hita_primary_3390ec') : '#FFFFFF') :
+        $r('app.color.hita_text_202b45'))
+      .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_surface_soft'),
+        this.selectedWeekdays.includes(index + 1), this.courseMaterialsEnabled(),
+        $r('app.color.hita_immersive_segment_selected'), false))
+      .accessibilityText('星期' + label)
+      .accessibilitySelected(this.selectedWeekdays.includes(index + 1))
+      .onClick(() => {
+        this.selectedWeekdays = CourseDateSelection.toggle(this.selectedWeekdays, index + 1,
+          !this.selectedWeekdays.includes(index + 1));
+      })
+  }
+
+  @Builder
+  weekPresetButton(label: string, index: number) {
+    Button(label)
+      .width('100%')
+      .height(32)
+      .fontSize(13)
+      .padding({ left: 4, right: 4 })
+      .backgroundColor($r('app.color.hita_surface_soft'))
+      .fontColor($r('app.color.hita_primary_3390ec'))
+      .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_surface_soft'), false,
+        this.courseMaterialsEnabled()))
+      .onClick(() => this.selectWeekPreset(index))
   }
 
   @Builder
@@ -995,7 +1114,7 @@ export struct EventEditorForm {
     .width('100%')
     .alignItems(VerticalAlign.Center)
     .padding(14)
-    .backgroundColor($r('app.color.hita_surface'))
+    .backgroundColor(this.courseCardColor())
     .borderRadius(16)
     .onClick(() => {
       this.chooseDate();
@@ -1010,15 +1129,11 @@ export struct EventEditorForm {
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.hita_text_202b45'))
       if (this.typeIdx === 1 && this.editId.length === 0) {
-        Row({ space: 8 }) {
-          ForEach(['具体时间', '按节次'], (label: string, index: number) => {
-            Button(label).layoutWeight(1).height(36).fontSize(14)
-              .backgroundColor(this.timeMode === index ? $r('app.color.hita_primary_fill') : $r('app.color.hita_surface_soft'))
-              .fontColor(this.timeMode === index ? '#FFFFFF' : $r('app.color.hita_text_202b45'))
-              .accessibilitySelected(this.timeMode === index)
-              .onClick(() => { this.timeMode = index; this.hint = ''; })
-          }, (label: string) => label)
-        }.width('100%').margin({ top: 10 })
+        CourseModeSegment({
+          labels: ['具体时间', '按节次'], selectedIndex: this.timeMode,
+          onSelect: (index: number) => { this.timeMode = index; this.hint = ''; }
+        })
+          .width('100%').margin({ top: 10 })
       }
       Row({ space: 10 }) {
         Row() {
@@ -1082,7 +1197,7 @@ export struct EventEditorForm {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding(14)
-    .backgroundColor($r('app.color.hita_surface'))
+    .backgroundColor(this.courseCardColor())
     .borderRadius(16)
   }
 

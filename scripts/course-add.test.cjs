@@ -5,6 +5,7 @@ const test = require('node:test');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '../entry/src/main/ets');
 global.$r = x => x;
+global.DialogAlignment = { Bottom: 'bottom' };
 
 function load(relative, overrides = {}, cache = new Map()) {
   const file = path.resolve(root, relative);
@@ -23,6 +24,15 @@ function load(relative, overrides = {}, cache = new Map()) {
   } }).outputText;
   new Function('require', 'module', 'exports', compiled)(name => {
     if (name.endsWith('/RdbHelper') && overrides.db) return { RdbHelper: { getInstance: () => overrides.db } };
+    if (name.endsWith('/CourseTimePickerDialog')) return { CourseTimePickerDialog: options => options };
+    if (name.endsWith('/CourseTextPickerDialog')) return { CourseTextPickerDialog: options => options };
+    if (name.endsWith('/CompatibleSheetMaterial')) return { CompatibleSheetMaterial: {
+      isEnabled: () => false, cardColor: fallback => fallback
+    } };
+    if (name.endsWith('/CompatiblePickerMaterial')) return { CompatiblePickerMaterial: {
+      isEnabled: () => overrides.pickerEnabled === true, textOptions: options => options,
+      dialogMaterial: () => overrides.pickerEnabled ? 'controlled-material' : undefined
+    } };
     if (name === '@kit.PerformanceAnalysisKit') return { hilog: { error() {} } };
     if (name === '@kit.ArkData') return { relationalStore: { RdbPredicates: class {
       constructor(table) { this.table = table; this.filters = []; }
@@ -129,7 +139,7 @@ test('adding occurrences to an existing course never overwrites its color or met
   assert.deepEqual(rows.subject, [{ id: subject.id, color: 123, credit: 5 }]);
 });
 
-function formSetup() {
+function formSetup(overrides = {}) {
   const tt = timetable();
   const commits = [], saved = [];
   const subject = Object.assign(new EasTermSubject(), { id: 'existing', name: '数学', timetableId: tt.id, color: 123 });
@@ -138,7 +148,7 @@ function formSetup() {
     getSubjectsOfTimetable: async () => [subject],
     saveCourseOccurrences: async (...args) => commits.push(args)
   };
-  const { EventEditorForm } = load('pages/AddEventPage.ets', { db });
+  const { EventEditorForm } = load('pages/AddEventPage.ets', { ...overrides, db });
   const form = new EventEditorForm();
   form.getUIContext = () => ({ getHostContext: () => ({}), getPromptAction: () => ({ showToast() {} }) });
   Object.assign(form, { courseTimetable: tt, weekChoices: dates.numbers(20), typeIdx: 1, timetableId: tt.id, name: '数学', hour: 8, minute: 15, endHour: 9,
@@ -333,4 +343,108 @@ test('legacy range migration changes only the matching timetable end', async () 
   db.upd = async (values, pred) => updates.push([values, pred.filters]);
   await db.repairLegacyImportedWeeks();
   assert.deepEqual(updates, [[{ endTime: tt.startTime + 17 * 7 * 86400000 - 1 }, [['id', tt.id], ['endTime', oldEnd]]]]);
+});
+
+test('course clock dialog omits the native calendar title, commits only valid times and closes on dismissal', () => {
+  const original = global.CustomDialogController;
+  const originalColor = global.Color;
+  global.Color = { Transparent: 'transparent' };
+  const dialogs = [];
+  global.CustomDialogController = class {
+    constructor(options) { this.options = options; this.opened = false; this.closed = false; dialogs.push(this); }
+    open() { this.opened = true; }
+    close() { this.closed = true; }
+  };
+  try {
+    const { form } = formSetup();
+    form.pickStartTime();
+    assert.equal(dialogs.length, 1);
+    const first = dialogs[0];
+    assert.equal(first.opened, true);
+    assert.equal(first.options.builder.title, '开始时间');
+    assert.equal(first.options.builder.initialHour, 8);
+    assert.equal(first.options.builder.initialMinute, 15);
+    assert.equal(first.options.builder.onAccept(9, 10), false, 'a reversed interval stays in the picker');
+    assert.equal(form.hour, 8);
+    assert.equal(first.options.builder.onAccept(7, 45), true);
+    assert.equal(form.hour, 7);
+    assert.equal(form.minute, 45);
+    form.pickEndTime();
+    assert.equal(first.closed, true, 'opening another picker closes the previous one');
+    const second = dialogs[1];
+    assert.equal(second.options.builder.title, '结束时间');
+    assert.equal(second.options.builder.onAccept(7, 30), false);
+    assert.equal(second.options.builder.onAccept(10, 0), true);
+    assert.equal(form.endHour, 10);
+    form.aboutToDisappear();
+    assert.equal(second.closed, true);
+    assert.equal(second.options.builder.onAccept(11, 0), false, 'late accepts cannot update a dismissed editor');
+    assert.equal(form.endHour, 10);
+    const clock = fs.readFileSync(path.join(root, 'feature/timetable/views/CourseTimePickerDialog.ets'), 'utf8');
+    assert.match(clock, /TimePicker\(\{ selected:/);
+    assert.doesNotMatch(clock, /DatePicker\(|showTimePickerDialog|dateText|星期六|2000年/);
+  } finally {
+    if (original === undefined) delete global.CustomDialogController;
+    else global.CustomDialogController = original;
+    if (originalColor === undefined) delete global.Color;
+    else global.Color = originalColor;
+  }
+});
+
+test('existing-course and period pickers preserve selection and discard late course accepts', async () => {
+  const { form, db } = formSetup();
+  const picked = [];
+  form.getUIContext = () => ({ showTextPickerDialog: options => picked.push(options) });
+  db.getEventsOfTimetable = async () => [
+    Object.assign(new EasEventItem(), { type: EasEventType.CLASS, subjectId: 'existing',
+      name: '数学', place: 'T3101', teacher: 'A' })
+  ];
+  await form.chooseExistingCourse();
+  assert.equal(picked.length, 1);
+  assert.deepEqual(picked[0].range, ['数学 · T3101 · A']);
+  assert.equal(picked[0].canLoop, false);
+  picked[0].onAccept({ index: 0 });
+  assert.equal(form.selectedSubjectId, 'existing');
+  assert.equal(form.place, 'T3101');
+  form.name = 'unchanged';
+  form.aboutToDisappear();
+  picked[0].onAccept({ index: 0 });
+  assert.equal(form.name, 'unchanged');
+});
+
+test('the API 26 wheel retains callbacks and closes its previous dialog and dismissed editor', () => {
+  const original = global.CustomDialogController, originalColor = global.Color;
+  global.Color = { Transparent: 'transparent' };
+  const dialogs = [];
+  global.CustomDialogController = class {
+    constructor(options) { this.options = options; dialogs.push(this); }
+    open() { this.opened = true; }
+    close() { this.closed = true; }
+  };
+  try {
+    const { form } = formSetup({ pickerEnabled: true });
+    form.getUIContext = () => ({ showTextPickerDialog() { assert.fail('API 26 uses the controlled wheel'); } });
+    const accepted = [], cancelled = [];
+    const options = { range: ['A', 'B'], selected: 1, canLoop: false,
+      onAccept: result => accepted.push(result), onCancel: () => cancelled.push('cancel') };
+    form.showCourseTextPicker(options);
+    assert.equal(dialogs[0].options.builder.options, options);
+    assert.equal(dialogs[0].options.backgroundColor, 'transparent');
+    assert.equal(dialogs[0].options.systemMaterial, 'controlled-material');
+    assert.equal(dialogs[0].opened, true);
+    dialogs[0].options.builder.options.onAccept({ index: 1, value: 'B' });
+    assert.deepEqual(accepted, [{ index: 1, value: 'B' }]);
+    dialogs[0].options.cancel();
+    assert.deepEqual(cancelled, ['cancel']);
+    form.showCourseTextPicker(options);
+    assert.equal(dialogs[0].closed, true);
+    form.aboutToDisappear();
+    assert.equal(dialogs[1].closed, true);
+    assert.equal(form.coursePicker, undefined);
+  } finally {
+    if (original === undefined) delete global.CustomDialogController;
+    else global.CustomDialogController = original;
+    if (originalColor === undefined) delete global.Color;
+    else global.Color = originalColor;
+  }
 });

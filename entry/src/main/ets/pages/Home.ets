@@ -19,9 +19,12 @@ import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/the
 import { CompatibleDockModifier } from '../common/theme/CompatibleDockModifier';
 import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
 import { CompatibleSheetMaterial } from '../common/theme/CompatibleSheetMaterial';
+import { CompatibleLightModifier } from '../common/theme/CompatibleLightModifier';
 import { CirclePaintModifier } from '../common/theme/CirclePaintModifier';
 import { FrostedDock } from '../common/components/FrostedDock';
-import { DockNavigationGuard } from '../common/util/DockNavigationGuard';
+import { DockLightOverlay } from '../common/components/DockLightOverlay';
+import { DockLightController } from '../common/util/DockLightEffect';
+import { DOCK_HOLD_DELAY_MS, DockNavigationGuard } from '../common/util/DockNavigationGuard';
 import { DeleteEffectController } from '../common/util/DeleteEffectController';
 import { CourseColorEditor } from '../feature/timetable/views/CourseColorEditor';
 import { TimetableCardMaterials } from '../feature/timetable/views/TimetableCardMaterials';
@@ -193,13 +196,18 @@ struct Home {
   private timetableDateBottom: number = TIMETABLE_CHROME_FALLBACK;
   private weekGestureActive: boolean = false;
   private dockNavigation: DockNavigationGuard = new DockNavigationGuard();
+  @State private dockHolding: boolean = false;
+  private dockHoldTimer: number = -1;
+  private dockPressSource: number = TAB_TODAY;
+  private dockLightPosition: number = 106;
+  private dockLight: DockLightController = new DockLightController();
   private dockBarModifier: CommonModifier = new CommonModifier()
     .onTouchIntercept((event: TouchEvent) => {
       this.dockNavigation.begin(event, true);
       return HitTestMode.Default;
     })
     .onTouch((event: TouchEvent) => {
-      this.dockNavigation.observe(event);
+      this.observeDockTouch(event, true);
     })
     .onGestureRecognizerJudgeBegin((event: BaseGestureEvent, current: GestureRecognizer) => {
       return this.judgePagePan(current, true);
@@ -243,6 +251,7 @@ struct Home {
 
   onPageHide(): void {
     this.pageVisible = false;
+    this.resetDockInteraction();
     this.closeActiveSheet();
     this.courseDeleteEffects.pause();
     this.finishCourseSheetDismissal();
@@ -275,6 +284,7 @@ struct Home {
 
   aboutToDisappear(): void {
     this.pageVisible = false;
+    this.resetDockInteraction();
     this.closeActiveSheet();
     this.courseDeleteEffects.pause();
     this.finishCourseSheetDismissal();
@@ -1344,7 +1354,18 @@ struct Home {
 
   build() {
     if (deviceInfo.apiAvailable('26.0.0')) {
-      this.homeTabs();
+      Stack({ alignContent: Alignment.Bottom }) {
+        this.homeTabs();
+        if (!deviceInfo.apiAvailable('27.0.0')) {
+          DockLightOverlay({ controller: this.dockLight })
+            .hitTestBehavior(HitTestMode.None)
+            .onAreaChange((_old: Area, area: Area) => this.updateDockBounds(area))
+            .margin({ bottom: 12 + this.navBarInset })
+        }
+      }
+      .width('100%')
+      .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.KEYBOARD], [SafeAreaEdge.BOTTOM])
     } else {
       // A Tabs overlay captures the page's input on API 23. Keep the dock a
       // bounded sibling so content gestures and clicks reach the original tabs.
@@ -1384,15 +1405,100 @@ struct Home {
   }
 
   private requestDockClick(index: number): void {
+    const source: number = this.dockNavigation.hasDockPointer() ? this.dockPressSource : this.selectedNav;
     const sequence: number = this.dockNavigation.requestClick();
     // Native click and raw Up callback ordering varies by renderer. Wait until
-    // this input dispatch completes before accepting the tap. No drag callback
-    // is allowed to navigate, either while held or after release.
+    // this dispatch completes; a held gesture always uses its release target.
     setTimeout(() => {
       this.dockNavigation.commitClick(sequence, index, (target: number) => {
+        if (this.dockLightEnabled() && !this.dockNavigation.isHolding()) {
+          this.dockLight.transfer(source, target);
+        }
         this.tabsController.changeIndex(target);
       });
     }, 0);
+  }
+
+  private clearDockHoldTimer(): void {
+    if (this.dockHoldTimer >= 0) {
+      clearTimeout(this.dockHoldTimer);
+      this.dockHoldTimer = -1;
+    }
+  }
+
+  private dockLightEnabled(): boolean {
+    return deviceInfo.apiAvailable('26.0.0') && !deviceInfo.apiAvailable('27.0.0');
+  }
+
+  private updateDockHoldLight(holding: boolean): void {
+    const began: boolean = holding && !this.dockHolding;
+    this.dockHolding = this.dockLightEnabled() && holding;
+    if (began && this.dockHolding) this.dockLight.move(this.dockLightPosition);
+  }
+
+  private resetDockInteraction(): void {
+    this.clearDockHoldTimer();
+    this.updateDockHoldLight(false);
+    this.dockNavigation.reset();
+    if (this.dockLightEnabled()) {
+      this.dockLight.stop();
+    }
+  }
+
+  private updateDockBounds(area: Area, padding: number = 0): void {
+    this.dockNavigation.setBounds(Number(area.globalPosition.x), Number(area.globalPosition.y),
+      Number(area.width), Number(area.height), padding);
+  }
+
+  private observeDockTouch(event: TouchEvent, fromDock: boolean = false): void {
+    if (fromDock && event.type === TouchType.Down && event.touches.length === 1) {
+      this.dockNavigation.begin(event, true);
+    }
+    if (!this.dockNavigation.observe(event) || !this.dockNavigation.isDock()) {
+      return;
+    }
+    if (this.dockNavigation.isRejected()) {
+      this.clearDockHoldTimer();
+      this.updateDockHoldLight(false);
+      if (this.dockLightEnabled()) this.dockLight.release(true);
+      return;
+    }
+    if (event.type === TouchType.Down && event.touches.length === 1) {
+      this.clearDockHoldTimer();
+      this.dockPressSource = this.selectedNav;
+      this.dockLightPosition = this.dockNavigation.lightPosition(event) ??
+        (this.dockPressSource + 0.5) * 212 / 3;
+      if (this.dockLightEnabled()) {
+        this.dockLight.press(this.dockPressSource);
+      }
+      this.updateDockHoldLight(false);
+      this.dockHoldTimer = setTimeout(() => {
+        this.dockHoldTimer = -1;
+        const holding: boolean = this.dockNavigation.activateHold();
+        this.updateDockHoldLight(holding);
+      }, DOCK_HOLD_DELAY_MS);
+    } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+      this.clearDockHoldTimer();
+      this.updateDockHoldLight(false);
+      if (this.dockLightEnabled()) {
+        if (this.dockNavigation.isHolding()) {
+          const x: number | undefined = this.dockNavigation.lightPosition(event);
+          if (x !== undefined) this.dockLight.move(x);
+        }
+        this.dockLight.release(event.type === TouchType.Cancel);
+      }
+      const target: number = this.dockNavigation.releaseTarget();
+      if (target >= 0) {
+        this.requestDockClick(target);
+      }
+    } else {
+      const x: number | undefined = this.dockNavigation.lightPosition(event);
+      if (x !== undefined) this.dockLightPosition = x;
+      this.updateDockHoldLight(this.dockNavigation.isHolding());
+      if (this.dockHolding) {
+        this.dockLight.move(this.dockLightPosition);
+      }
+    }
   }
 
   @Builder
@@ -1449,7 +1555,7 @@ struct Home {
       return HitTestMode.Default;
     })
     .onTouch((event: TouchEvent) => {
-      this.dockNavigation.observe(event);
+      this.observeDockTouch(event);
     })
     .onGestureRecognizerJudgeBegin((event: BaseGestureEvent, current: GestureRecognizer) => {
       return this.judgePagePan(current);
@@ -1516,9 +1622,10 @@ struct Home {
         bottomInset: this.navBarInset,
         darkMode: this.darkMode,
         hideMask: this.selectedNav === TAB_TIMETABLE && this.hasTimetableBackground(),
+        onDockAreaChanged: (area: Area) => this.updateDockBounds(area, 4),
         onDockTouch: (event: TouchEvent) => {
           this.dockNavigation.begin(event, true);
-          this.dockNavigation.observe(event);
+          this.observeDockTouch(event, true);
         },
         onSelect: (index: number) => {
           this.requestDockClick(index);
@@ -1546,7 +1653,8 @@ struct Home {
         }
       })
         .width('100%')
-        .height('100%');
+        .height('100%')
+        .attributeModifier(new CompatibleLightModifier(24, CompatibleSheetMaterial.isEnabled(), true));
     } else if (this.timetablePaletteOpen) {
       Column() {
         CourseColorEditor({
@@ -1566,7 +1674,8 @@ struct Home {
           },
           onCancel: () => { this.closeActiveSheet(); }
         })
-      }.width('100%').padding({ left: 20, right: 20, top: 4, bottom: 20 });
+      }.width('100%').padding({ left: 20, right: 20, top: 4, bottom: 20 })
+        .attributeModifier(new CompatibleLightModifier(24, CompatibleSheetMaterial.isEnabled(), true));
     } else if (this.courseSheetOpen && this.selectedCourse !== undefined) {
       this.courseDetailSheet(this.selectedCourse as EasEventItem);
     } else if (this.calendarExportSheetOpen && this.calendarExportTimetable !== undefined) {
@@ -1632,7 +1741,8 @@ struct Home {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .padding({ left: 20, right: 20, top: 4, bottom: 20 });
+    .padding({ left: 20, right: 20, top: 4, bottom: 20 })
+    .attributeModifier(new CompatibleLightModifier(24, CompatibleSheetMaterial.isEnabled(), true));
   }
 
   @Builder
@@ -2732,7 +2842,8 @@ struct Home {
       }
     }
     .width('100%')
-    .padding({ left: 20, right: 20, top: 4, bottom: 20 });
+    .padding({ left: 20, right: 20, top: 4, bottom: 20 })
+    .attributeModifier(new CompatibleLightModifier(24, CompatibleSheetMaterial.isEnabled(), true));
   }
 
   @Builder
@@ -2971,7 +3082,8 @@ struct Home {
       }
     }
     .width('100%')
-    .padding({ left: 20, right: 20, top: 4, bottom: 22 });
+    .padding({ left: 20, right: 20, top: 4, bottom: 22 })
+    .attributeModifier(new CompatibleLightModifier(24, CompatibleSheetMaterial.isEnabled(), true));
   }
 
   @Builder

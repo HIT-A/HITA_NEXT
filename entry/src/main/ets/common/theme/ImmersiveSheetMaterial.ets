@@ -17,7 +17,7 @@ export class SheetMaterial {
         style: uiMaterial.ImmersiveStyle.THICK,
         colorInvert: false,
         interactive: true,
-        lightEffect: { color: Color.White }
+        lightEffect: null
       });
       // Callers pass fresh sheet options; retain their sizing and lifecycle callbacks.
       options.systemMaterial = material;

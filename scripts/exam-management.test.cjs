@@ -38,6 +38,14 @@ function load(file, mocks = {}, cache = new Map()) {
     if (name.endsWith('/RdbHelper') && mocks.db) {
       return { RdbHelper: { getInstance: () => mocks.db } };
     }
+    if (name.endsWith('/CourseTimePickerDialog')) return { CourseTimePickerDialog: options => options };
+    if (name.endsWith('/CourseTextPickerDialog')) return { CourseTextPickerDialog: options => options };
+    if (name.endsWith('/CompatibleSheetMaterial')) return { CompatibleSheetMaterial: {
+      isEnabled: () => false, cardColor: fallback => fallback
+    } };
+    if (name.endsWith('/CompatiblePickerMaterial')) return { CompatiblePickerMaterial: {
+      isEnabled: () => false, textOptions: options => options, dialogMaterial: () => undefined
+    } };
     if (name.endsWith('/TimetableSelectionStore')) {
       return { TimetableSelectionStore: { getInstance: () => ({
         init: async () => {}, load: async () => 'current'

@@ -7,6 +7,7 @@ export struct FrostedDock {
   @Prop hideMask: boolean = false;
   onSelect: (index: number) => void = () => {};
   onDockTouch: (event: TouchEvent) => void = () => {};
+  onDockAreaChanged: (area: Area) => void = () => {};
   private areaWidth: number = 0;
   private areaHeight: number = 0;
 
@@ -72,6 +73,7 @@ export struct FrostedDock {
       })
       .border({ width: 0.5, color: this.darkMode ? '#33FFFFFF' : '#88FFFFFF' })
       .margin({ bottom: 12 + this.bottomInset })
+      .onAreaChange((_old: Area, area: Area) => this.onDockAreaChanged(area))
       .onTouch((event: TouchEvent) => this.onDockTouch(event))
     }
     .width('100%')

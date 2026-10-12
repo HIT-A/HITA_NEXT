@@ -9,13 +9,14 @@
  */
 import { uiMaterial } from '@kit.ArkUI';
 import { Available } from '@kit.BasicServicesKit';
+import { dockWhiteLightColor } from '../util/DockLightEffect';
 
 const DOCK_BAR_WIDTH: number = 212;
 
 @Available({ minApiVersion: 'HarmonyOS 26.0.0' })
 export class DockBarMaterial {
   static floatingStyle(bottomMargin: number, hideMask: boolean = false,
-    darkMode: boolean = false): FloatingTabBarStyle {
+    darkMode: boolean = false, lightAlpha: number = 0): FloatingTabBarStyle {
     const style: FloatingTabBarStyle = {
       barWidth: {
         smallBarWidth: DOCK_BAR_WIDTH,
@@ -33,9 +34,9 @@ export class DockBarMaterial {
           applyShadow: true,
           // 按背景亮度反色，避免深色课表上图标发灰；具体色值走系统文本色，避免纯黑超对比度上限。
           colorInvert: true,
-          // 原生按压形变与触点光感反馈由同一个 TabBar 材质处理。
+          // Keep the light white in both themes; opacity controls its strength.
           interactive: true,
-          lightEffect: { color: Color.White }
+          lightEffect: lightAlpha <= 0 ? null : { color: dockWhiteLightColor(lightAlpha) }
         });
       }
     } catch (e) {

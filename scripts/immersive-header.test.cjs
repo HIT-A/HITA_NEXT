@@ -85,7 +85,14 @@ function nativeMaterial(overrides = {}) {
   const mod = { exports: {} };
   new Function('require', 'module', 'exports', 'Color', '$r',
     compile(read('common/theme/ImmersiveHeaderMaterial.ets')))(
-    name => name === '@kit.BasicServicesKit' ? { Available: () => value => value } : { uiMaterial },
+    name => {
+      if (name === '@kit.BasicServicesKit') return { Available: () => value => value,
+        deviceInfo: { apiAvailable: version => (overrides.api ?? 26) >= Number(version.split('.')[0]) } };
+      if (name.includes('CompatibleLightModifier')) return {
+        CompatibleLightModifier: class { applyNormalAttribute() {} }
+      };
+      return { uiMaterial };
+    },
     mod, mod.exports, { White: 'white', Transparent: 'transparent' }, name => name);
   return mod.exports.HeaderMaterial;
 }
@@ -100,7 +107,7 @@ test('native controls enable light feedback, elastic interaction and adaptive th
     assert.deepEqual(calls, [
       ['background', 'transparent'],
       ['material', { style, materialColor: 'transparent', colorInvert: true,
-        applyShadow: false, interactive: true, lightEffect: { color: 'white' } }]
+        applyShadow: false, interactive: true, lightEffect: null }]
     ]);
   }
 });
@@ -129,7 +136,7 @@ test('timetable materials keep each course hue without enabling background color
     assert.equal(material.materialColor, tint);
     assert.equal(material.colorInvert, false);
     assert.equal(material.interactive, true);
-    assert.deepEqual(material.lightEffect, { color: 'white' });
+    assert.equal(material.lightEffect, null);
   }
   let fill = 0xFF8346A0;
   nativeMaterial({ isImmersiveMaterialSupported: () => false }).apply({
@@ -187,10 +194,16 @@ test('native segmented controls reuse the shadow-free material and safely omit u
   assert.equal(material.style, 'ultra-thin');
   assert.equal(material.applyShadow, false);
   assert.equal(material.interactive, true);
-  assert.deepEqual(material.lightEffect, { color: 'white' });
+  assert.equal(material.lightEffect, null);
   assert.equal(material.colorInvert, true);
   assert.equal(nativeMaterial({ isImmersiveMaterialSupported: () => false }).create(), undefined);
   assert.equal(nativeMaterial({ isImmersiveMaterialSupported() { throw Error('unavailable'); } }).create(), undefined);
+});
+
+test('later APIs retain the original native white light instead of the API 26 animation layer', () => {
+  for (const api of [27, 28]) {
+    assert.deepEqual(nativeMaterial({ api }).create().lightEffect, { color: 'white' });
+  }
 });
 
 test('title hosts only instantiate Navigation on API 26 and retain the original builder on API 23-25', () => {
@@ -341,11 +354,12 @@ test('news uses the native tab segment for drag selection, with 4vp insets and n
         SegmentButtonV2Items: class { constructor(items) { return items; } },
         TabSegmentButtonV2: config => {
           options = config;
-          return { width: value => { width = value; } };
+          return { width(value) { width = value; return this; }, attributeModifier() {} };
         }
       };
       if (name === '@kit.BasicServicesKit') return { Available: () => value => value };
       if (name.includes('ImmersiveHeaderMaterial')) return { HeaderMaterial: { create: () => material } };
+      if (name.includes('CompatibleLightModifier')) return { CompatibleLightModifier: class {} };
       if (name.includes('NewsService')) return { NewsService: { CATEGORIES: categories } };
       throw Error('Unexpected import ' + name);
     }, mod, mod.exports, name => name, { Transparent: 'transparent' },
@@ -397,10 +411,13 @@ test('assistant provider segments keep selection callbacks and fallback fills wh
         ColorMetrics: { resourceColor: color => color },
         LengthMetrics: { vp: value => value, fp: value => value },
         SegmentButtonV2Items: class { constructor(items) { return items; } },
-        TabSegmentButtonV2: config => { options = config; return { width() {} }; }
+        TabSegmentButtonV2: config => { options = config; return {
+          width() { return this; }, attributeModifier() {}
+        }; }
       };
       if (name === '@kit.BasicServicesKit') return { Available: () => value => value };
       if (name.includes('ImmersiveHeaderMaterial')) return { HeaderMaterial: { create: () => material } };
+      if (name.includes('CompatibleLightModifier')) return { CompatibleLightModifier: class {} };
       throw Error('Unexpected import ' + name);
     }, mod, mod.exports, name => name, { Transparent: 'transparent' },
     { Regular: 'regular', Medium: 'medium' });

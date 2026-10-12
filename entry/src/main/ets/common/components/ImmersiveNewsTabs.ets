@@ -2,6 +2,7 @@ import { ColorMetrics, LengthMetrics, SegmentButtonV2ItemOptions, SegmentButtonV
   TabSegmentButtonV2, uiMaterial } from '@kit.ArkUI';
 import { Available } from '@kit.BasicServicesKit';
 import { HeaderMaterial } from '../theme/ImmersiveHeaderMaterial';
+import { CompatibleLightModifier } from '../theme/CompatibleLightModifier';
 import { NewsCategory, NewsService } from '../../feature/news/NewsService';
 
 @Available({ minApiVersion: 'HarmonyOS 26.0.0' })
@@ -43,6 +44,7 @@ export struct ImmersiveNewsTabs {
       itemSelectedBackgroundColor: ColorMetrics.resourceColor($r('app.color.hita_immersive_segment_selected')),
       itemShadow: { radius: 0, color: Color.Transparent, offsetX: 0, offsetY: 0 }
     })
-      .width('100%');
+      .width('100%')
+      .attributeModifier(new CompatibleLightModifier());
   }
 }

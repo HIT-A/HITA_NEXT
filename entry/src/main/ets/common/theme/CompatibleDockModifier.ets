@@ -6,7 +6,6 @@ export class CompatibleDockModifier implements AttributeModifier<TabsAttribute> 
   private bottomMargin: number;
   private hideMask: boolean;
   private darkMode: boolean;
-
   constructor(bottomMargin: number, hideMask: boolean, darkMode: boolean) {
     this.bottomMargin = bottomMargin;
     this.hideMask = hideMask;
@@ -15,7 +14,9 @@ export class CompatibleDockModifier implements AttributeModifier<TabsAttribute> 
 
   applyNormalAttribute(instance: TabsAttribute): void {
     if (deviceInfo.apiAvailable('26.0.0')) {
-      instance.barFloatingStyle(DockBarMaterial.floatingStyle(this.bottomMargin, this.hideMask, this.darkMode));
+      instance.barFloatingStyle(DockBarMaterial.floatingStyle(
+        this.bottomMargin, this.hideMask, this.darkMode,
+        deviceInfo.apiAvailable('27.0.0') ? 1 : 0));
     }
   }
 }

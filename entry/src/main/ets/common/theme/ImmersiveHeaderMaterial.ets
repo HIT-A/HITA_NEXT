@@ -1,5 +1,6 @@
 import { uiMaterial } from '@kit.ArkUI';
-import { Available } from '@kit.BasicServicesKit';
+import { Available, deviceInfo } from '@kit.BasicServicesKit';
+import { CompatibleLightModifier } from './CompatibleLightModifier';
 
 @Available({ minApiVersion: 'HarmonyOS 26.0.0' })
 export class HeaderMaterial {
@@ -13,6 +14,7 @@ export class HeaderMaterial {
       // An opaque legacy fill would hide the material's blur and refraction.
       instance.backgroundColor(Color.Transparent);
       instance.systemMaterial(material);
+      new CompatibleLightModifier().applyNormalAttribute(instance);
     } catch (e) {
       instance.backgroundColor(fallbackColor);
     }
@@ -31,7 +33,7 @@ export class HeaderMaterial {
         colorInvert: !blueSurface,
         applyShadow: shadow === undefined ? blueSurface : shadow,
         interactive: true,
-        lightEffect: { color: Color.White }
+        lightEffect: deviceInfo.apiAvailable('27.0.0') ? { color: Color.White } : null
       });
     } catch (e) {
       return undefined;

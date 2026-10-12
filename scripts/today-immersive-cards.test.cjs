@@ -32,7 +32,8 @@ test('card material lives inside the supported title host, matches measured cont
   const material = read('common/theme/ImmersiveHeaderMaterial.ets');
   assert.match(material, /applyShadow: shadow === undefined \? blueSurface : shadow/);
   assert.match(material, /interactive: true/);
-  assert.match(material, /lightEffect: \{ color: Color\.White \}/);
+  assert.match(material, /lightEffect: deviceInfo\.apiAvailable\('27\.0\.0'\) \? \{ color: Color\.White \} : null/);
+  assert.match(material, /new CompatibleLightModifier\(\)\.applyNormalAttribute\(instance\)/);
 });
 
 test('measured card height ignores invalid values and updates when event content changes', () => {

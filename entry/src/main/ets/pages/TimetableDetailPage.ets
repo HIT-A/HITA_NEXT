@@ -440,7 +440,8 @@ struct TimetableDetailPage {
                 .width('100%')
                 .height(44)
                 .backgroundColor($r('app.color.hita_selected_ebf4fc'))
-                .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_selected_ebf4fc')))
+                .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_selected_ebf4fc'), false,
+                  CompatibleSheetMaterial.isEnabled(), undefined, false))
                 .onClick(() => { this.openAddEvent(); })
             }
           }
@@ -1000,7 +1001,7 @@ struct TimetableDetailPage {
     .padding({ top: this.statusBarInset })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(PAGE_BG)
-    .bindSheet(this.sheetVisible, this.eventSheetContent(), {
+    .bindSheet(this.sheetVisible, this.eventSheetContent(), CompatibleSheetMaterial.options({
       height: this.eventSheetMode === 2 ? '78%' : SheetSize.FIT_CONTENT,
       dragBar: true,
       showClose: false,
@@ -1010,7 +1011,7 @@ struct TimetableDetailPage {
       onDisappear: () => {
         this.resetSheetState();
       }
-    })
+    }, this.eventSheetMode === 2))
   }
 
   private static dateText(ms: number): string {

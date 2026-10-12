@@ -85,7 +85,7 @@ test('sheet material retains sizing, mask, dismissal and callback identities wit
   const result = nativeMaterial().options({ ...retained, backgroundColor: 'legacy' });
   assert.equal(result.backgroundColor, 'transparent');
   assert.deepEqual({ ...result.systemMaterial }, {
-    style: 'thick', colorInvert: false, interactive: true, lightEffect: { color: 'white' }
+    style: 'thick', colorInvert: false, interactive: true, lightEffect: null
   });
   for (const [key, value] of Object.entries(retained)) assert.equal(result[key], value, key);
 });
@@ -122,7 +122,8 @@ test('Home retains one sheet lifecycle for authentication, timetable and calenda
   assert.match(home, /height: this.loginSheetOpen \? SheetSize.LARGE : SheetSize.FIT_CONTENT/);
   assert.match(home, /onWillDisappear: \(\) => \{\s*this.closeActiveSheet\(\)/);
   const detail = read('ets/pages/TimetableDetailPage.ets');
-  assert.doesNotMatch(detail, /CompatibleSheetMaterial.options/);
+  assert.match(detail, /\.bindSheet\(this\.sheetVisible, this\.eventSheetContent\(\), CompatibleSheetMaterial.options\(\{/);
+  assert.match(detail, /\}, this\.eventSheetMode === 2\)\)/);
 });
 
 test('calendar confirmation uses the guarded sheet material without changing export or cancel controls', () => {

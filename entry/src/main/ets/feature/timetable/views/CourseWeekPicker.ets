@@ -1,5 +1,8 @@
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { CourseDateSelection } from '../CourseDateSelection';
+import { COURSE_CONTROL_OVERFLOW, CourseControlHost } from './CourseControlHost';
+import { CompatibleMaterialModifier } from '../../../common/theme/CompatibleMaterialModifier';
+import { CompatibleSheetMaterial } from '../../../common/theme/CompatibleSheetMaterial';
 
 /** API 26 uses ArkUI's native swipe multi-selection; older devices retain tap selection. */
 @Component
@@ -7,6 +10,7 @@ export struct CourseWeekPicker {
   @Prop weeks: number[] = [];
   @Link chosen: number[];
   @State editMode: boolean = true;
+  @State activeWeek: number = -1;
   onChoosingChanged: (choosing: boolean) => void = (_choosing: boolean) => {};
 
   aboutToDisappear(): void {
@@ -19,18 +23,33 @@ export struct CourseWeekPicker {
 
   @Builder
   cell(week: number) {
-    Text(week.toString())
-      .fontSize(16)
-      .fontWeight(FontWeight.Medium)
-      .width('100%')
-      .height('100%')
-      .textAlign(TextAlign.Center)
-      .borderRadius(12)
-      .backgroundColor(this.chosen.includes(week) ? $r('app.color.hita_primary_fill') :
-        $r('app.color.hita_surface_soft'))
-      .fontColor(this.chosen.includes(week) ? '#FFFFFF' : $r('app.color.hita_text_202b45'))
-      .accessibilityText('第' + week.toString() + '周')
-      .accessibilitySelected(this.chosen.includes(week))
+    CourseControlHost({
+      barHeight: 44,
+      onPressingChanged: (pressing: boolean) => {
+        if (pressing) this.activeWeek = week;
+        else if (this.activeWeek === week) this.activeWeek = -1;
+        this.onChoosingChanged(pressing);
+      }
+    }) {
+      Text(week.toString())
+        .fontSize(16)
+        .fontWeight(FontWeight.Medium)
+        .width('100%')
+        .height(44)
+        .textAlign(TextAlign.Center)
+        .borderRadius(12)
+        .backgroundColor(this.chosen.includes(week) ? $r('app.color.hita_primary_fill') :
+          $r('app.color.hita_surface_soft'))
+        .fontColor(this.chosen.includes(week) ?
+          (CompatibleSheetMaterial.isEnabled() ? $r('app.color.hita_primary_3390ec') : '#FFFFFF') :
+          $r('app.color.hita_text_202b45'))
+        .attributeModifier(new CompatibleMaterialModifier(this.chosen.includes(week) ?
+          $r('app.color.hita_primary_fill') : $r('app.color.hita_surface_soft'),
+          this.chosen.includes(week), CompatibleSheetMaterial.isEnabled(),
+          $r('app.color.hita_immersive_segment_selected'), false))
+        .accessibilityText('第' + week.toString() + '周')
+        .accessibilitySelected(this.chosen.includes(week))
+    }
   }
 
   build() {
@@ -53,6 +72,8 @@ export struct CourseWeekPicker {
           ForEach(this.weeks, (week: number) => {
             GridItem() { this.cell(week) }
               .height(44)
+              .clip(false)
+              .zIndex(this.activeWeek === week ? 3 : 1)
               .selectable(true)
               .selected(this.chosen.includes(week))
               .onSelect((selected: boolean) => this.select(week, selected))
@@ -64,7 +85,14 @@ export struct CourseWeekPicker {
         .columnsTemplate('1fr 1fr 1fr 1fr 1fr')
         .rowsGap(8)
         .columnsGap(8)
-        .height(Math.min(304, Math.ceil(this.weeks.length / 5) * 52 - 8))
+        .width(CompatibleSheetMaterial.isEnabled() ?
+          'calc(100% + ' + (COURSE_CONTROL_OVERFLOW * 2).toString() + 'vp)' : '100%')
+        .padding(CompatibleSheetMaterial.isEnabled() ? COURSE_CONTROL_OVERFLOW : 0)
+        .margin(CompatibleSheetMaterial.isEnabled() ? -COURSE_CONTROL_OVERFLOW : 0)
+        .height(Math.min(304, Math.ceil(this.weeks.length / 5) * 52 - 8) +
+          (CompatibleSheetMaterial.isEnabled() ? COURSE_CONTROL_OVERFLOW * 2 : 0))
+        .clipContent(ContentClipMode.BOUNDARY)
+        .zIndex(1)
         .editModeOptions({ useDefaultMultiSelectStyle: false, enableTwoFingerMultiSelect: true })
         .enableEditMode(this.editMode)
         .onEditModeChange((enabled: boolean) => { this.editMode = enabled; })
@@ -91,5 +119,6 @@ export struct CourseWeekPicker {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
+    .clip(false)
   }
 }

@@ -3,9 +3,17 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const ts = require('typescript');
+const lightModule = { exports: {} };
 
 const root = path.resolve(__dirname, '../entry/src/main/ets');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const envelopeModule = { exports: {} };
+new Function('module', 'exports', ts.transpileModule(read('common/util/ImmersiveLightEffect.ets'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
+}).outputText)(envelopeModule, envelopeModule.exports);
+new Function('require', 'module', 'exports', ts.transpileModule(read('common/util/DockLightEffect.ets'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
+}).outputText)(() => envelopeModule.exports, lightModule, lightModule.exports);
 
 function material(overrides = {}) {
   const uiMaterial = {
@@ -21,6 +29,7 @@ function material(overrides = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
   }).outputText;
   const platform = name => {
+    if (name === '../util/DockLightEffect') return lightModule.exports;
     if (name === '@kit.BasicServicesKit') return { Available: () => value => value };
     assert.equal(name, '@kit.ArkUI');
     return { uiMaterial };
@@ -38,7 +47,7 @@ test('native dock retains fixed dimensions, safe-area margin and default mask', 
   assert.equal(style.maskHeight, 92);
   assert.deepEqual({ ...style.systemMaterial }, {
     style: 'ultra-thin', applyShadow: true, colorInvert: true,
-    interactive: true, lightEffect: { color: 'white' }
+    interactive: true, lightEffect: null
   });
 });
 
@@ -49,6 +58,20 @@ test('timetable wallpaper hides only the background mask, not the dock material'
   assert.ok(style.systemMaterial);
   const home = read('pages/Home.ets');
   assert.match(home, /new CompatibleDockModifier\(12 \+ this\.navBarInset,\s*this\.selectedNav === TAB_TIMETABLE && this\.hasTimetableBackground\(\), this\.darkMode\)/);
+});
+
+test('the API 26 canvas owns light timing while later APIs can retain native white feedback', () => {
+  const dock = material();
+  for (const dark of [false, true]) {
+    const tap = dock.floatingStyle(36, false, dark, 0).systemMaterial;
+    const hold = dock.floatingStyle(36, false, dark, 1).systemMaterial;
+    assert.equal(tap.lightEffect, null);
+    assert.deepEqual(hold.lightEffect, { color: '#ffFFFFFF' });
+    assert.deepEqual({ ...tap, lightEffect: hold.lightEffect }, { ...hold });
+    const middle = dock.floatingStyle(36, false, dark, 0.675).systemMaterial.lightEffect.color;
+    assert.match(middle, /^#[0-9a-f]{2}FFFFFF$/);
+    assert.ok(parseInt(middle.slice(1, 3), 16) > 89 && parseInt(middle.slice(1, 3), 16) < 255);
+  }
 });
 
 test('the dark dock changes only its mask color and keeps wallpaper unobscured', () => {
