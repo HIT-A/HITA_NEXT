@@ -21,6 +21,7 @@ import {
   EasTimePeriodInDay,
   EasTimetable
 } from '../model/timetable/TimetableModels';
+import { CourseDateSelection } from '../../feature/timetable/CourseDateSelection';
 import { normalizeHtmlSpaces } from '../util/HtmlSpaces';
 
 // The first prototype shipped a different schema under this name.  Use a
@@ -93,6 +94,7 @@ export class RdbHelper {
     await this.execSql(CREATE_EVENTS);
     await this.ensureEventColorColumn();
     await this.repairLegacyWeihaiTimetables();
+    await this.repairLegacyImportedWeeks();
   }
 
   private async ensureEventColorColumn(): Promise<void> {
@@ -217,6 +219,19 @@ export class RdbHelper {
     }
   }
 
+  private async repairLegacyImportedWeeks(): Promise<void> {
+    const timetables = await this.getTimetables();
+    for (const timetable of timetables) {
+      if (timetable.code.length === 0 || timetable.endTime !== timetable.startTime + 25 * 7 * 86400000) continue;
+      const events = await this.getEventsOfTimetable(timetable.id);
+      const endTime = CourseDateSelection.repairedImportedEnd(timetable, events);
+      if (endTime !== timetable.endTime) {
+        await this.upd({ 'endTime': endTime }, new relationalStore.RdbPredicates('timetable')
+          .equalTo('id', timetable.id).equalTo('endTime', timetable.endTime));
+      }
+    }
+  }
+
   private static isLegacyBenbuSchedule(timetable: EasTimetable): boolean {
     if (timetable.scheduleStructure.length !== 12) {
       return false;
@@ -320,7 +335,11 @@ export class RdbHelper {
   // ------------------------------------------------------------------
 
   async saveSubject(s: EasTermSubject): Promise<void> {
-    const b: relationalStore.ValuesBucket = {
+    await this.replaceRow('subject', RdbHelper.subjectValues(s), 'id', s.id);
+  }
+
+  private static subjectValues(s: EasTermSubject): relationalStore.ValuesBucket {
+    return {
       'id': s.id,
       'timetableId': s.timetableId,
       'name': s.name,
@@ -334,7 +353,6 @@ export class RdbHelper {
       'createdAt': s.createdAt,
       'color': s.color
     };
-    await this.replaceRow('subject', b, 'id', s.id);
   }
 
   /** 某课表科目，按 credit 降序（对应 SubjectDao.getSubjects）。 */
@@ -397,6 +415,44 @@ export class RdbHelper {
 
   async saveEvent(e: EasEventItem): Promise<void> {
     await this.replaceRow('events', RdbHelper.eventValues(e), 'id', e.id);
+  }
+
+  /** Save all selected course occurrences together; failures leave no partial course behind. */
+  async saveCourseOccurrences(subject: EasTermSubject, events: EasEventItem[], newSubject: boolean): Promise<void> {
+    if (events.length === 0 || events.some((event: EasEventItem): boolean =>
+      event.type !== EasEventType.CLASS || event.subjectId !== subject.id ||
+      event.timetableId !== subject.timetableId || event.to <= event.from)) {
+      throw new Error('Invalid course occurrences');
+    }
+    const transaction: relationalStore.Transaction = await this.s().createTransaction();
+    try {
+      const table: relationalStore.ResultSet = await transaction.query(
+        new relationalStore.RdbPredicates('timetable').equalTo('id', subject.timetableId), ['startTime', 'endTime']);
+      let currentEnd: number = 0;
+      let currentStart: number = 0;
+      try {
+        if (!table.goToFirstRow()) throw new Error('Timetable no longer exists');
+        currentStart = table.getLong(table.getColumnIndex('startTime'));
+        currentEnd = table.getLong(table.getColumnIndex('endTime'));
+      } finally { table.close(); }
+      if (events.some((event: EasEventItem): boolean => event.from < EasTimetable.mondayMsOf(currentStart))) {
+        throw new Error('Course predates timetable');
+      }
+      if (newSubject) await transaction.insert('subject', RdbHelper.subjectValues(subject));
+      for (const event of events) {
+        await transaction.insert('events', RdbHelper.eventValues(event));
+      }
+      const lastEnd: number = events.reduce((end: number, event: EasEventItem): number => Math.max(end, event.to), currentEnd);
+      if (lastEnd > currentEnd) {
+        const updated: number = await transaction.update({ 'endTime': CourseDateSelection.weekEnd(lastEnd) },
+          new relationalStore.RdbPredicates('timetable').equalTo('id', subject.timetableId));
+        if (updated !== 1) throw new Error('Timetable update failed');
+      }
+      await transaction.commit();
+    } catch (error) {
+      try { await transaction.rollback(); } catch (_) {}
+      throw new Error('课程未保存，请重试');
+    }
   }
 
   /** Exam colors belong to individual events, never to their linked course. */

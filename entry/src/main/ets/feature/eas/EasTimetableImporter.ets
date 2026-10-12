@@ -165,13 +165,14 @@ export class EasTimetableImporter {
     }
     timetable.name = term.name;
     timetable.startTime = EasTimetable.mondayMsOf(startTimeMs);
-    let maxWeek: number = 25;
+    let maxWeek: number = 1;
     for (let i = 0; i < courses.length; i++) {
       for (let j = 0; j < courses[i].weekNumbers.length; j++) {
-        maxWeek = Math.max(maxWeek, courses[i].weekNumbers[j]);
+        const week = courses[i].weekNumbers[j];
+        if (Number.isInteger(week) && week > 0) maxWeek = Math.max(maxWeek, week);
       }
     }
-    timetable.endTime = timetable.startTime + maxWeek * 7 * 24 * 60 * 60 * 1000;
+    timetable.endTime = timetable.startTime + maxWeek * 7 * 24 * 60 * 60 * 1000 - 1;
     timetable.createdAt = Date.now();
     timetable.scheduleStructure = schedule.length > 0 ? schedule : EasTimetableImporter.scheduleStructure(session.campus);
     await rdb.saveTimetable(timetable);
@@ -225,7 +226,7 @@ export class EasTimetableImporter {
       const weeks: number[] = course.weekNumbers;
       for (let w: number = 0; w < weeks.length; w++) {
         const week: number = weeks[w];
-        if (week < 1 || week > maxWeek) continue;
+        if (!Number.isInteger(week) || week < 1 || week > maxWeek) continue;
         const timestamps: number[] = timetable.getTimestamps(week, course.dayOfWeek,
           course.beginSection, course.beginSection + course.sectionCount - 1);
         const key: string = course.name + '|' + timestamps[0].toString() + '|' + timestamps[1].toString();
@@ -260,6 +261,19 @@ export class EasTimetableImporter {
     }
     if (validCourseCount > 0 && savedEventCount === 0) {
       throw new Error('课表已解析，但本地没有写入任何课次');
+    }
+    const allEvents: EasEventItem[] = await rdb.getEventsOfTimetable(timetable.id);
+    let lastEnd: number = 0;
+    for (const event of allEvents) {
+      if (Number.isFinite(event.to) && event.from >= timetable.startTime && event.to > event.from) {
+        lastEnd = Math.max(lastEnd, event.to);
+      }
+    }
+    if (lastEnd > 0) {
+      const end: Date = new Date(EasTimetable.mondayMsOf(lastEnd));
+      end.setDate(end.getDate() + 7);
+      timetable.endTime = end.getTime() - 1;
+      await rdb.saveTimetable(timetable);
     }
     return timetable;
   }

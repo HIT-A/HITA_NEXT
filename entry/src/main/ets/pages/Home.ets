@@ -236,7 +236,9 @@ struct Home {
     this.courseDeleteEffects.resume();
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
     this.startClock();
-    await this.refreshSummaries();
+    const preserveWeek: boolean = this.returningFromCourseEditor;
+    this.returningFromCourseEditor = false;
+    await this.refreshSummaries(preserveWeek);
   }
 
   onPageHide(): void {
@@ -995,6 +997,24 @@ struct Home {
     await TimetableSelectionStore.getInstance().saveTextColor(color);
     this.timetableTextColor = color;
     this.drawTimetableNow();
+  }
+
+  private returningFromCourseEditor: boolean = false;
+
+  private openAddCourse(): void {
+    if (!this.canOpenSheet()) return;
+    if (this.currentTimetable === undefined) {
+      this.getUIContext().getPromptAction().showToast({ message: '请先新建或导入课表，再添加课程' });
+      return;
+    }
+    this.returningFromCourseEditor = true;
+    this.getUIContext().getRouter().pushUrl({
+      url: 'pages/AddEventPage',
+      params: { type: 'CLASS', timetableId: this.currentTimetable.id, week: this.timetableWeek.toString() }
+    }).catch(() => {
+      this.returningFromCourseEditor = false;
+      this.getUIContext().getPromptAction().showToast({ message: '无法打开添加课程，请重试' });
+    });
   }
 
   private canOpenSheet(): boolean {
@@ -2209,6 +2229,20 @@ struct Home {
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start)
             .backgroundColor(Color.Transparent)
+
+            Button({ type: ButtonType.Circle }) {
+              SymbolGlyph($r('sys.symbol.plus'))
+                .fontSize(20)
+                .fontColor([CompatibleMaterialModifier.foreground(COLOR_PRIMARY)]);
+            }
+            .width(44)
+            .height(44)
+            .backgroundColor(COLOR_NAV_ACTIVE)
+            .attributeModifier(new CompatibleMaterialModifier(COLOR_NAV_ACTIVE))
+            .flexShrink(0)
+            .margin({ left: 8 })
+            .accessibilityText('添加课程')
+            .onClick(() => this.openAddCourse())
 
             Button({ type: ButtonType.Circle }) {
               SymbolGlyph($r('sys.symbol.paintpalette'))

@@ -11,6 +11,7 @@ import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
 import { STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { promptAction } from '@kit.ArkUI';
+import { CourseDateSelection } from '../feature/timetable/CourseDateSelection';
 import { RdbHelper } from '../common/db/RdbHelper';
 import {
   EasEventItem,
@@ -192,7 +193,7 @@ struct TimetableDetailPage {
   }
 
   /** 保存后只改对应课程/课时，不重新 load 整页，避免滚动和展开状态被清掉。 */
-  private applySavedEvent(event: EasEventItem): void {
+  private applySavedEvent(event: EasEventItem, syncReminders: boolean = true): void {
     const nextEvents: EasEventItem[] = [];
     let foundEvent: boolean = false;
     for (let i: number = 0; i < this.eventRows.length; i++) {
@@ -257,7 +258,7 @@ struct TimetableDetailPage {
     if (this.selectedEvent !== undefined && this.selectedEvent.id === event.id) {
       this.selectedEvent = event;
     }
-    void this.resyncReminders();
+    if (syncReminders) void this.resyncReminders();
   }
 
   private async resyncReminders(): Promise<void> {
@@ -723,8 +724,14 @@ struct TimetableDetailPage {
         onCancel: () => {
           this.closeSheet();
         },
-        onSaved: (event: EasEventItem) => {
-          this.applySavedEvent(event);
+        onSaved: (_event: EasEventItem, occurrences: EasEventItem[]) => {
+          for (const occurrence of occurrences) {
+            this.applySavedEvent(occurrence, false);
+            if (this.timetable !== undefined && occurrence.to > this.timetable.endTime) {
+              this.timetable.endTime = CourseDateSelection.weekEnd(occurrence.to);
+            }
+          }
+          void this.resyncReminders();
           this.closeSheet();
         }
       })

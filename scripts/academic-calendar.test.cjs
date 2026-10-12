@@ -228,7 +228,7 @@ test('date resolution prefers the calendar, labels saved fallback, and leaves un
   }, session, term()), /会话已失效/);
 });
 
-function importSetup({ remote = date(2026, 8, 24), savedDate, selectedTerms = [term()] } = {}) {
+function importSetup({ remote = date(2026, 8, 24), savedDate, selectedTerms = [term()], weeks = [1, 3] } = {}) {
   const events = [];
   let timetable = savedDate === undefined ? undefined : Object.assign(new EasTimetable(), {
     id: 'existing', code: 'WEIHAI:2026-20271', startTime: savedDate
@@ -252,7 +252,7 @@ function importSetup({ remote = date(2026, 8, 24), savedDate, selectedTerms = [t
     async getTimetableOfTerm() {
       calls.timetable++;
       return [Object.assign(new EasCourseItem(), {
-        name: 'Calendar regression', weekNumbers: [1, 3], dayOfWeek: 3, beginSection: 7, sectionCount: 2
+        name: 'Calendar regression', weekNumbers: weeks, dayOfWeek: 3, beginSection: 7, sectionCount: 2
       })];
     }
     async getLegacyCourseAttributes() { return { rows: [], diag: '' }; }
@@ -275,7 +275,8 @@ test('importer saves real calendar dates and expands teaching weeks without offs
   assert.equal(result.timetable.startTime, date(2026, 8, 24));
   assert.equal(setup.events[0].from, new Date(2026, 7, 26, 16, 5).getTime());
   assert.equal(setup.events[1].from, new Date(2026, 8, 9, 16, 5).getTime());
-  assert.equal(result.timetable.getWeekNumber(date(2026, 9, 28)), 6);
+  assert.equal(result.timetable.getWeekNumber(date(2026, 9, 9)), 3);
+  assert.equal(result.timetable.getWeekNumber(date(2026, 9, 28)), -1);
 });
 
 test('manual dates are normalized to week-one Monday and are not overwritten by remote data', async () => {
@@ -361,4 +362,14 @@ test('manual date selection uses Monday, and cannot race an in-flight calendar r
   page.detailsGeneration++;
   pickers[1].onDateAccept(new Date(2026, 7, 31));
   assert.equal(page.startTime, date(2026, 9, 7));
+});
+
+test('imported week choices end at the last real course week, not a fixed 25 weeks', async () => {
+  for (const lastWeek of [3, 17, 21]) {
+    const setup = importSetup({ weeks: [1, lastWeek] });
+    const result = await setup.EasTimetableImporter.importCurrent({});
+    assert.equal(result.success, true);
+    assert.equal(result.timetable.endTime, result.timetable.startTime + lastWeek * 7 * 86400000 - 1);
+    assert.equal(result.timetable.getWeekNumber(result.timetable.endTime), lastWeek);
+  }
 });
