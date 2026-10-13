@@ -47,6 +47,7 @@ struct ExamPage {
   @State remoteExams: EasExamItem[] = [];
   @State loading: boolean = true;
   @State querying: boolean = false;
+  @State preparingQuery: boolean = true;
   @State loadError: boolean = false;
   @State pendingDeleteId: string = '';
   @State openingEditor: boolean = false;
@@ -72,17 +73,36 @@ struct ExamPage {
   private pageScroller: Scroller = new Scroller();
   private session: EasSession | undefined = undefined;
   private queryGeneration: number = 0;
+  private pageGeneration: number = 0;
   private deleteEffects: DeleteEffectController = new DeleteEffectController();
   private deleteSheetDismissed: (() => void) | undefined = undefined;
   private deleteSheetTimer: number = -1;
 
   async onPageShow(): Promise<void> {
+    const generation: number = ++this.pageGeneration;
+    this.preparingQuery = true;
+    this.fadeOpacity = 0;
     this.deleteEffects.resume();
-    await this.refreshSession();
-    await this.loadExams();
+    try {
+      await this.refreshSession();
+      if (generation !== this.pageGeneration) {
+        return;
+      }
+      const queryGeneration: number = this.queryGeneration;
+      await this.loadExams();
+      // 本地数据先加载以去重；离开页面或已手动查询时，不再启动自动请求。
+      if (generation === this.pageGeneration && queryGeneration === this.queryGeneration && this.hasSession) {
+        await this.queryEasExams();
+      }
+    } finally {
+      if (generation === this.pageGeneration) {
+        this.preparingQuery = false;
+      }
+    }
   }
 
   onPageHide(): void {
+    this.pageGeneration++;
     this.deleteEffects.pause();
     this.finishDeleteSheetDismissal();
     this.queryGeneration++;
@@ -475,11 +495,22 @@ struct ExamPage {
 
   build() {
     Stack({ alignContent: Alignment.Top }) {
-      if (this.loading && this.exams.length === 0 && this.remoteExams.length === 0) {
-        LoadingProgress()
-          .width(36)
-          .height(36)
-          .margin({ top: HEADER_HEIGHT + 60 })
+      if (this.preparingQuery || this.querying ||
+        (this.loading && this.exams.length === 0 && this.remoteExams.length === 0)) {
+        Column({ space: 12 }) {
+          LoadingProgress()
+            .width(36)
+            .height(36)
+            .color($r('app.color.hita_primary_3390ec'))
+          Text('正在刷新考试安排…')
+            .fontSize(13)
+            .fontColor($r('app.color.hita_text_secondary_808080'))
+        }
+        .width('100%')
+        .height('100%')
+        .padding({ top: HEADER_HEIGHT, bottom: this.navBarInset })
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
       } else if (this.loadError && this.exams.length === 0) {
         Row() {
           Text('考试安排加载失败')
@@ -494,28 +525,20 @@ struct ExamPage {
         .margin({ top: HEADER_HEIGHT })
       } else if (!this.loadError && this.exams.length === 0 && this.remoteExams.length === 0) {
         Column() {
-          Text('暂无考试安排')
+          Text(this.queryWarning ? '考试查询失败' : '暂无考试安排')
             .fontSize(16)
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.hita_text_1a1a1a'))
             .width('100%')
             .textAlign(TextAlign.Center)
-          Text(this.hasSession ? '点击右上角“查询”从教务同步，或手动添加考试' : '登录教务后可查询考试，也可手动添加')
+          Text(this.queryMsg.length > 0 ? this.queryMsg :
+            (this.hasSession ? '可点右上角“查询”刷新，或手动添加考试' : '登录教务后可查询考试，也可手动添加'))
             .fontSize(13)
-            .fontColor($r('app.color.hita_text_secondary_808080'))
+            .fontColor(this.queryWarning ? $r('app.color.hita_error') : $r('app.color.hita_text_secondary_808080'))
             .width('100%')
             .textAlign(TextAlign.Center)
             .lineHeight(20)
             .margin({ top: 8 })
-          if (this.queryMsg.length > 0) {
-            Text(this.queryMsg)
-              .fontSize(12)
-              .fontColor(this.queryWarning ? $r('app.color.hita_error') :
-                $r('app.color.hita_text_secondary_808080'))
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ top: 12 })
-          }
         }
         .width('100%')
         .height('100%')
@@ -615,7 +638,8 @@ struct ExamPage {
         })
       }
 
-      if (this.queryContext.length > 0 && this.exams.length === 0 && this.remoteExams.length === 0) {
+      if (!this.preparingQuery && !this.querying && this.queryContext.length > 0 &&
+        this.exams.length === 0 && this.remoteExams.length === 0) {
         Text(this.queryContext)
           .fontSize(12)
           .fontColor($r('app.color.hita_text_secondary_72809a'))
@@ -644,13 +668,16 @@ struct ExamPage {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-          this.headerAction(this.querying ? '查询中' : '查询',
-            !this.querying && this.pendingDeleteId.length === 0, () => {
-              this.queryEasExams();
+          this.headerAction('查询', this.pendingDeleteId.length === 0, () => {
+              if (!this.preparingQuery) {
+                this.queryEasExams();
+              }
             })
           this.headerAction('添加',
             !this.openingEditor && this.pendingDeleteId.length === 0, () => {
-              this.openAddExam();
+              if (!this.preparingQuery && !this.querying) {
+                this.openAddExam();
+              }
             })
         }
         .width('100%')

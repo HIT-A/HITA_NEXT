@@ -37,13 +37,8 @@ export class EasShenzhenEndpoints {
   static scheduleStructurePath: string = '/component/queryKbjg';
   static weekDatesPath: string = '/component/queryRlZcSj';
   static scoresPath: string = '/cjgl/grcjcx/grcjcx';
-  /** 学生考试安排；不同部署路径略有差异，查询时按序尝试。 */
-  static examPaths: string[] = [
-    '/cjgl/xsksapcx/queryXsksap',
-    '/cjgl/xsksxx/queryXsksxx',
-    '/cjgl/grksap/grksap',
-    '/xszykb/queryxsksap'
-  ];
+  /** 与 Android getShenzhenWebExamItems 使用同一网页接口。 */
+  static examsPath: string = '/kscxtj/queryXsksByxhList';
 }
 
 export class EasWeihaiEndpoints {
@@ -867,67 +862,51 @@ export class EasDataProvider {
     return result;
   }
 
-  /** 深圳新版 Web 考试安排，请求形态对齐成绩查询。 */
+  /** 深圳 Web 考试安排使用独立的表单接口，不沿用成绩查询的 JSON 参数。 */
   private async getShenzhenExams(session: EasSession, term: EasTermItem): Promise<EasExamItem[]> {
     if (!session.hasShenzhenWebSession()) {
       throw new Error('深圳教务会话已失效，请重新登录');
     }
     const cfg = easWebLoginConfigFor(session.campus, session.getStudentType());
-    const jsonBody: string = '{"xn":"' + EasDataProvider.jsonEscape(term.yearCode) +
-      '","xq":"' + EasDataProvider.jsonEscape(term.termCode) +
-      '","kcmc":null,"cxbj":"-1","pylx":"' + session.getStudentType() +
-      '","current":1,"pageSize":1000}';
-    const formBody: string = 'xn=' + encodeURIComponent(term.yearCode) +
-      '&xq=' + encodeURIComponent(term.termCode) +
-      '&pylx=' + encodeURIComponent(session.getStudentType());
-    let lastError: string = '未获取到考试安排';
-    for (let i = 0; i < EasShenzhenEndpoints.examPaths.length; i++) {
-      const path: string = EasShenzhenEndpoints.examPaths[i];
-      const parsed: ParsedShenzhenWebExams | undefined =
-        await this.requestShenzhenExam(session, cfg, path, jsonBody, true, term) ??
-        await this.requestShenzhenExam(session, cfg, path, formBody, false, term);
-      if (parsed === undefined) {
-        continue;
-      }
-      if (parsed.code !== 0 && parsed.code !== 200 && parsed.list.length === 0) {
-        lastError = parsed.msg.length > 0 ? parsed.msg : lastError;
-        continue;
-      }
-      const campus: string = ExamSchedule.campusName(session.campus.toString());
-      for (let j = 0; j < parsed.list.length; j++) {
-        parsed.list[j].campusName = campus;
-        if (parsed.list[j].termName.length === 0) {
-          parsed.list[j].termName = term.name;
-        }
-      }
-      return parsed.list;
+    if (term.yearCode.trim().length === 0 || term.termCode.trim().length === 0) {
+      throw new Error('未获取到学期列表');
     }
-    throw new Error(lastError);
-  }
-
-  private async requestShenzhenExam(session: EasSession, cfg: EasCampusConfig, path: string,
-    body: string, json: boolean, term: EasTermItem): Promise<ParsedShenzhenWebExams | undefined> {
     const opts: EasApiClientOptions = new EasApiClientOptions();
     opts.method = EasHttpMethod.POST;
     opts.timeoutMs = 60000;
-    opts.body = body;
-    opts.extraHeaders.set('Content-Type', json ?
-      'application/json;charset=UTF-8' : 'application/x-www-form-urlencoded; charset=UTF-8');
-    opts.extraHeaders.set('Accept', 'application/json, text/plain, */*');
+    opts.useCache = false;
+    opts.body = 'pxn=' + encodeURIComponent(term.yearCode) +
+      '&pxq=' + encodeURIComponent(term.termCode) + '&pageNum=1&pageSize=500';
+    opts.extraHeaders.set('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+    opts.extraHeaders.set('Accept', '*/*');
+    opts.extraHeaders.set('Accept-Language', 'zh-CN,zh;q=0.9');
     opts.extraHeaders.set('RoleCode', '01');
     opts.extraHeaders.set('X-Requested-With', 'XMLHttpRequest');
     if (session.webBaseUrl.length > 0) {
       opts.extraHeaders.set('Origin', session.webBaseUrl);
-      opts.extraHeaders.set('Referer', EasApiClient.joinUrl(session.webBaseUrl, '/authentication/main'));
+      opts.extraHeaders.set('Referer', EasApiClient.joinUrl(session.webBaseUrl, '/kscxtj/queryXsksByxh'));
     }
-    const resp: EasApiResponse = await this.api.request(session, cfg, path, opts);
-    if (resp.statusCode === 401 || resp.statusCode === 403 || EasDataProvider.isLoginResponse(resp.body)) {
+    const resp: EasApiResponse = await this.api.request(session, cfg, EasShenzhenEndpoints.examsPath, opts);
+    hilog.info(DOMAIN, TAG, 'shenzhen exams status=%{public}d len=%{public}d',
+      resp.statusCode, resp.body.length);
+    if (isExpiredEasResponse(resp)) {
       throw new Error('深圳教务会话已失效，请重新登录');
     }
-    if (resp.statusCode === 0 || !EasDataProvider.isHttpOk(resp)) {
-      return undefined;
+    if (resp.statusCode === 0) {
+      throw new Error('考试请求网络失败');
     }
-    return parseShenzhenWebExams(resp.body, term);
+    if (!EasDataProvider.isHttpOk(resp)) {
+      throw new Error('教务考试查询暂不可用，请稍后重试');
+    }
+    const parsed: ParsedShenzhenWebExams | undefined = parseShenzhenWebExams(resp.body, term);
+    if (parsed === undefined || (parsed.code !== 0 && parsed.code !== 200)) {
+      throw new Error('考试页面无法识别，请稍后重试');
+    }
+    for (const item of parsed.list) {
+      item.campusName = ExamSchedule.campusName(session.campus.toString());
+    }
+    hilog.info(DOMAIN, TAG, 'shenzhen exams count=%{public}d', parsed.list.length);
+    return parsed.list;
   }
 
 }

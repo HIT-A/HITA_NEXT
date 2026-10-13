@@ -266,7 +266,7 @@ test('the existing client uses the correct VPN host and sends saved cookies for 
   }
 });
 
-test('Shenzhen keeps its existing parser and request path through the new result wrapper', async () => {
+test('Shenzhen uses its web exam endpoint through the shared result wrapper', async () => {
   const s = session(Campus.SHENZHEN);
   s.webCookies.set('route', 'synthetic-route');
   s.webBaseUrl = Urls.SHENZHEN_PROXY_BASE;
@@ -281,5 +281,5 @@ test('Shenzhen keeps its existing parser and request path through the new result
   assert.equal(result.items[0].examLocation, 'T1-101');
   assert.equal(result.items[0].campusName, '深圳校区');
   assert.deepEqual(result.failedTypes, []);
-  assert.equal(calls[0], '/cjgl/xsksapcx/queryXsksap');
+  assert.equal(calls[0], '/kscxtj/queryXsksByxhList');
 });

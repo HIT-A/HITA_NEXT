@@ -51,10 +51,10 @@ function easNumber(obj: Record<string, Object>, key: string): number | undefined
   return undefined;
 }
 
-function rowsFromValue(value: Object | undefined): Array<Record<string, Object>> {
+function rowsFromValue(value: Object | undefined): Array<Record<string, Object>> | undefined {
   const result: Array<Record<string, Object>> = [];
   if (value === undefined || value === null) {
-    return result;
+    return undefined;
   }
   if (Array.isArray(value)) {
     const values: Object[] = value as Object[];
@@ -68,30 +68,60 @@ function rowsFromValue(value: Object | undefined): Array<Record<string, Object>>
   }
   const record: Record<string, Object> | undefined = asRecord(value);
   if (record === undefined) {
-    return result;
+    return undefined;
   }
   const nestedKeys: string[] = ['content', 'data', 'list', 'rows', 'result', 'resultData', 'ksapList'];
   for (let i = 0; i < nestedKeys.length; i++) {
-    const nested: Array<Record<string, Object>> = rowsFromValue(record[nestedKeys[i]]);
-    if (nested.length > 0) {
+    const nested: Array<Record<string, Object>> | undefined = rowsFromValue(record[nestedKeys[i]]);
+    if (nested !== undefined) {
       return nested;
     }
   }
-  return result;
+  return undefined;
+}
+
+function examDate(raw: string): string {
+  // 教务可能返回 UTC 时间戳，考试日期固定按中国时区计算，避免午夜落到前一天。
+  if (/T.*(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw)) {
+    const time: number = Date.parse(raw);
+    if (!Number.isNaN(time)) {
+      return new Date(time + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    }
+  }
+  const date: RegExpMatchArray | null = raw.match(/^\d{4}-\d{2}-\d{2}/);
+  return date === null ? raw : date[0];
 }
 
 function itemFromJson(item: Record<string, Object>, term: EasTermItem): EasExamItem {
   const out: EasExamItem = new EasExamItem();
   out.courseName = easText(item, ['kcmc', 'KCMC', 'courseName', 'kcm', 'KCM']);
-  out.examDate = easText(item, ['ksrq', 'KSRQ', 'ksrqmc', 'KSRQMC', 'examDate', 'rq', 'RQ']);
+  out.examDate = examDate(easText(item, ['ksrq', 'KSRQ', 'ksrqmc', 'KSRQMC', 'examDate', 'rq', 'RQ']));
   out.examTime = easText(item, [
-    'kssj', 'KSSJ', 'kssjms', 'KSSJMS', 'kssjfw', 'KSSJFW', 'examTime', 'sj', 'SJ'
+    'KSJTSJ', 'ksjtsj', 'kssj', 'KSSJ', 'kssjms', 'KSSJMS', 'kssjfw', 'KSSJFW', 'examTime', 'sj', 'SJ'
   ]);
-  out.examType = easText(item, ['kslx', 'KSLX', 'ksmc', 'KSMC', 'kslxmc', 'KSLXMC', 'examType']);
+  out.examType = easText(item, ['KSSJDMC', 'kssjdmc', 'kslx', 'KSLX', 'ksmc', 'KSMC', 'kslxmc', 'KSLXMC', 'examType']);
+  if (out.examType.length === 0) {
+    out.examType = '考试';
+  }
   out.examLocation = easText(item, [
     'kscd', 'KSCD', 'ksdd', 'KSDD', 'cdmc', 'CDMC', 'jasmc', 'JASMC',
     'kscdmc', 'KSCDMC', 'examLocation', 'dd', 'DD'
   ]);
+  const building: string = easText(item, ['JXLMC', 'jxlmc']);
+  const room: string = easText(item, ['JXCDMC', 'jxcdmc', 'CDMC', 'cdmc']);
+  const seat: string = easText(item, ['ZWH', 'zwh']);
+  const locations: string[] = [];
+  for (const part of [building, room]) {
+    if (part.length > 0 && locations.indexOf(part) < 0) {
+      locations.push(part);
+    }
+  }
+  if (locations.length > 0) {
+    out.examLocation = locations.join(' ');
+  }
+  if (seat.length > 0) {
+    out.examLocation = (out.examLocation + ' 座位 ' + seat).trim();
+  }
   const termName: string = easText(item, ['xnxqmc', 'XNXQMC', 'termName']);
   out.termName = termName.length > 0 ? termName : term.name;
   return out;
@@ -112,12 +142,19 @@ export function parseShenzhenWebExams(body: string, term: EasTermItem): ParsedSh
   const code: number | undefined = easNumber(obj, 'code');
   parsed.code = code === undefined ? 0 : code;
   parsed.msg = easText(obj, ['msg', 'message']);
-  const rows: Array<Record<string, Object>> = rowsFromValue(obj);
+  const rows: Array<Record<string, Object>> | undefined = rowsFromValue(root);
+  if (rows === undefined) {
+    // 错误对象或未知结构不能被误报成“暂无考试”。
+    return parsed.code !== 0 && parsed.code !== 200 ? parsed : undefined;
+  }
   for (let i = 0; i < rows.length; i++) {
     const item: EasExamItem = itemFromJson(rows[i], term);
     if (item.courseName.length > 0) {
       parsed.list.push(item);
     }
+  }
+  if (rows.length > 0 && parsed.list.length === 0) {
+    return undefined;
   }
   return parsed;
 }

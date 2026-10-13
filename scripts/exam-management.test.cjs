@@ -153,7 +153,7 @@ test('list keeps event identity, filters courses and sorts by time across timeta
   assert.match(editor, /\.layoutWeight\(1\)/);
   assert.match(editor, /Column\(\) \{[\s\S]*?Button\(this\.loading \? '正在读取'/);
   assert.match(editor, /\.padding\(\{[\s\S]*?top: 8,[\s\S]*?bottom: 10/);
-  assert.match(source, /this\.headerAction\(this\.querying \? '查询中' : '查询'/);
+  assert.match(source, /this\.headerAction\('查询'/);
   assert.match(source, /this\.headerAction\('添加'/);
   assert.match(source, /private headerAction\(label: string, enabled: boolean/);
   assert.match(read('pages/TimetableDetailPage.ets'),
@@ -459,6 +459,50 @@ test('upcoming and past groups split on the exam end time', async () => {
   assert.deepEqual(page.past.map(e => e.id), ['done']);
 });
 
+test('initial loading stays active until the remote query settles, including failure and empty results', async () => {
+  for (const outcome of ['success', 'empty', 'failure']) {
+    let finish;
+    class Provider {
+      async getExamTerms() { return [{ name: '2026秋季' }]; }
+      async getExamResult() {
+        return new Promise((resolve, reject) => {
+          finish = () => outcome === 'failure' ? reject(new Error('考试请求网络失败')) :
+            resolve({ items: outcome === 'success' ? [{ courseName: 'New', examDate: '2026-12-20',
+              examTime: '09:00-11:00', examLocation: 'A101' }] : [], failedTypes: [] });
+        });
+      }
+    }
+    const { page } = setup([exam('saved')], {
+      EasDataProvider: Provider,
+      sessionStore: { init: async () => {}, loadPreferred: async () => ({ campus: 'SHENZHEN' }) }
+    });
+    assert.equal(page.preparingQuery, true);
+    const shown = page.onPageShow();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(page.loading, false, 'local read has finished');
+    assert.equal(page.exams.length, 1, 'local records are preserved');
+    assert.equal(page.preparingQuery, true, 'do not reveal the old list between local and remote loading');
+    assert.equal(page.querying, true);
+    finish();
+    await shown;
+    assert.equal(page.preparingQuery, false);
+    assert.equal(page.querying, false);
+    assert.equal(page.queryWarning, outcome === 'failure');
+    assert.equal(page.remoteExams.length, outcome === 'success' ? 1 : 0);
+  }
+});
+
+test('the native loading branch precedes both cached lists and empty/error result views', () => {
+  const page = read('pages/ExamPage.ets');
+  const build = page.slice(page.indexOf('  build()'));
+  const firstBranch = build.slice(0, build.indexOf('} else if'));
+  assert.match(firstBranch, /this\.preparingQuery \|\| this\.querying/);
+  assert.match(firstBranch, /LoadingProgress\(\)/);
+  assert.match(firstBranch, /正在刷新考试安排/);
+  assert.doesNotMatch(firstBranch, /暂无考试安排|remoteExamCard|examCard/);
+  assert.match(build, /Text\(this\.queryWarning \? '考试查询失败' : '暂无考试安排'\)/);
+});
+
 test('query without a session asks the user to log in', async () => {
   const { page, calls } = setup();
   await page.queryEasExams();
@@ -539,12 +583,71 @@ test('exam queries use the preferred campus and the selected current term instea
   });
   await page.onPageShow();
   assert.equal(page.hasSession, true);
-  await page.queryEasExams();
+  assert.equal(calls.length, 1, 'entering the page automatically queries once');
   assert.equal(calls[0].s, preferred);
   assert.equal(calls[0].term, current);
   assert.match(page.queryContext, /威海校区.*2026秋季/);
   assert.match(page.queryMsg, /本学期暂无教务考试安排/);
   assert.equal(page.queryWarning, false);
+  await page.queryEasExams();
+  assert.equal(calls.length, 2, 'manual refresh remains available');
+});
+
+test('entering without a saved session only loads local exams and does not prompt for login', async () => {
+  let requests = 0;
+  class Provider { async getExamTerms() { requests++; return []; } }
+  const { page, calls } = setup([exam('local')], { EasDataProvider: Provider });
+  await page.onPageShow();
+  assert.equal(requests, 0);
+  assert.equal(page.exams.length, 1);
+  assert.deepEqual(calls.toasts, []);
+});
+
+test('leaving while the page initializes prevents a late automatic query', async () => {
+  for (const stage of ['session', 'local']) {
+    let finish;
+    let requests = 0;
+    class Provider { async getExamTerms() { requests++; return []; } }
+    const { page, db } = setup([], {
+      sessionStore: { init: async () => {}, loadPreferred: async () => stage === 'session'
+        ? new Promise(resolve => { finish = () => resolve({ campus: 'SHENZHEN' }); })
+        : { campus: 'SHENZHEN' } },
+      EasDataProvider: Provider
+    });
+    if (stage === 'local') {
+      db.getTimetables = () => new Promise(resolve => { finish = () => resolve([]); });
+    }
+    const shown = page.onPageShow();
+    await new Promise(resolve => setImmediate(resolve));
+    page.onPageHide();
+    finish();
+    await shown;
+    assert.equal(requests, 0, stage);
+  }
+});
+
+test('manual query during local loading prevents a duplicate auto query', async () => {
+  let finish;
+  let requests = 0;
+  class Provider {
+    async getExamTerms() { requests++; return [{ name: '2026秋季' }]; }
+    async getExamResult() { return { items: [], failedTypes: [] }; }
+  }
+  const { page, db } = setup([], {
+    sessionStore: { init: async () => {}, loadPreferred: async () => ({ campus: 'SHENZHEN' }) },
+    EasDataProvider: Provider
+  });
+  db.getTimetables = () => new Promise(resolve => { finish = () => resolve([]); });
+  const shown = page.onPageShow();
+  await new Promise(resolve => setImmediate(resolve));
+  await page.queryEasExams();
+  finish();
+  await shown;
+  assert.equal(requests, 1);
+  page.onPageHide();
+  db.getTimetables = async () => [];
+  await page.onPageShow();
+  assert.equal(requests, 2, 'returning to the page automatically refreshes');
 });
 
 test('partial exam results never claim there are no exams or that the query completed fully', async () => {
