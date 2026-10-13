@@ -122,7 +122,7 @@ test('Home retains one sheet lifecycle for authentication, timetable and calenda
   assert.match(home, /height: this.loginSheetOpen \? SheetSize.LARGE : SheetSize.FIT_CONTENT/);
   assert.match(home, /onWillDisappear: \(\) => \{\s*this.closeActiveSheet\(\)/);
   const detail = read('ets/pages/TimetableDetailPage.ets');
-  assert.match(detail, /\.bindSheet\(this\.sheetVisible, this\.eventSheetContent\(\), CompatibleSheetMaterial.options\(\{/);
+  assert.match(detail, /\.bindSheet\(\$\$this\.sheetVisible, this\.eventSheetContent\(\), CompatibleSheetMaterial.options\(\{/);
   assert.match(detail, /\}, this\.eventSheetMode === 2\)\)/);
 });
 
@@ -171,8 +171,9 @@ test('Add Course material hosts only the action and leaves the original label br
   const detail = read('ets/pages/TimetableDetailPage.ets');
   const info = detail.slice(detail.indexOf('  private infoCard('), detail.indexOf('  private subjectCard('));
   assert.match(info, /Column\(\) \{\s*Row\(\) \{\s*Column\(\)/);
-  assert.match(info, /if \(CompatibleSheetMaterial.isEnabled\(\)\) \{\s*Column\(\) \{\s*ImmersiveHeader\(\{ barHeight: 44 \}\)/);
+  assert.match(info, /if \(CompatibleSheetMaterial.isEnabled\(\)\) \{\s*Column\(\) \{\s*(?:\/\/[^\n]*\n\s*)?ImmersiveHeader\(\{ barHeight: 68 \}\)/);
   assert.match(info, /\.width\(104\)\s*\.height\(44\)/);
+  assert.match(info, /\.width\(128\)\s*\.height\(68\)/);
   assert.match(info, /else \{\s*Text\('添加课程'\)[\s\S]*\.height\(32\)/);
   assert.equal((info.match(/this.openAddEvent\(\)/g) || []).length, 2);
 });

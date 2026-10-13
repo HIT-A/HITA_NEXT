@@ -433,22 +433,29 @@ struct TimetableDetailPage {
         .layoutWeight(1)
         if (CompatibleSheetMaterial.isEnabled()) {
           Column() {
-            ImmersiveHeader({ barHeight: 44 }) {
-              Button('添加课程', { type: ButtonType.Capsule })
-                .fontSize(13)
-                .fontWeight(FontWeight.Medium)
-                .fontColor(CompatibleMaterialModifier.foreground($r('app.color.hita_primary_3390ec')))
-                .width('100%')
-                .height(44)
-                .backgroundColor($r('app.color.hita_selected_ebf4fc'))
-                .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_selected_ebf4fc'), false,
-                  CompatibleSheetMaterial.isEnabled(), undefined, false))
-                .onClick(() => { this.openAddEvent(); })
+            // 原生材质会随按压、拖动形变，四周留 12 vp，避免被标题栏边界裁剪。
+            ImmersiveHeader({ barHeight: 68 }) {
+              Row() {
+                Button('添加课程', { type: ButtonType.Capsule })
+                  .fontSize(13)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(CompatibleMaterialModifier.foreground($r('app.color.hita_primary_3390ec')))
+                  .width(104)
+                  .height(44)
+                  .backgroundColor($r('app.color.hita_selected_ebf4fc'))
+                  .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_selected_ebf4fc'), false,
+                    CompatibleSheetMaterial.isEnabled(), undefined, false))
+                  .onClick(() => { this.openAddEvent(); })
+              }
+              .width('100%')
+              .height(68)
+              .justifyContent(FlexAlign.Center)
             }
           }
-          .width(104)
-          .height(44)
-          .margin({ left: 8 })
+          .width(128)
+          .height(68)
+          // 抵消动画留白的布局占位，静止时按钮位置、大小与行高保持不变。
+          .margin({ left: -4, right: -12, top: -12, bottom: -12 })
           .flexShrink(0)
         } else {
           Text('添加课程')
@@ -1004,14 +1011,18 @@ struct TimetableDetailPage {
     .padding({ top: this.statusBarInset })
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     .backgroundColor(PAGE_BG)
-    .bindSheet(this.sheetVisible, this.eventSheetContent(), CompatibleSheetMaterial.options({
+    .bindSheet($$this.sheetVisible, this.eventSheetContent(), CompatibleSheetMaterial.options({
       height: this.eventSheetMode === 2 ? '78%' : SheetSize.FIT_CONTENT,
       dragBar: true,
       showClose: false,
       preferType: SheetType.BOTTOM,
       backgroundColor: $r('app.color.hita_surface_soft'),
       maskColor: $r('app.color.hita_sheet_mask'),
+      onWillDisappear: () => {
+        this.closeSheet();
+      },
       onDisappear: () => {
+        this.sheetVisible = false;
         this.resetSheetState();
       }
     }, this.eventSheetMode === 2))
