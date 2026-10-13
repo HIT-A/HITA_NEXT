@@ -75,8 +75,8 @@ export class TimetableIcsImporter {
 
     const rdb: RdbHelper = RdbHelper.getInstance();
     await rdb.init(context);
-    await rdb.saveTimetable(timetable);
     const subjects: Map<string, EasTermSubject> = new Map<string, EasTermSubject>();
+    const importedEvents: EasEventItem[] = [];
     for (let i: number = 0; i < events.length; i++) {
       const ics: IcsEventInstance = events[i];
       const event: EasEventItem = new EasEventItem();
@@ -100,13 +100,13 @@ export class TimetableIcsImporter {
           subject.type = EasSubjectType.TAG;
           subject.field = 'ics';
           subjects.set(ics.summary, subject);
-          await rdb.saveSubject(subject);
         }
         event.subjectId = subject.id;
       }
-      await rdb.saveEvent(event);
+      importedEvents.push(event);
     }
 
+    await rdb.saveImportedTimetable(timetable, Array.from(subjects.values()), importedEvents, false);
     await TimetableSelectionStore.getInstance().init(context);
     await TimetableSelectionStore.getInstance().save(timetable.id);
     result.success = true;

@@ -124,5 +124,24 @@ test('campus labels use the main-campus name without changing the campus key', (
   assert.ok(home.includes(`sessionCampusButton('BENBU', '${campusLabel}')`));
   assert.ok(!home.includes('\u672c\u90e8\u6821\u533a'));
   assert.ok(!home.includes('\u6821\u672c\u90e8'));
-  assert.ok(scores.includes(`return '${campusLabel}'`));
+  const declarations = ts.createSourceFile('ScorePage.ts', scores, ts.ScriptTarget.Latest, true).statements
+    .filter(ts.isVariableStatement).flatMap(statement => [...statement.declarationList.declarations]);
+  const array = name => {
+    const initializer = declarations.find(declaration => declaration.name.getText() === name)?.initializer;
+    assert.ok(initializer && ts.isArrayLiteralExpression(initializer), `${name} must define the campus mapping`);
+    return [...initializer.elements];
+  };
+  const keys = array('CAMPUSES').map(item => {
+    assert.ok(ts.isPropertyAccessExpression(item));
+    assert.equal(item.expression.getText(), 'EasCampus');
+    return EasCampus[item.name.text];
+  });
+  const labels = array('CAMPUS_NAMES').map(item => {
+    assert.ok(ts.isStringLiteral(item));
+    return item.text;
+  });
+  assert.deepEqual(keys.map((key, index) => [key, labels[index]]),
+    [['SHENZHEN', '\u6df1\u5733'], ['BENBU', campusLabel], ['WEIHAI', '\u5a01\u6d77']]);
+  assert.match(scores, /Select\(CAMPUS_NAMES\.map\(/);
+  assert.match(scores, /\.value\(CAMPUS_NAMES\[this\.campusIndex\]\)/);
 });

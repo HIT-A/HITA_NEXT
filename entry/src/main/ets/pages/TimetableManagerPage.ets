@@ -36,6 +36,7 @@ struct TimetableManagerPage {
   @State loading: boolean = true;
   @State exporting: boolean = false;
   @State deleting: boolean = false;
+  @State adding: boolean = false;
   @State activeTimetableId: string = '';
   @State fadeOpacity: number = 0;
   private pageScroller: Scroller = new Scroller();
@@ -105,6 +106,8 @@ struct TimetableManagerPage {
   }
 
   private async importIcs(): Promise<void> {
+    if (this.adding || this.loading || this.deleting) return;
+    this.adding = true;
     const ctx: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
     try {
       const result: IcsImportResult | undefined = await TimetableIcsImporter.pickAndImport(ctx);
@@ -122,6 +125,8 @@ struct TimetableManagerPage {
       }
     } catch (e) {
       this.getUIContext().getPromptAction().showToast({ message: '导入 ICS 失败' });
+    } finally {
+      this.adding = false;
     }
   }
 
@@ -130,21 +135,29 @@ struct TimetableManagerPage {
   }
 
   private async createEmptyTimetable(): Promise<void> {
-    const now: number = Date.now();
-    const timetable: EasTimetable = new EasTimetable();
-    timetable.name = TimetableManagerPage.defaultName(now);
-    timetable.code = 'LOCAL:' + timetable.id;
-    timetable.startTime = EasTimetable.mondayMsOf(now);
-    timetable.endTime = timetable.startTime + 20 * WEEK_MS - 1;
-    timetable.createdAt = now;
-    await RdbHelper.getInstance().saveTimetable(timetable);
-    await TimetableSelectionStore.getInstance().save(timetable.id);
-    this.activeTimetableId = timetable.id;
-    await this.load();
-    this.getUIContext().getRouter().pushUrl({
-      url: 'pages/TimetableDetailPage',
-      params: { 'timetableId': timetable.id }
-    });
+    if (this.adding || this.loading || this.deleting) return;
+    this.adding = true;
+    try {
+      const now: number = Date.now();
+      const timetable: EasTimetable = new EasTimetable();
+      timetable.name = TimetableManagerPage.defaultName(now);
+      timetable.code = 'LOCAL:' + timetable.id;
+      timetable.startTime = EasTimetable.mondayMsOf(now);
+      timetable.endTime = timetable.startTime + 20 * WEEK_MS - 1;
+      timetable.createdAt = now;
+      await RdbHelper.getInstance().saveTimetable(timetable);
+      await TimetableSelectionStore.getInstance().save(timetable.id);
+      this.activeTimetableId = timetable.id;
+      await this.load();
+      this.getUIContext().getRouter().pushUrl({
+        url: 'pages/TimetableDetailPage',
+        params: { 'timetableId': timetable.id }
+      });
+    } catch (_) {
+      this.getUIContext().getPromptAction().showToast({ message: '新建课表失败，请重试' });
+    } finally {
+      this.adding = false;
+    }
   }
 
   /** Export the selected/current timetable into the app sandbox as an ICS file. */
@@ -184,10 +197,9 @@ struct TimetableManagerPage {
       this.getUIContext().getPromptAction().showToast({ message: '暂无可导出的课表' });
       return;
     }
-    // Android exports the currently active timetable from this toolbar. The
-    // manager opens with the newest timetable first, so keep the same single
-    // action here and avoid a platform-specific dynamic action-menu tuple.
-    this.exportTimetable(this.timetables[0]);
+    const current: EasTimetable | undefined =
+      this.timetables.find((item: EasTimetable): boolean => item.id === this.activeTimetableId);
+    this.exportTimetable(current ?? this.timetables[0]);
   }
 
   private confirmDelete(): void {
@@ -350,14 +362,14 @@ struct TimetableManagerPage {
 
   @Builder
   private addCard() {
-    Column() {
-      this.addActionGlyph($r('sys.symbol.plus'), () => {
+    Column({ space: 14 }) {
+      this.addActionGlyph($r('sys.symbol.plus'), '新建课表', () => {
         this.createEmptyTimetable();
       });
-      this.addActionGlyph($r('sys.symbol.repeat_1'), () => {
+      this.addActionGlyph($r('sys.symbol.repeat_1'), '教务导入', () => {
         this.openImportPage();
       });
-      this.addActionGlyph($r('sys.symbol.doc_plaintext'), () => {
+      this.addActionGlyph($r('sys.symbol.doc_plaintext'), '导入日历文件', () => {
         this.importIcs();
       });
     }
@@ -370,18 +382,29 @@ struct TimetableManagerPage {
   }
 
   @Builder
-  private addActionGlyph(symbol: Resource, action: () => void) {
-    Stack() {
-      SymbolGlyph(symbol)
-        .fontSize(24)
-        .fontColor([HitaColors.primary]);
+  private addActionGlyph(symbol: Resource, label: string, action: () => void) {
+    Column() {
+      ImmersiveHeader({ barHeight: 48 }) {
+        Row() {
+          Button({ type: ButtonType.Circle }) {
+            SymbolGlyph(symbol)
+              .fontSize(22)
+              .fontColor([CompatibleMaterialModifier.foreground(HitaColors.primary)]);
+          }
+          .width(48)
+          .height(48)
+          .padding(0)
+          .backgroundColor($r('app.color.hita_selected_e8f3fd'))
+          .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_selected_e8f3fd')))
+          .accessibilityText(label)
+          .enabled(!this.adding && !this.loading && !this.deleting)
+          .onClick(action);
+        }.width('100%').height(48)
+      }
     }
-    .width(64)
-    .height(64)
-    .alignContent(Alignment.Center)
-    .backgroundColor($r('app.color.hita_selected_e8f3fd'))
-    .borderRadius(32)
-    .onClick(action);
+    .width(48)
+    .height(48)
+    .flexShrink(0);
   }
 
   build() {

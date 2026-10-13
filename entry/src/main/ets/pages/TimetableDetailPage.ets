@@ -64,9 +64,11 @@ struct TimetableDetailPage {
   @State creditDraft: string = '';
   @State fadeOpacity: number = 0;
   @State pendingDeleteCourseId: string = '';
+  @State changingStartDate: boolean = false;
   private deleteEffects: DeleteEffectController = new DeleteEffectController();
   private detailScroller: ListScroller = new ListScroller();
   private timetableId: string = '';
+  private subjectTypeMenuOpen: boolean = false;
 
   async aboutToAppear(): Promise<void> {
     const params: Object | undefined = this.getUIContext().getRouter().getParams();
@@ -146,7 +148,7 @@ struct TimetableDetailPage {
   }
 
   private chooseStartDate(): void {
-    if (this.timetable === undefined) {
+    if (this.timetable === undefined || this.changingStartDate) {
       return;
     }
     this.getUIContext().showDatePickerDialog({
@@ -159,31 +161,29 @@ struct TimetableDetailPage {
 
   private async applyStartDate(date: Date): Promise<void> {
     const timetable: EasTimetable | undefined = this.timetable;
-    if (timetable === undefined) {
+    if (timetable === undefined || this.changingStartDate) {
       return;
     }
     const picked: number = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0).getTime();
     const nextStart: number = EasTimetable.mondayMsOf(picked);
     const delta: number = nextStart - EasTimetable.mondayMsOf(timetable.startTime);
-    if (delta === 0) {
+    if (!Number.isFinite(nextStart) || nextStart <= 0 || delta === 0) {
       return;
     }
-    const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
-    const rdb: RdbHelper = RdbHelper.getInstance();
-    await rdb.init(ctx);
-    const events: EasEventItem[] = await rdb.getEventsOfTimetable(timetable.id);
-    for (let i: number = 0; i < events.length; i++) {
-      events[i].from += delta;
-      events[i].to += delta;
-      await rdb.saveEvent(events[i]);
+    this.changingStartDate = true;
+    try {
+      const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
+      const rdb: RdbHelper = RdbHelper.getInstance();
+      await rdb.init(ctx);
+      await rdb.shiftTimetableStart(timetable.id, timetable.startTime, timetable.endTime, nextStart);
+      await this.load();
+      void this.resyncReminders().catch(() => {});
+      this.getUIContext().getPromptAction().showToast({ message: '开学日期已更新，课程已同步平移' });
+    } catch (_) {
+      this.getUIContext().getPromptAction().showToast({ message: '修改开学日期失败，请刷新后重试' });
+    } finally {
+      this.changingStartDate = false;
     }
-    const span: number = Math.max(DAY_MS, timetable.endTime - timetable.startTime);
-    timetable.startTime = nextStart;
-    timetable.endTime = nextStart + span;
-    await rdb.saveTimetable(timetable);
-    this.timetable = timetable;
-    await this.load();
-    this.getUIContext().getPromptAction().showToast({ message: '开学日期已更新，课程已同步平移' });
   }
 
   private openEditEvent(event: EasEventItem): void {
@@ -388,7 +388,11 @@ struct TimetableDetailPage {
   }
 
   /** 教务数据未提供考核方式时，允许手动纠正课程类型。 */
-  private chooseSubjectType(row: TimetableSubjectRow): void {
+  private async chooseSubjectType(row: TimetableSubjectRow): Promise<void> {
+    if (this.subjectTypeMenuOpen) {
+      return;
+    }
+    this.subjectTypeMenuOpen = true;
     const types: EasSubjectType[] = [EasSubjectType.COM_A, EasSubjectType.COM_B, EasSubjectType.OPT_A,
       EasSubjectType.OPT_B, EasSubjectType.MOOC, EasSubjectType.TAG];
     const button = (type: EasSubjectType): promptAction.Button => {
@@ -398,21 +402,56 @@ struct TimetableDetailPage {
       };
       return item;
     };
-    this.getUIContext().getPromptAction().showActionMenu({
-      title: '课程类型',
-      buttons: [button(types[0]), button(types[1]), button(types[2]), button(types[3]), button(types[4]),
-        button(types[5])]
-    }).then(async (ret) => {
+    try {
+      const ret = await this.getUIContext().getPromptAction().showActionMenu({
+        title: '课程类型',
+        buttons: [button(types[0]), button(types[1]), button(types[2]), button(types[3]), button(types[4]),
+          button(types[5])]
+      });
       const next: EasSubjectType | undefined = types[ret.index];
-      if (next === undefined || next === row.subject.type) {
+      if (next === undefined) {
         return;
       }
-      const subject: EasTermSubject = row.subject;
-      subject.type = next;
-      await RdbHelper.getInstance().saveSubject(subject);
-      await this.load();
-    }).catch(() => {
-    });
+      await this.applySubjectType(row.subject.id, row.subject.timetableId, next);
+    } catch (e) {
+      // Cancelling the system action menu leaves the course unchanged.
+    } finally {
+      this.subjectTypeMenuOpen = false;
+    }
+  }
+
+  private async applySubjectType(subjectId: string, timetableId: string, type: EasSubjectType): Promise<void> {
+    let index: number = this.subjectRows.findIndex((item: TimetableSubjectRow): boolean =>
+      item.subject.id === subjectId && item.subject.timetableId === timetableId);
+    if (index < 0) {
+      return;
+    }
+    if (this.subjectRows[index].subject.type !== type) {
+      try {
+        await RdbHelper.getInstance().saveSubjectType(subjectId, timetableId, type);
+      } catch (e) {
+        this.getUIContext().getPromptAction().showToast({ message: '课程类型保存失败，请重试' });
+        return;
+      }
+      index = this.subjectRows.findIndex((item: TimetableSubjectRow): boolean =>
+        item.subject.id === subjectId && item.subject.timetableId === timetableId);
+      if (index < 0) {
+        return;
+      }
+      const current: TimetableSubjectRow = this.subjectRows[index];
+      const previous: EasTermSubject = current.subject;
+      const updated: TimetableSubjectRow = new TimetableSubjectRow();
+      updated.subject = {
+        id: previous.id, timetableId: previous.timetableId, name: previous.name, type: type,
+        field: previous.field, credit: previous.credit, school: previous.school,
+        countInSPA: previous.countInSPA, code: previous.code, key: previous.key,
+        createdAt: previous.createdAt, color: previous.color
+      };
+      updated.classCount = current.classCount;
+      updated.sessions = current.sessions;
+      this.subjectRows = this.subjectRows.map((item: TimetableSubjectRow, rowIndex: number): TimetableSubjectRow =>
+        rowIndex === index ? updated : item);
+    }
   }
 
   @Builder
@@ -548,7 +587,7 @@ struct TimetableDetailPage {
   @Builder
   private courseGroupCard(row: TimetableSubjectRow) {
     Column() {
-      this.subjectCard(row)
+      this.subjectCard({ subject: row.subject, classCount: row.classCount, sessions: row.sessions })
       if (this.expandedSubjectId === row.subject.id) {
         Column() {
           Divider()
@@ -924,13 +963,17 @@ struct TimetableDetailPage {
             }
             .width('100%')
           }
-          ForEach(this.subjectRows, (row: TimetableSubjectRow) => {
+          ForEach(this.subjectRows, (row: TimetableSubjectRow, index: number) => {
             ListItem() {
               DeleteParticleCard({
                 controller: this.deleteEffects,
                 effectId: row.subject.id
               }) {
-                this.courseGroupCard(row)
+                this.courseGroupCard({
+                  subject: this.subjectRows[index].subject,
+                  classCount: this.subjectRows[index].classCount,
+                  sessions: this.subjectRows[index].sessions
+                })
               }
             }
             .enabled(this.pendingDeleteCourseId.length === 0)

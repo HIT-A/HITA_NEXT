@@ -38,7 +38,7 @@ test('page and sheet header back buttons stay on the leading side', () => {
   for (const page of pages) {
     const source = read(`pages/${page}.ets`);
     const header = source.slice(source.indexOf('  build()'));
-    assert.match(header, /Row\(\) \{\s*HeaderBackButton\(\{/, page);
+    assert.match(header, /Row\(\s*(?:\{[^{}\n]*\}\s*)?\)\s*\{\s*HeaderBackButton\(\{/, page);
   }
   const home = read('pages/Home.ets');
   const session = home.slice(home.indexOf('  sessionSheet()'));
@@ -118,5 +118,5 @@ test('manager selection cancel and course editor cancel keep their behavior', ()
   assert.equal((sheet.match(/\.margin\(\{ left: COURSE_DETAIL_TEXT_GAP \}\)/g) || []).length, 2);
   assert.match(sheet, /CirclePaintModifier/);
   assert.match(sheet, /this\.openEditEvent\(event\)/);
-  assert.match(detail, /\.bindSheet\(this\.sheetVisible,[\s\S]*?dragBar: true/);
+  assert.match(detail, /\.bindSheet\(\$\$this\.sheetVisible,[\s\S]*?dragBar: true/);
 });

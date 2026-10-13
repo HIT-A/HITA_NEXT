@@ -211,7 +211,20 @@ test('function-centre secondary pages use the same transparent header', () => {
     const source = read(`pages/${page}.ets`);
     const build = source.slice(source.indexOf('  build()'));
     assert.match(build, /HeaderFadeMask\(\{[\s\S]*?headerHeight: HEADER_HEIGHT/, page);
-    assert.match(build, /Row\(\) \{\s*HeaderBackButton\(\{[\s\S]*?\.height\(HEADER_HEIGHT\)[\s\S]*?\.hitTestBehavior\(HitTestMode\.Transparent\)/, page);
+    assert.match(build, /Row\(\s*(?:\{[^{}\n]*\}\s*)?\)\s*\{\s*HeaderBackButton\(\{[\s\S]*?\.height\(HEADER_HEIGHT\)[\s\S]*?\.hitTestBehavior\(HitTestMode\.Transparent\)/, page);
     assert.doesNotMatch(build, /\.border\(\{ width: \{ bottom: 1 \}/, page);
   }
+});
+
+test('score results scroll beneath the header and clear its fade when refreshing', () => {
+  const source = read('pages/ScorePage.ets');
+  const build = source.slice(source.indexOf('  build()'));
+  assert.match(build, /Stack\(\{ alignContent: Alignment\.Top \}\)/);
+  assert.match(build, /Scroll\(this\.pageScroller\) \{[\s\S]*?this\.queryFilters\(\)[\s\S]*?this\.statisticsCard\(\)/);
+  assert.match(build, /top: HEADER_HEIGHT, bottom: 16 \+ this\.navBarInset/);
+  assert.match(build, /\.onDidScroll\(\(\) => \{\s*this\.fadeOpacity = HeaderFade\.opacity\(this\.pageScroller\.currentOffset\(\)\.yOffset\)/);
+  assert.ok(build.indexOf('Scroll(this.pageScroller)') < build.indexOf('HeaderFadeMask('));
+  assert.ok(build.indexOf('HeaderFadeMask(') < build.indexOf('ImmersiveHeader({ barHeight: HEADER_HEIGHT })'));
+  assert.match(source, /private resetResult\(\): void \{[^}]*this\.fadeOpacity = 0;/);
+  assert.match(build, /\.padding\(\{ top: this\.statusBarInset \}\)/);
 });

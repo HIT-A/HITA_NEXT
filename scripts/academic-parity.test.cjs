@@ -23,7 +23,8 @@ function load(file) {
     return load(path.resolve(path.dirname(file), name + '.ets'));
   };
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
-  new Function('require', 'module', 'exports', js)(req, mod, mod.exports);
+  new Function('require', 'module', 'exports', 'Scroller', js)(req, mod, mod.exports,
+    class { currentOffset() { return { xOffset: 0, yOffset: 0 }; } });
   return mod.exports;
 }
 global.$r = name => name;
@@ -132,7 +133,9 @@ test('changing term/type discards old in-flight results and failures; leaving pa
   const page = new ScorePage(); page.session = session(C.SHENZHEN); page.terms = [term];
   const old = deferred(), fresh = deferred(); let calls = 0;
   page.service = { query: () => calls++ === 0 ? old.promise : fresh.promise };
+  page.fadeOpacity = 1;
   const a = page.queryReal(); page.typeIndex = 1; const b = page.queryReal();
+  assert.equal(page.fadeOpacity, 0, 'refreshing must clear the previous scroll fade');
   const result = new ScoreQueryResult(); result.items = [grade('95', 3)];
   fresh.resolve(result); await b;
   old.reject(new Error('old request failed')); await a;

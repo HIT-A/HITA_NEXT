@@ -38,8 +38,15 @@ test('empty states keep loading and text hints without login or add buttons', ()
   assert.doesNotMatch(examEmpty, /Button\(|\.onClick\(|openAddExam|\.margin\(\{\s*bottom:/);
   assert.match(exam, /this\.headerAction\('\u6dfb\u52a0',[\s\S]*?this\.openAddExam\(\)/);
   assert.equal((exam.match(/this\.openAddExam\(\)/g) ?? []).length, 1);
-  assert.match(examEmpty, /Text\(this\.queryMsg\)[\s\S]*?\.textAlign\(TextAlign\.Center\)/);
-  assert.match(exam, /if \(this\.loading && this\.exams\.length === 0 && this\.remoteExams\.length === 0\) \{\s*LoadingProgress\(\)/);
+  const hint = /Text\((this\.queryMsg[\s\S]*?)\)\s*\.fontSize/.exec(examEmpty);
+  assert.ok(hint, 'the empty state must display the query message');
+  const text = new Function(`return (${hint[1]});`);
+  assert.equal(text.call({ queryMsg: 'Query failed', hasSession: true }), 'Query failed');
+  for (const hasSession of [false, true]) {
+    assert.ok(text.call({ queryMsg: '', hasSession }).length > 0, 'no message still needs a readable fallback');
+  }
+  assert.match(examEmpty.slice(hint.index), /\.width\('100%'\)\s*\.textAlign\(TextAlign\.Center\)/);
+  assert.match(exam, /if \(this\.preparingQuery \|\| this\.querying \|\|\s*\(this\.loading && this\.exams\.length === 0 && this\.remoteExams\.length === 0\)\) \{\s*Column\([^)]*\) \{\s*LoadingProgress\(\)/);
   // Score statistics stay visible for a successful empty transcript; errors have their own retry state.
   assert.match(score, /if \(this\.loading\) \{\s*Column\([^)]*\) \{\s*LoadingProgress\(\)/);
   assert.match(score, /else if \(this\.errorText\) \{/);

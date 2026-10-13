@@ -159,6 +159,7 @@ export class EasTimetableImporter {
     courses: EasCourseItem[], schedule: EasTimePeriodInDay[], startTimeMs: number): Promise<EasTimetable> {
     const code: string = session.campus.toString() + ':' + term.getCode();
     let timetable: EasTimetable | undefined = await rdb.getTimetableByEasCode(code);
+    const replaceCourses: boolean = timetable !== undefined;
     if (timetable === undefined) {
       timetable = new EasTimetable();
       timetable.code = code;
@@ -175,12 +176,6 @@ export class EasTimetableImporter {
     timetable.endTime = timetable.startTime + maxWeek * 7 * 24 * 60 * 60 * 1000 - 1;
     timetable.createdAt = Date.now();
     timetable.scheduleStructure = schedule.length > 0 ? schedule : EasTimetableImporter.scheduleStructure(session.campus);
-    await rdb.saveTimetable(timetable);
-    const savedTimetable: EasTimetable | undefined = await rdb.getTimetableById(timetable.id);
-    if (savedTimetable === undefined) {
-      throw new Error('本地课表数据库写入失败，请重试');
-    }
-    await rdb.deleteCourseFromTimetable(timetable.id);
     const subjects: EasTermSubject[] = await rdb.getSubjectsOfTimetable(timetable.id);
     let validCourseCount: number = 0;
     let savedEventCount: number = 0;
@@ -188,8 +183,10 @@ export class EasTimetableImporter {
     const eventByKey: Map<string, EasEventItem> = new Map<string, EasEventItem>();
     for (let i: number = 0; i < courses.length; i++) {
       const course: EasCourseItem = courses[i];
-      if (course.dayOfWeek < 1 || course.dayOfWeek > 7 || course.beginSection < 1 ||
-        course.sectionCount < 1 || course.beginSection + course.sectionCount - 1 > timetable.scheduleStructure.length) {
+      if (!Number.isInteger(course.dayOfWeek) || course.dayOfWeek < 1 || course.dayOfWeek > 7 ||
+        !Number.isInteger(course.beginSection) || course.beginSection < 1 ||
+        !Number.isInteger(course.sectionCount) || course.sectionCount < 1 ||
+        course.beginSection + course.sectionCount - 1 > timetable.scheduleStructure.length) {
         hilog.warn(DOMAIN, TAG, 'skip invalid course name=%{public}s day=%{public}d section=%{public}d count=%{public}d',
           course.name, course.dayOfWeek, course.beginSection, course.sectionCount);
         continue;
@@ -210,7 +207,6 @@ export class EasTimetableImporter {
         subject.type = EasTimetableImporter.subjectTypeForCourse(course);
         subject.credit = course.credit > 0 ? course.credit : 0;
         subjects.push(subject);
-        await rdb.saveSubject(subject);
       } else if (EasTimetableImporter.hasSubjectTypeHint(course)) {
         // 旧版本导入器曾把所有新科目默认写成 COM_A（必修·考试）。
         // 重新导入时，仅在教务返回了明确分类时修正已有科目，避免用不完整
@@ -220,7 +216,6 @@ export class EasTimetableImporter {
         if (subject.type !== inferredType || subject.credit !== nextCredit) {
           subject.type = inferredType;
           subject.credit = nextCredit;
-          await rdb.saveSubject(subject);
         }
       }
       const weeks: number[] = course.weekNumbers;
@@ -234,7 +229,6 @@ export class EasTimetableImporter {
         if (duplicate !== undefined) {
           duplicate.teacher = EasTimetableImporter.joinDistinct(duplicate.teacher, course.teacher);
           duplicate.place = EasTimetableImporter.joinDistinct(duplicate.place, course.classroom);
-          await rdb.saveEvent(duplicate);
           continue;
         }
         const event: EasEventItem = new EasEventItem();
@@ -249,7 +243,6 @@ export class EasTimetableImporter {
         event.to = timestamps[1];
         event.fromNumber = course.beginSection;
         event.lastNumber = course.beginSection + course.sectionCount - 1;
-        await rdb.saveEvent(event);
         eventByKey.set(key, event);
         savedEventCount++;
       }
@@ -262,7 +255,7 @@ export class EasTimetableImporter {
     if (validCourseCount > 0 && savedEventCount === 0) {
       throw new Error('课表已解析，但本地没有写入任何课次');
     }
-    const allEvents: EasEventItem[] = await rdb.getEventsOfTimetable(timetable.id);
+    const allEvents: EasEventItem[] = Array.from(eventByKey.values());
     let lastEnd: number = 0;
     for (const event of allEvents) {
       if (Number.isFinite(event.to) && event.from >= timetable.startTime && event.to > event.from) {
@@ -273,8 +266,8 @@ export class EasTimetableImporter {
       const end: Date = new Date(EasTimetable.mondayMsOf(lastEnd));
       end.setDate(end.getDate() + 7);
       timetable.endTime = end.getTime() - 1;
-      await rdb.saveTimetable(timetable);
     }
+    await rdb.saveImportedTimetable(timetable, subjects, allEvents, replaceCourses);
     return timetable;
   }
 

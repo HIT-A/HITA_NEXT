@@ -194,7 +194,7 @@ test('detail page uses native left swipe, confirmation and animated expansion', 
   const deleteAction = source.slice(source.indexOf('  private courseDeleteAction('),
     source.indexOf('  private sessionRow('));
   assert.match(build, /List\(\{ scroller: this\.detailScroller \}\)/);
-  assert.match(build, /ListItem\(\) \{\s*DeleteParticleCard\([\s\S]*?this\.courseGroupCard\(row\)[\s\S]*?\.swipeAction\(\{\s*end:/);
+  assert.match(build, /ListItem\(\) \{\s*DeleteParticleCard\([\s\S]*?this\.courseGroupCard\(\{[\s\S]*?subject: this\.subjectRows\[index\]\.subject,[\s\S]*?\.swipeAction\(\{\s*end:/);
   assert.match(build, /edgeEffect: SwipeEdgeEffect\.None/);
   assert.match(source, /deleteCourseWithClasses\(subjectId, timetableId\)/);
   assert.match(source, /if \(ret\.index !== 1\)/);

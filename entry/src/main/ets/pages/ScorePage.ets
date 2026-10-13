@@ -1,6 +1,9 @@
 import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
+import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
+import { HeaderFade } from '../common/theme/HeaderFade';
+import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
@@ -15,6 +18,7 @@ const CAMPUSES: EasCampus[] = [EasCampus.SHENZHEN, EasCampus.BENBU, EasCampus.WE
 const CAMPUS_NAMES: string[] = ['深圳', '本部', '威海'];
 const TYPES: ScoreTestType[] = [ScoreTestType.NORMAL, ScoreTestType.MIDTERM, ScoreTestType.ALL, ScoreTestType.RETAKE];
 const TYPE_NAMES: string[] = ['期末', '期中', '全部', '重修'];
+const HEADER_HEIGHT: number = 60;
 
 @Entry
 @Component
@@ -30,12 +34,14 @@ struct ScorePage {
   @State queried: boolean = false;
   @State errorText: string = '';
   @State summaryMessage: string = '';
+  @State fadeOpacity: number = 0;
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
   @StorageProp('hita_nav_bar_vp') navBarInset: number = NAV_BAR_INSET_FALLBACK;
   private session: EasSession | undefined = undefined;
   private generation: number = 0;
   private initialized: boolean = false;
   private service: ScoreService = new ScoreService();
+  private pageScroller: Scroller = new Scroller();
 
   async onPageShow(): Promise<void> {
     const generation = ++this.generation;
@@ -57,6 +63,7 @@ struct ScorePage {
     this.scores = []; this.summary = new OfficialScoreSummary();
     this.statistics = new LocalScoreStatistics();
     this.errorText = ''; this.summaryMessage = ''; this.queried = false;
+    this.fadeOpacity = 0;
   }
 
   private async loadTerms(): Promise<void> {
@@ -176,15 +183,9 @@ struct ScorePage {
     }.width('100%').padding(16).borderRadius(16).backgroundColor($r('app.color.hita_surface'))
   }
 
-  build() {
+  @Builder
+  private queryFilters() {
     Column() {
-      ImmersiveHeader({ barHeight: 60 }) {
-        Row({ space: 12 }) {
-          HeaderBackButton({ onBack: () => this.getUIContext().getRouter().back() })
-          Text('成绩与统计').fontSize(20).fontWeight(FontWeight.Bold).fontColor($r('app.color.hita_text')).layoutWeight(1)
-          Button('刷新').height(34).fontSize(13).enabled(!this.loading).onClick(() => this.loadTerms())
-        }.width('100%').height(60).padding({ left: 16, right: 16 })
-      }
       Row({ space: 12 }) {
         Select(CAMPUS_NAMES.map((name: string): SelectOption => ({ value: name })))
           .selected(this.campusIndex).value(CAMPUS_NAMES[this.campusIndex]).layoutWeight(1)
@@ -195,24 +196,47 @@ struct ScorePage {
         Select(TYPE_NAMES.slice(0, this.campusIndex === 0 ? 2 : 4).map((name: string): SelectOption => ({ value: name })))
           .selected(this.typeIndex).value(TYPE_NAMES[this.typeIndex]).layoutWeight(1).enabled(this.terms.length > 0)
           .onSelect((index: number) => { this.typeIndex = index; this.queryReal(); })
-      }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
+      }.width('100%').padding({ top: 8, bottom: 8 })
       Select(this.terms.map((term: EasTermItem): SelectOption => ({ value: term.name })))
         .selected(this.termIndex).value(this.terms[this.termIndex]?.name ?? '学期').enabled(this.terms.length > 0)
         .onSelect((index: number) => { this.termIndex = index; this.queryReal(); })
-        .margin({ left: 16, right: 16, bottom: 12 })
-      if (this.loading) {
-        Column({ space: 12 }) {
-          LoadingProgress().width(40).height(40)
-          Text('正在查询成绩…').fontSize(14).fontColor($r('app.color.hita_text_secondary'))
-        }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-      } else if (this.errorText) {
-        Column({ space: 18 }) {
-          Text(this.errorText).fontSize(15).fontColor($r('app.color.hita_text')).textAlign(TextAlign.Center)
-          Button('重新查询').onClick(() => this.loadTerms())
-        }.width('100%').layoutWeight(1).padding(28).justifyContent(FlexAlign.Center)
+        .width('100%').margin({ bottom: 12 })
+    }.width('100%')
+  }
+
+  build() {
+    Stack({ alignContent: Alignment.Top }) {
+      if (this.loading || this.errorText) {
+        Column() {
+          this.queryFilters()
+          if (this.loading) {
+            Column({ space: 12 }) {
+              LoadingProgress().width(40).height(40)
+              Text('正在查询成绩…').fontSize(14).fontColor($r('app.color.hita_text_secondary'))
+            }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+          } else if (this.errorText) {
+            Column({ space: 18 }) {
+              Text(this.errorText).fontSize(15).fontColor($r('app.color.hita_text')).textAlign(TextAlign.Center)
+              Column() {
+                ImmersiveHeader({ barHeight: 52 }) {
+                  Row() {
+                    Button('重新查询', { type: ButtonType.Capsule })
+                      .width('100%').height(40).fontSize(14).fontWeight(FontWeight.Medium)
+                      .fontColor(CompatibleMaterialModifier.foreground('#FFFFFF'))
+                      .backgroundColor($r('app.color.hita_primary_fill'))
+                      .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_primary_fill')))
+                      .onClick(() => this.loadTerms())
+                  }.width('100%').height(52)
+                }
+              }.width(128).height(52)
+            }.width('100%').layoutWeight(1).padding(28).justifyContent(FlexAlign.Center)
+          }
+        }.width('100%').height('100%')
+          .padding({ left: 16, right: 16, top: HEADER_HEIGHT, bottom: 16 + this.navBarInset })
       } else if (this.queried) {
-        Scroll() {
+        Scroll(this.pageScroller) {
           Column({ space: 12 }) {
+            this.queryFilters()
             this.statisticsCard()
             if (this.scores.length === 0) {
               Text('所选学期及成绩类型暂无成绩').fontSize(14).fontColor($r('app.color.hita_text_secondary')).margin(24)
@@ -230,8 +254,29 @@ struct ScorePage {
               }.width('100%').padding(16).borderRadius(14).backgroundColor($r('app.color.hita_surface'))
                 .onClick(() => this.details(item))
             })
-          }.width('100%').padding({ left: 16, right: 16, bottom: 16 + this.navBarInset })
-        }.layoutWeight(1).width('100%').scrollBar(BarState.Off)
+          }.width('100%').padding({ left: 16, right: 16, top: HEADER_HEIGHT, bottom: 16 + this.navBarInset })
+        }.width('100%').height('100%').align(Alignment.Top).scrollBar(BarState.Off)
+          .onDidScroll(() => {
+            this.fadeOpacity = HeaderFade.opacity(this.pageScroller.currentOffset().yOffset);
+          })
+      }
+
+      HeaderFadeMask({ maskOpacity: this.fadeOpacity, headerHeight: HEADER_HEIGHT })
+
+      ImmersiveHeader({ barHeight: HEADER_HEIGHT }) {
+        Row({ space: 12 }) {
+          HeaderBackButton({ onBack: () => this.getUIContext().getRouter().back() })
+          Text('成绩与统计').fontSize(20).fontWeight(FontWeight.Bold).fontColor($r('app.color.hita_text'))
+            .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Button('刷新', { type: ButtonType.Capsule })
+            .height(34).fontSize(13).fontWeight(FontWeight.Medium)
+            .padding({ left: 12, right: 12 })
+            .fontColor(CompatibleMaterialModifier.foreground('#FFFFFF'))
+            .backgroundColor($r('app.color.hita_primary_fill'))
+            .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_primary_fill')))
+            .enabled(!this.loading).onClick(() => this.loadTerms())
+        }.width('100%').height(HEADER_HEIGHT).padding({ left: 16, right: 16 })
+          .alignItems(VerticalAlign.Center).hitTestBehavior(HitTestMode.Transparent)
       }
     }.width('100%').height('100%').padding({ top: this.statusBarInset }).backgroundColor($r('app.color.hita_page'))
   }
