@@ -10,6 +10,8 @@ HITA NEXT 是基于开源项目 [HITA Android](https://github.com/HIT-A/HITA_And
 
 ## 核心功能
 
+开发和 AI 修改请先阅读 [项目约定](AGENTS.md)。底部弹层统一使用 `SheetContent` 提供拖拽条下方的内容留白；相关检查见 `scripts/sheet-layout.test.cjs`。
+
 ### 今日
 
 - 显示当前日期、星期和教学周。
@@ -24,6 +26,7 @@ HITA NEXT 是基于开源项目 [HITA Android](https://github.com/HIT-A/HITA_And
 - 支持左右滑动切换周次，并带有页面切换动画。
 - 课程按照真实开始时间和持续时间绘制。
 - 默认显示约 08:00–19:00，晚间课程可继续向下滚动查看。
+- 查看周存在晚间课程时，右下角显示下箭头；点击滚动至课表底部。
 - 显示课程名称、地点以及不同课程对应的颜色。
 
 ### 教务
@@ -32,7 +35,7 @@ HITA NEXT 是基于开源项目 [HITA Android](https://github.com/HIT-A/HITA_And
 - 保存登录会话，并在再次启动应用时恢复当前登录状态。
 - 支持深圳、威海和本部本科生课表导入。
 - 自动获取当前学期，将课程、科目和每周课次写入本地数据库。
-- 支持使用深圳校区教务会话查询成绩。
+- 支持三校区本科成绩查询、学期和类型选择；分别展示教务官方统计与当前列表的本地统计。
 - 支持本部、威海本科教务考试查询，合并期末、期中与补考安排；保留深圳查询及手动考试管理，已确定时间的考试可导入当前课表。
 - 支持三校区本科教务空教室查询：沿用安卓 3.0.0 的教学楼／学期／周次自动查询、双列教室卡片及底部每日节次详情。
 
@@ -93,7 +96,8 @@ HitaNEXT/
 
 - `entry/src/main/ets/pages/Home.ets`：今日、时间表、更多三个主页面。
 - `entry/src/main/ets/feature/eas/webLogin/`：ArkWeb 登录和 Cookie 会话采集。
-- `entry/src/main/ets/feature/eas/EasDataProvider.ets`：深圳、本部本科与威海课表数据适配；真实成绩目前仅支持深圳。
+- `entry/src/main/ets/feature/eas/EasDataProvider.ets`：深圳、本部本科与威海课表数据适配。
+- `entry/src/main/ets/feature/eas/ScoreService.ets`：三校区成绩及官方统计查询；本部、威海研究生接口尚未接入。
 - `entry/src/main/ets/feature/eas/EasTimetableImporter.ets`：远端课程到本地课表的转换与写入。
 - `entry/src/main/ets/feature/timetable/views/TimetableWeekDraw.ets`：周课表网格及课程卡片绘制。
 - `entry/src/main/ets/common/db/RdbHelper.ets`：本地课表、科目和事件数据库。

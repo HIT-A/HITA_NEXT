@@ -15,8 +15,7 @@ function emptyBranch(source, condition) {
 }
 
 const cases = [
-  ['ExamPage.ets', '!this.loadError && this.exams.length === 0 && this.remoteExams.length === 0'],
-  ['ScorePage.ets', 'this.scores.length === 0']
+  ['ExamPage.ets', '!this.loadError && this.exams.length === 0 && this.remoteExams.length === 0']
 ];
 
 for (const [file, condition] of cases) {
@@ -36,12 +35,13 @@ test('empty states keep loading and text hints without login or add buttons', ()
   const exam = read('ExamPage.ets');
   const score = read('ScorePage.ets');
   const examEmpty = emptyBranch(exam, cases[0][1]);
-  const scoreEmpty = emptyBranch(score, cases[1][1]);
   assert.doesNotMatch(examEmpty, /Button\(|\.onClick\(|openAddExam|\.margin\(\{\s*bottom:/);
   assert.match(exam, /this\.headerAction\('\u6dfb\u52a0',[\s\S]*?this\.openAddExam\(\)/);
   assert.equal((exam.match(/this\.openAddExam\(\)/g) ?? []).length, 1);
   assert.match(examEmpty, /Text\(this\.queryMsg\)[\s\S]*?\.textAlign\(TextAlign\.Center\)/);
-  assert.doesNotMatch(scoreEmpty, /Button\(|\.onClick\(|openSession/);
   assert.match(exam, /if \(this\.loading && this\.exams\.length === 0 && this\.remoteExams\.length === 0\) \{\s*LoadingProgress\(\)/);
-  assert.match(score, /if \(this\.loading\) \{\s*Column\(\) \{\s*LoadingProgress\(\)/);
+  // Score statistics stay visible for a successful empty transcript; errors have their own retry state.
+  assert.match(score, /if \(this\.loading\) \{\s*Column\([^)]*\) \{\s*LoadingProgress\(\)/);
+  assert.match(score, /else if \(this\.errorText\) \{/);
+  assert.match(score, /else if \(this\.queried\) \{[\s\S]*?this\.statisticsCard\(\)[\s\S]*?if \(this\.scores\.length === 0\)/);
 });

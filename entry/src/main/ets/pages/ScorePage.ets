@@ -1,338 +1,238 @@
-/**
- * ScorePage.ets — 成绩查询。
- *
- * 需要教务会话：无会话 → 显示登录提示；有会话 → 拉取学期成绩并渲染。
- */
 import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
-import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
-import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
-import { HeaderFade } from '../common/theme/HeaderFade';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
 import { EasDataProvider } from '../feature/eas/EasDataProvider';
-import { EasUserMessages } from '../feature/eas/EasUserMessages';
-import { EasCourseScoreItem, EasTermItem } from '../feature/eas/model/EasModels';
 import { EasApiClient } from '../feature/eas/EasApiClient';
+import { EasCourseScoreItem, EasTermItem } from '../feature/eas/model/EasModels';
+import { ScoreService } from '../feature/eas/ScoreService';
+import { ScoreTestType, OfficialScoreSummary, LocalScoreStatistics, localScoreStatistics,
+  numericScore, scoreErrorMessage } from '../feature/eas/data/ScoreData';
 
-const HEADER_HEIGHT: number = 60;
-const PAGE_BG: ResourceColor = $r('app.color.hita_page_f6f7fa');
-const PAGE_BG_RGB: string = '246,247,250';
+const CAMPUSES: EasCampus[] = [EasCampus.SHENZHEN, EasCampus.BENBU, EasCampus.WEIHAI];
+const CAMPUS_NAMES: string[] = ['深圳', '本部', '威海'];
+const TYPES: ScoreTestType[] = [ScoreTestType.NORMAL, ScoreTestType.MIDTERM, ScoreTestType.ALL, ScoreTestType.RETAKE];
+const TYPE_NAMES: string[] = ['期末', '期中', '全部', '重修'];
 
 @Entry
 @Component
 struct ScorePage {
-  @State modeText: string = '';
-  @State msg: string = '';
+  @State campusIndex: number = 0;
+  @State termIndex: number = 0;
+  @State typeIndex: number = 0;
+  @State terms: EasTermItem[] = [];
   @State scores: EasCourseScoreItem[] = [];
-  @State loading: boolean = false;
-  @State hasSession: boolean = false;
-  @State fadeOpacity: number = 0;
+  @State summary: OfficialScoreSummary = new OfficialScoreSummary();
+  @State statistics: LocalScoreStatistics = new LocalScoreStatistics();
+  @State loading: boolean = true;
+  @State queried: boolean = false;
+  @State errorText: string = '';
+  @State summaryMessage: string = '';
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
   @StorageProp('hita_nav_bar_vp') navBarInset: number = NAV_BAR_INSET_FALLBACK;
   private session: EasSession | undefined = undefined;
-  private pageScroller: Scroller = new Scroller();
+  private generation: number = 0;
+  private initialized: boolean = false;
+  private service: ScoreService = new ScoreService();
 
-  async aboutToAppear(): Promise<void> {
-    const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
-    await EasSessionStore.getInstance().init(ctx);
-    // 依次找深圳/本部/威海的可用会话
-    const order: EasCampus[] = [EasCampus.SHENZHEN, EasCampus.BENBU, EasCampus.WEIHAI];
-    for (let i = 0; i < order.length; i++) {
-      const s: EasSession | undefined = await EasSessionStore.getInstance().load(order[i]);
-      if (s !== undefined && s.isLogin()) {
-        this.session = s;
-        break;
-      }
+  async onPageShow(): Promise<void> {
+    const generation = ++this.generation;
+    const store = EasSessionStore.getInstance();
+    await store.init(this.getUIContext().getHostContext() as common.Context);
+    if (!this.initialized) {
+      const preferred = await store.loadPreferred();
+      if (generation !== this.generation) return;
+      if (preferred !== undefined) this.campusIndex = CAMPUSES.indexOf(preferred.campus);
+      this.initialized = true;
     }
-    if (this.session !== undefined) {
-      this.hasSession = true;
-      this.modeText = '当前会话：' + ScorePage.campusText(this.session.campus);
-    } else {
-      this.modeText = '未登录教务';
+    if (generation === this.generation) await this.loadTerms();
+  }
+
+  onPageHide(): void { this.generation++; }
+  aboutToDisappear(): void { this.generation++; }
+
+  private resetResult(): void {
+    this.scores = []; this.summary = new OfficialScoreSummary();
+    this.statistics = new LocalScoreStatistics();
+    this.errorText = ''; this.summaryMessage = ''; this.queried = false;
+  }
+
+  private async loadTerms(): Promise<void> {
+    const generation = ++this.generation;
+    const oldCode = this.terms[this.termIndex]?.getCode() ?? '';
+    this.resetResult(); this.loading = true; this.terms = [];
+    try {
+      const session = await EasSessionStore.getInstance().load(CAMPUSES[this.campusIndex]);
+      if (generation !== this.generation) return;
+      this.session = session;
+      if (session === undefined || !session.isLogin()) {
+        throw new Error('请先在“更多 → 教务账号”登录' + CAMPUS_NAMES[this.campusIndex] + '教务');
+      }
+      if (session.campus !== EasCampus.SHENZHEN && session.getStudentType() === '2') {
+        throw new Error('该校区研究生成绩接口暂未接入，请到教务网站查询');
+      }
+      const terms = await new EasDataProvider(new EasApiClient()).getAllTerms(session);
+      if (generation !== this.generation) return;
+      if (terms.length === 0) throw new Error('未获取到学期列表，请稍后重试');
+      this.terms = terms;
+      const oldIndex = terms.findIndex((term: EasTermItem) => term.getCode() === oldCode);
+      const currentIndex = terms.findIndex((term: EasTermItem) => term.isCurrent);
+      this.termIndex = oldIndex >= 0 ? oldIndex : Math.max(0, currentIndex);
+      await this.queryReal();
+    } catch (error) {
+      if (generation === this.generation) this.errorText = scoreErrorMessage(error instanceof Error ? error.message : '');
+    } finally {
+      if (generation === this.generation) this.loading = false;
     }
   }
 
-  /** 拉取当前学期成绩：需要网页登录会话。 */
-  async queryReal(): Promise<void> {
-    if (this.session === undefined) {
-      this.msg = '请先登录教务';
-      return;
-    }
-    this.loading = true;
-    this.msg = '正在查询…';
+  private async queryReal(): Promise<void> {
+    const session = this.session;
+    const term = this.terms[this.termIndex];
+    if (session === undefined || term === undefined) { await this.loadTerms(); return; }
+    const generation = ++this.generation;
+    this.resetResult(); this.loading = true;
     try {
-      const provider: EasDataProvider = new EasDataProvider(new EasApiClient());
-      const terms: EasTermItem[] = await provider.getAllTerms(this.session);
-      if (terms.length === 0) {
-        this.msg = '未获取到学期信息，请稍后重试';
-        return;
-      }
-      const term: EasTermItem = terms[0];
-      const result = await provider.getPersonalScores(this.session, term);
-      if (result.ok) {
-        this.scores = result.items;
-        this.modeText = ScorePage.campusText(this.session.campus) + ' · ' + term.name;
-        this.msg = result.items.length > 0 ? '共 ' + result.items.length.toString() + ' 条成绩' : '本学期暂无成绩';
-      } else {
-        this.msg = EasUserMessages.fromError(result.msg, '成绩查询失败，请稍后重试');
-      }
-    } catch (e) {
-      this.msg = EasUserMessages.fromError(e instanceof Error ? e.message : String(e),
-        '成绩查询失败，请稍后重试');
+      const result = await this.service.query(session, term, TYPES[this.typeIndex]);
+      if (generation !== this.generation) return;
+      this.scores = result.items; this.summary = result.summary;
+      this.statistics = localScoreStatistics(result.items, TYPES[this.typeIndex] !== ScoreTestType.MIDTERM);
+      this.summaryMessage = result.summaryMessage; this.queried = true;
+    } catch (error) {
+      if (generation === this.generation) this.errorText = scoreErrorMessage(error instanceof Error ? error.message : '');
     } finally {
-      this.loading = false;
+      if (generation === this.generation) this.loading = false;
     }
+  }
+
+  private details(item: EasCourseScoreItem): void {
+    this.getUIContext().getPromptAction().showDialog({
+      title: item.courseName,
+      message: '成绩：' + item.displayScore() + '\n课程代码：' + (item.courseCode || '—') +
+        '\n学分：' + item.credits + '\n学时：' + item.hours + '\n学期：' + item.termName +
+        '\n课程性质：' + (item.courseProperty || '—') + '\n课程类别：' + (item.courseCategory || '—') +
+        '\n考核方式：' + (item.assessMethod || '—') + '\n开课单位：' + (item.schoolName || '—'),
+      buttons: [{ text: '知道了', color: '#3390EC' }]
+    });
+  }
+
+  private number(value: number): string { return value < 0 ? '—' : Number(value.toFixed(2)).toString(); }
+
+  @Builder
+  metric(label: string, value: string) {
+    Column({ space: 5 }) {
+      Text(value || '—').fontSize(20).fontWeight(FontWeight.Bold).fontColor($r('app.color.hita_text'))
+      Text(label).fontSize(12).fontColor($r('app.color.hita_text_secondary'))
+    }.layoutWeight(1).alignItems(HorizontalAlign.Center)
+  }
+
+  @Builder
+  statisticsCard() {
+    if (this.summary.available()) {
+      Column({ space: 14 }) {
+        Text(this.summary.scope).fontSize(14).fontWeight(FontWeight.Medium).fontColor($r('app.color.hita_text'))
+        Row() {
+          this.metric('学分绩', this.summary.weightedAverage)
+          this.metric('GPA', this.summary.gpa)
+          this.metric('排名', this.summary.rank ? this.summary.rank + (this.summary.total ? '/' + this.summary.total : '') : '')
+        }.width('100%')
+        if (this.summary.earnedCredits || this.summary.passedCourses) {
+          Text('获得学分 ' + (this.summary.earnedCredits || '—') + ' · 通过课程 ' + (this.summary.passedCourses || '—'))
+            .fontSize(12).fontColor($r('app.color.hita_text_secondary'))
+        }
+        if (this.summary.allCourseWeightedAverage || this.summary.allPassedCourseGpa) {
+          Text('全部课程学分绩 ' + (this.summary.allCourseWeightedAverage || '—') +
+            ' · 全部及格课程 GPA ' + (this.summary.allPassedCourseGpa || '—'))
+            .fontSize(12).fontColor($r('app.color.hita_text_secondary'))
+        }
+      }.width('100%').padding(16).borderRadius(16).backgroundColor($r('app.color.hita_surface'))
+    }
+    if (this.summaryMessage) {
+      Text(this.summaryMessage).fontSize(12).fontColor($r('app.color.hita_text_secondary')).width('100%')
+    }
+    Column({ space: 12 }) {
+      Text('当前列表统计 · ' + this.statistics.count + ' 门').fontSize(14).fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.hita_text')).width('100%')
+      if (TYPES[this.typeIndex] !== ScoreTestType.MIDTERM) {
+        Row() {
+          this.metric('通过', this.statistics.passed.toString())
+          this.metric('未通过', this.statistics.failed.toString())
+          this.metric('待定 / 未识别', this.statistics.pending.toString())
+        }.width('100%')
+      }
+      Row() {
+        this.metric('平均分', this.number(this.statistics.average))
+        this.metric('学分加权均分', this.number(this.statistics.weightedAverage))
+      }.width('100%')
+      Text('学分合计 ' + this.number(this.statistics.credits) + (TYPES[this.typeIndex] === ScoreTestType.MIDTERM ? '' :
+        ' · 通过学分 ' + this.number(this.statistics.passedCredits)))
+        .fontSize(12).fontColor($r('app.color.hita_text_secondary')).width('100%')
+      Text(TYPES[this.typeIndex] === ScoreTestType.MIDTERM ?
+        '期中按原始数值计算，不判定课程是否通过。不同课程可能采用不同满分或折算方式，均分仅供参考。' :
+        '均分只统计 0～100 的数值成绩，等级制不换算分数；按百分制及格线估算通过情况。此处不等于教务 GPA、毕业学分或官方排名。')
+        .fontSize(11).lineHeight(18).fontColor($r('app.color.hita_text_secondary')).width('100%')
+    }.width('100%').padding(16).borderRadius(16).backgroundColor($r('app.color.hita_surface'))
   }
 
   build() {
-    Stack({ alignContent: Alignment.Top }) {
-      if (this.loading) {
-        Column() {
-          LoadingProgress()
-            .width(48)
-            .height(48)
-            .color($r('app.color.hita_primary_3390ec'))
-          Text('正在查询…')
-            .fontSize(14)
-            .fontColor($r('app.color.hita_text_secondary_808080'))
-            .margin({ top: 12 })
-        }
-        .width('100%')
-        .height('100%')
-        .padding({ top: HEADER_HEIGHT })
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center)
-      } else if (this.scores.length === 0) {
-        Column() {
-          Text('暂无成绩数据')
-            .fontSize(16)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.hita_text_1a1a1a'))
-            .width('100%')
-            .textAlign(TextAlign.Center)
-            .margin({ bottom: 8 })
-          Text(this.hasSession ? '点击右上角“查询”获取成绩' : '登录教务后即可查询成绩')
-            .fontSize(13)
-            .fontColor($r('app.color.hita_text_secondary_808080'))
-            .width('100%')
-            .textAlign(TextAlign.Center)
-            .lineHeight(20)
-        }
-        .width('100%')
-        .height('100%')
-        .padding({ left: 32, right: 32, top: HEADER_HEIGHT, bottom: this.navBarInset })
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center)
-      } else {
-        List({ space: 10, scroller: this.pageScroller }) {
-          ListItem() {
-            Column()
-              .width('100%')
-              .height(HEADER_HEIGHT)
-          }
-          ListItem() {
-            Column() {
-              Text(this.modeText)
-                .fontSize(12)
-                .fontColor($r('app.color.hita_text_secondary_808080'))
-                .width('100%')
-                .maxLines(2)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-              if (this.msg.length > 0) {
-                Text(this.msg)
-                  .fontSize(12)
-                  .fontColor($r('app.color.hita_success_2e7d32'))
-                  .width('100%')
-                  .margin({ top: 4 })
-              }
-            }
-            .width('100%')
-            .padding({ left: 2, right: 2, top: 2, bottom: 6 })
-          }
-          ForEach(this.scores, (it: EasCourseScoreItem) => {
-            ListItem() {
-              Column() {
-                // ── Top row: course name + score ──
-                Row() {
-                  Text(it.courseName)
-                    .fontSize(15)
-                    .fontWeight(FontWeight.Bold)
-                    .fontColor($r('app.color.hita_text_1a1a1a'))
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .layoutWeight(1)
-                  Text(it.displayScore())
-                    .fontSize(22)
-                    .fontWeight(FontWeight.Bold)
-                    .fontColor(ScorePage.scoreColor(it))
-                }
-                .width('100%')
-                .alignItems(VerticalAlign.Center)
-
-                // ── Detail rows ──
-                Row({ space: 6 }) {
-                  Text(it.courseCode)
-                    .fontSize(12)
-                    .fontColor($r('app.color.hita_text_secondary_808080'))
-                  Text('·')
-                    .fontSize(12)
-                    .fontColor($r('app.color.hita_text_hint_b0b4ba'))
-                  Text(it.courseProperty.length > 0 ? it.courseProperty : '—')
-                    .fontSize(12)
-                    .fontColor($r('app.color.hita_text_secondary_808080'))
-                  Text('·')
-                    .fontSize(12)
-                    .fontColor($r('app.color.hita_text_hint_b0b4ba'))
-                  Text(it.courseCategory.length > 0 ? it.courseCategory : '—')
-                    .fontSize(12)
-                    .fontColor($r('app.color.hita_text_secondary_808080'))
-                }
-                .width('100%')
-                .margin({ top: 6 })
-
-                Row({ space: 4 }) {
-                  Text('学分')
-                    .fontSize(12)
-                    .fontColor($r('app.color.hita_text_hint_b0b4ba'))
-                  Text(ScorePage.num(it.credits))
-                    .fontSize(12)
-                    .fontColor($r('app.color.hita_text_secondary_808080'))
-                    .fontWeight(FontWeight.Medium)
-                  Text('·')
-                    .fontSize(12)
-                    .fontColor($r('app.color.hita_text_hint_b0b4ba'))
-                  Text('学时')
-                    .fontSize(12)
-                    .fontColor($r('app.color.hita_text_hint_b0b4ba'))
-                  Text(it.hours.toString())
-                    .fontSize(12)
-                    .fontColor($r('app.color.hita_text_secondary_808080'))
-                    .fontWeight(FontWeight.Medium)
-                  if (it.assessMethod.length > 0) {
-                    Text('·')
-                      .fontSize(12)
-                      .fontColor($r('app.color.hita_text_hint_b0b4ba'))
-                    Text(it.assessMethod)
-                      .fontSize(12)
-                      .fontColor($r('app.color.hita_text_secondary_808080'))
-                  }
-                  Text('·')
-                    .fontSize(12)
-                    .fontColor($r('app.color.hita_text_hint_b0b4ba'))
-                  Text(it.termName)
-                    .fontSize(12)
-                    .fontColor($r('app.color.hita_text_secondary_808080'))
-                }
-                .width('100%')
-                .margin({ top: 4 })
-
-                // ── School name ──
-                if (it.schoolName.length > 0) {
-                  Text(it.schoolName)
-                    .fontSize(11)
-                    .fontColor($r('app.color.hita_text_hint_b0b4ba'))
-                    .width('100%')
-                    .margin({ top: 6 })
-                }
-              }
-              .width('100%')
-              .padding(14)
-              .backgroundColor($r('app.color.hita_surface'))
-              .borderRadius(12)
-              .shadow({ radius: 8, color: '#14000000', offsetY: 2 })
-            }
-          }, (it: EasCourseScoreItem) => it.courseCode + it.termName)
-        }
-        .width('100%')
-        .height('100%')
-        .padding({ left: 14, right: 14, bottom: 16 })
-        .scrollBar(BarState.Off)
-        .onDidScroll(() => {
-          this.fadeOpacity = HeaderFade.opacity(this.pageScroller.currentOffset().yOffset);
-        })
+    Column() {
+      ImmersiveHeader({ barHeight: 60 }) {
+        Row({ space: 12 }) {
+          HeaderBackButton({ onBack: () => this.getUIContext().getRouter().back() })
+          Text('成绩与统计').fontSize(20).fontWeight(FontWeight.Bold).fontColor($r('app.color.hita_text')).layoutWeight(1)
+          Button('刷新').height(34).fontSize(13).enabled(!this.loading).onClick(() => this.loadTerms())
+        }.width('100%').height(60).padding({ left: 16, right: 16 })
       }
-
-      HeaderFadeMask({
-        maskOpacity: this.fadeOpacity,
-        rgb: PAGE_BG_RGB,
-        headerHeight: HEADER_HEIGHT
-      })
-
-      ImmersiveHeader({ barHeight: HEADER_HEIGHT }) {
-        Row() {
-          HeaderBackButton({
-            onBack: () => this.getUIContext().getRouter().back()
+      Row({ space: 12 }) {
+        Select(CAMPUS_NAMES.map((name: string): SelectOption => ({ value: name })))
+          .selected(this.campusIndex).value(CAMPUS_NAMES[this.campusIndex]).layoutWeight(1)
+          .onSelect((index: number) => {
+            if (index === this.campusIndex) return;
+            this.campusIndex = index; this.typeIndex = 0; this.terms = []; this.loadTerms();
           })
-            .margin({ right: 12 })
-          Text('成绩查询')
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.hita_text_1a1a1a'))
-            .layoutWeight(1)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-          Text('查询')
-            .fontSize(13)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(CompatibleMaterialModifier.foreground($r('app.color.hita_primary_3390ec')))
-            .height(32)
-            .padding({ left: 12, right: 12 })
-            .borderRadius(16)
-            .backgroundColor($r('app.color.hita_selected_ebf4fc'))
-            .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_selected_ebf4fc')))
-            .textAlign(TextAlign.Center)
-            .onClick(() => {
-              this.queryReal();
+        Select(TYPE_NAMES.slice(0, this.campusIndex === 0 ? 2 : 4).map((name: string): SelectOption => ({ value: name })))
+          .selected(this.typeIndex).value(TYPE_NAMES[this.typeIndex]).layoutWeight(1).enabled(this.terms.length > 0)
+          .onSelect((index: number) => { this.typeIndex = index; this.queryReal(); })
+      }.width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
+      Select(this.terms.map((term: EasTermItem): SelectOption => ({ value: term.name })))
+        .selected(this.termIndex).value(this.terms[this.termIndex]?.name ?? '学期').enabled(this.terms.length > 0)
+        .onSelect((index: number) => { this.termIndex = index; this.queryReal(); })
+        .margin({ left: 16, right: 16, bottom: 12 })
+      if (this.loading) {
+        Column({ space: 12 }) {
+          LoadingProgress().width(40).height(40)
+          Text('正在查询成绩…').fontSize(14).fontColor($r('app.color.hita_text_secondary'))
+        }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+      } else if (this.errorText) {
+        Column({ space: 18 }) {
+          Text(this.errorText).fontSize(15).fontColor($r('app.color.hita_text')).textAlign(TextAlign.Center)
+          Button('重新查询').onClick(() => this.loadTerms())
+        }.width('100%').layoutWeight(1).padding(28).justifyContent(FlexAlign.Center)
+      } else if (this.queried) {
+        Scroll() {
+          Column({ space: 12 }) {
+            this.statisticsCard()
+            if (this.scores.length === 0) {
+              Text('所选学期及成绩类型暂无成绩').fontSize(14).fontColor($r('app.color.hita_text_secondary')).margin(24)
+            }
+            ForEach(this.scores, (item: EasCourseScoreItem) => {
+              Column({ space: 8 }) {
+                Row({ space: 12 }) {
+                  Text(item.courseName).fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('app.color.hita_text')).layoutWeight(1)
+                  Text(item.displayScore()).fontSize(22).fontWeight(FontWeight.Bold)
+                    .fontColor(numericScore(item.displayScore()) >= 0 && numericScore(item.displayScore()) < 60 ?
+                      $r('app.color.hita_error') : $r('app.color.hita_primary'))
+                }.width('100%')
+                Text([item.courseCode, item.courseProperty, item.credits + ' 学分'].filter((v: string) => v.length > 0).join(' · '))
+                  .fontSize(12).fontColor($r('app.color.hita_text_secondary')).width('100%')
+              }.width('100%').padding(16).borderRadius(14).backgroundColor($r('app.color.hita_surface'))
+                .onClick(() => this.details(item))
             })
-        }
-        .width('100%')
-        .height(HEADER_HEIGHT)
-        .padding({ left: 16, right: 16 })
-        .alignItems(VerticalAlign.Center)
-        .hitTestBehavior(HitTestMode.Transparent)
+          }.width('100%').padding({ left: 16, right: 16, bottom: 16 + this.navBarInset })
+        }.layoutWeight(1).width('100%').scrollBar(BarState.Off)
       }
-    }
-    .width('100%')
-    .height('100%')
-    .padding({ top: this.statusBarInset })
-    .backgroundColor(PAGE_BG)
-  }
-
-  static campusText(c: EasCampus): string {
-    if (c === EasCampus.SHENZHEN) {
-      return '深圳校区';
-    }
-    if (c === EasCampus.BENBU) {
-      return '本部';
-    }
-    return '威海校区';
-  }
-
-  static num(v: number): string {
-    const s: string = v.toString();
-    if (s.indexOf('.') < 0) {
-      return s + '.0';
-    }
-    return s;
-  }
-
-  static scoreColor(it: EasCourseScoreItem): ResourceColor {
-    if (it.finalScores >= 90) {
-      return $r('app.color.hita_success_2e7d32');
-    }
-    if (it.finalScores >= 80) {
-      return $r('app.color.hita_primary_3390ec');
-    }
-    if (it.finalScores >= 60) {
-      return $r('app.color.hita_text_secondary_808080');
-    }
-    if (it.finalScoresText.length > 0 && it.finalScores < 0) {
-      return $r('app.color.hita_primary_3390ec'); // 等级制文本（优/良/通过…）
-    }
-    return $r('app.color.hita_error');
+    }.width('100%').height('100%').padding({ top: this.statusBarInset }).backgroundColor($r('app.color.hita_page'))
   }
 }

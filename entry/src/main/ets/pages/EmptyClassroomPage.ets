@@ -1,3 +1,4 @@
+import { SheetContent } from '../common/components/SheetContent';
 import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
 import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
@@ -402,37 +403,39 @@ struct EmptyClassroomPage {
 
   @Builder
   private classroomSheet() {
-    Column({ space: 16 }) {
-      Row({ space: 8 }) {
-        Text(this.detailRoom.name + ' 空闲情况').fontSize(24).fontWeight(FontWeight.Bold).fontColor(TEXT)
-          .layoutWeight(1).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.termLabel() + '\n第 ' + this.selectedWeek.toString() + ' 周')
-          .fontSize(12).fontColor(SECONDARY).padding(8).borderRadius(12).backgroundColor($r('app.color.hita_control'))
-      }.width('100%')
-      Row({ space: 4 }) {
-        ForEach(DAYS, (day: string, index: number) => {
-          Text(day).fontSize(14).height(34).layoutWeight(1).textAlign(TextAlign.Center).borderRadius(17)
-            .fontColor(this.detailDay === index + 1 ? PRIMARY : SECONDARY)
-            .backgroundColor(this.detailDay === index + 1 ? $r('app.color.hita_selected') : Color.Transparent)
-            .onClick(() => this.selectDay(index + 1))
-        })
-      }.width('100%')
-      Divider().color($r('app.color.hita_control'))
-      List({ space: 12 }) {
-        ForEach(this.detailRows, (row: ClassroomScheduleRow) => {
-          ListItem() {
-            Row({ space: 8 }) {
-              Text('第 ' + row.number.toString() + ' 节').fontSize(16).fontColor(TEXT).layoutWeight(1)
-              Text(row.time).fontSize(14).fontColor(SECONDARY).padding(8).borderRadius(8)
-                .backgroundColor($r('app.color.hita_control'))
-              Blank().layoutWeight(1)
-              Text(row.state).fontSize(14).fontWeight(FontWeight.Bold).width(40).height(40).borderRadius(20)
-                .textAlign(TextAlign.Center).fontColor(row.state === '空' ? PRIMARY : SECONDARY)
-                .backgroundColor(row.state === '空' ? $r('app.color.hita_selected') : $r('app.color.hita_control'))
-            }.width('100%').padding({ right: 12 })
-          }
-        }, (row: ClassroomScheduleRow): string => this.detailDay.toString() + ':' + row.number.toString() + ':' + row.time + ':' + row.state)
-      }.layoutWeight(1).width('100%').padding({ bottom: this.navBarInset + 16 })
-    }.width('100%').height('100%').padding({ top: 16, left: 20, right: 20 })
+    SheetContent({ fillHeight: true }) {
+      Column({ space: 16 }) {
+        Row({ space: 8 }) {
+          Text(this.detailRoom.name + ' 空闲情况').fontSize(24).fontWeight(FontWeight.Bold).fontColor(TEXT)
+            .layoutWeight(1).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(this.termLabel() + '\n第 ' + this.selectedWeek.toString() + ' 周')
+            .fontSize(12).fontColor(SECONDARY).padding(8).borderRadius(12).backgroundColor($r('app.color.hita_control'))
+        }.width('100%')
+        Row({ space: 4 }) {
+          ForEach(DAYS, (day: string, index: number) => {
+            Text(day).fontSize(14).height(34).layoutWeight(1).textAlign(TextAlign.Center).borderRadius(17)
+              .fontColor(this.detailDay === index + 1 ? PRIMARY : SECONDARY)
+              .backgroundColor(this.detailDay === index + 1 ? $r('app.color.hita_selected') : Color.Transparent)
+              .onClick(() => this.selectDay(index + 1))
+          })
+        }.width('100%')
+        Divider().color($r('app.color.hita_control'))
+        List({ space: 12 }) {
+          ForEach(this.detailRows, (row: ClassroomScheduleRow) => {
+            ListItem() {
+              Row({ space: 8 }) {
+                Text('第 ' + row.number.toString() + ' 节').fontSize(16).fontColor(TEXT).layoutWeight(1)
+                Text(row.time).fontSize(14).fontColor(SECONDARY).padding(8).borderRadius(8)
+                  .backgroundColor($r('app.color.hita_control'))
+                Blank().layoutWeight(1)
+                Text(row.state).fontSize(14).fontWeight(FontWeight.Bold).width(40).height(40).borderRadius(20)
+                  .textAlign(TextAlign.Center).fontColor(row.state === '空' ? PRIMARY : SECONDARY)
+                  .backgroundColor(row.state === '空' ? $r('app.color.hita_selected') : $r('app.color.hita_control'))
+              }.width('100%').padding({ right: 12 })
+            }
+          }, (row: ClassroomScheduleRow): string => this.detailDay.toString() + ':' + row.number.toString() + ':' + row.time + ':' + row.state)
+        }.layoutWeight(1).width('100%').padding({ bottom: this.navBarInset + 16 })
+      }.width('100%').height('100%').padding({ left: 20, right: 20 })
+    }
   }
 }

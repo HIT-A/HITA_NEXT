@@ -1014,26 +1014,12 @@ export struct EventEditorForm {
             }
           }, (label: string) => label)
         }.width('100%').clip(false)
-        CourseControlHost({
-          barHeight: 32, materialEnabled: this.courseMaterialsEnabled(),
-          onPressingChanged: (pressing: boolean) => { this.activeCourseControl = pressing; }
-        }) {
-          Row() {
-            Button('增加 5 周')
-              .height(32).fontSize(13)
-              .backgroundColor($r('app.color.hita_surface_soft'))
-              .fontColor($r('app.color.hita_primary_3390ec'))
-              .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_surface_soft'), false,
-                this.courseMaterialsEnabled()))
-              .onClick(() => {
-                this.weekChoices = CourseDateSelection.numbers(this.weekChoices.length + 5);
-                this.hint = '';
-              })
-            Blank()
-          }.width('100%')
-        }
         CourseWeekPicker({ weeks: this.weekChoices, chosen: $selectedWeeks,
-          onChoosingChanged: (choosing: boolean) => { this.choosingWeeks = choosing; } })
+          onChoosingChanged: (choosing: boolean) => { this.choosingWeeks = choosing; },
+          onAddWeeks: () => {
+            this.weekChoices = CourseDateSelection.numbers(this.weekChoices.length + 5);
+            this.hint = '';
+          } })
         Text('已选 ' + this.selectedWeeks.length.toString() + ' 周 · ' +
           this.selectedWeekdays.length.toString() + ' 天/周，共 ' +
           (this.selectedWeeks.length * this.selectedWeekdays.length).toString() + ' 个课次')

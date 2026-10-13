@@ -11,6 +11,7 @@ export struct CourseWeekPicker {
   @Link chosen: number[];
   @State editMode: boolean = true;
   @State activeWeek: number = -1;
+  onAddWeeks: () => void = () => {};
   onChoosingChanged: (choosing: boolean) => void = (_choosing: boolean) => {};
 
   aboutToDisappear(): void {
@@ -52,6 +53,32 @@ export struct CourseWeekPicker {
     }
   }
 
+  @Builder
+  addWeekCell() {
+    CourseControlHost({
+      barHeight: 44,
+      onPressingChanged: (pressing: boolean) => {
+        if (pressing) this.activeWeek = 0;
+        else if (this.activeWeek === 0) this.activeWeek = -1;
+        this.onChoosingChanged(pressing);
+      }
+    }) {
+      Button('+', { type: ButtonType.Normal })
+        .width('100%')
+        .height(44)
+        .padding(0)
+        .borderRadius(12)
+        .fontSize(24)
+        .fontWeight(FontWeight.Medium)
+        .backgroundColor($r('app.color.hita_surface_soft'))
+        .fontColor($r('app.color.hita_primary_3390ec'))
+        .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_surface_soft'), false,
+          CompatibleSheetMaterial.isEnabled()))
+        .accessibilityText('增加 5 个教学周')
+        .onClick(() => this.onAddWeeks())
+    }
+  }
+
   build() {
     Column({ space: 8 }) {
       if (deviceInfo.apiAvailable('26.0.0')) {
@@ -81,6 +108,11 @@ export struct CourseWeekPicker {
                 this.select(week, !this.chosen.includes(week));
               })
           }, (week: number) => week.toString())
+          GridItem() { this.addWeekCell() }
+            .height(44)
+            .clip(false)
+            .zIndex(this.activeWeek === 0 ? 3 : 1)
+            .selectable(false)
         }
         .columnsTemplate('1fr 1fr 1fr 1fr 1fr')
         .rowsGap(8)
@@ -89,7 +121,7 @@ export struct CourseWeekPicker {
           'calc(100% + ' + (COURSE_CONTROL_OVERFLOW * 2).toString() + 'vp)' : '100%')
         .padding(CompatibleSheetMaterial.isEnabled() ? COURSE_CONTROL_OVERFLOW : 0)
         .margin(CompatibleSheetMaterial.isEnabled() ? -COURSE_CONTROL_OVERFLOW : 0)
-        .height(Math.min(304, Math.ceil(this.weeks.length / 5) * 52 - 8) +
+        .height(Math.min(304, Math.ceil((this.weeks.length + 1) / 5) * 52 - 8) +
           (CompatibleSheetMaterial.isEnabled() ? COURSE_CONTROL_OVERFLOW * 2 : 0))
         .clipContent(ContentClipMode.BOUNDARY)
         .zIndex(1)
@@ -110,11 +142,16 @@ export struct CourseWeekPicker {
               .height(44)
               .onClick(() => this.select(week, !this.chosen.includes(week)))
           }, (week: number) => week.toString())
+          GridItem() { this.addWeekCell() }
+            .height(44)
+            .clip(false)
+            .zIndex(this.activeWeek === 0 ? 3 : 1)
+            .selectable(false)
         }
         .columnsTemplate('1fr 1fr 1fr 1fr 1fr')
         .rowsGap(8)
         .columnsGap(8)
-        .height(Math.min(304, Math.ceil(this.weeks.length / 5) * 52 - 8))
+        .height(Math.min(304, Math.ceil((this.weeks.length + 1) / 5) * 52 - 8))
       }
     }
     .width('100%')

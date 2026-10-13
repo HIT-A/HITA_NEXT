@@ -10,13 +10,15 @@
 import { http } from '@kit.NetworkKit';
 import { EasCampusConfig, EasCampusUrls, EasUserAgent } from './webLogin/EasWebLoginConfig';
 import { EasSession } from './EasSession';
+import { EasSessionStore } from './EasSessionStore';
+import { EasSessionResponse, isExpiredEasResponse } from './EasSessionStatus';
 
 export enum EasHttpMethod {
   GET = 'GET',
   POST = 'POST'
 }
 
-export class EasApiResponse {
+export class EasApiResponse implements EasSessionResponse {
   statusCode: number = 0;
   body: string = '';
 }
@@ -82,6 +84,9 @@ export class EasApiClient {
       }
       const resp: EasApiResponse = await EasApiClient.doHttp(url, options.method, header, options.body,
         options.timeoutMs, options.useCache);
+      if (isExpiredEasResponse(resp)) {
+        await EasSessionStore.getInstance().markExpired(session);
+      }
       if (resp.statusCode === 401 || this.isSessionInvalidResponse(resp, cfg)) {
         if (this.reloginHandler !== undefined && i + 1 < attempts) {
           const ok: boolean = await this.reloginHandler('session invalid on ' + path);

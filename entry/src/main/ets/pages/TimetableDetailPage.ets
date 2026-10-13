@@ -1,3 +1,4 @@
+import { SheetContent } from '../common/components/SheetContent';
 /** Android HITA-style timetable detail and course management. */
 import { common } from '@kit.AbilityKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
@@ -716,30 +717,32 @@ struct TimetableDetailPage {
 
   @Builder
   private eventSheetContent() {
-    if (this.eventSheetMode === 2) {
-      EventEditorForm({
-        eventId: this.sheetEventId,
-        targetTimetableId: this.timetableId,
-        initialType: 'CLASS',
-        sheetMode: true,
-        onCancel: () => {
-          this.closeSheet();
-        },
-        onSaved: (_event: EasEventItem, occurrences: EasEventItem[]) => {
-          for (const occurrence of occurrences) {
-            this.applySavedEvent(occurrence, false);
-            if (this.timetable !== undefined && occurrence.to > this.timetable.endTime) {
-              this.timetable.endTime = CourseDateSelection.weekEnd(occurrence.to);
+    SheetContent({ fillHeight: this.eventSheetMode === 2 }) {
+      if (this.eventSheetMode === 2) {
+        EventEditorForm({
+          eventId: this.sheetEventId,
+          targetTimetableId: this.timetableId,
+          initialType: 'CLASS',
+          sheetMode: true,
+          onCancel: () => {
+            this.closeSheet();
+          },
+          onSaved: (_event: EasEventItem, occurrences: EasEventItem[]) => {
+            for (const occurrence of occurrences) {
+              this.applySavedEvent(occurrence, false);
+              if (this.timetable !== undefined && occurrence.to > this.timetable.endTime) {
+                this.timetable.endTime = CourseDateSelection.weekEnd(occurrence.to);
+              }
             }
+            void this.resyncReminders();
+            this.closeSheet();
           }
-          void this.resyncReminders();
-          this.closeSheet();
-        }
-      })
-        .width('100%')
-        .height('100%');
-    } else if (this.selectedEvent !== undefined) {
-      this.courseDetailSheet(this.selectedEvent as EasEventItem);
+        })
+          .width('100%')
+          .height('100%');
+      } else if (this.selectedEvent !== undefined) {
+        this.courseDetailSheet(this.selectedEvent as EasEventItem);
+      }
     }
   }
 
@@ -798,7 +801,7 @@ struct TimetableDetailPage {
         this.courseProgressText(event));
     }
     .width('100%')
-    .padding({ left: 20, right: 20, top: 4, bottom: 20 });
+    .padding({ left: 20, right: 20, top: 0, bottom: 20 });
   }
 
   @Builder

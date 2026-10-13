@@ -18,7 +18,7 @@ function deferred() {
   return { promise, resolve };
 }
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
-const Status = { CHECKING: 'checking', CONNECTED: 'connected', EXPIRED: 'expired', UNKNOWN: 'unknown' };
+const Status = { SAVED: 'saved', CHECKING: 'checking', CONNECTED: 'connected', EXPIRED: 'expired', UNKNOWN: 'unknown' };
 
 function harness() {
   const state = {
@@ -273,67 +273,47 @@ test('text palette keeps its close guard until dismissal finishes', () => {
   assert.equal(page.canOpenSheet(), true);
 });
 
-test('a saved session is checked when the sheet opens, and expiry does not delete offline data', async () => {
+test('opening and reopening account sheet reads saved expiry without network probes or clearing data', async () => {
   const { page, state } = harness();
-  const check = deferred();
   let clears = 0;
   state.clear = async () => { clears++; };
-  state.verify = () => check.promise;
+  state.verify = () => { assert.fail('account sheet must not probe'); };
+  state.load = async campus => ({ campus, name: 'Current session', loginExpired: true });
   await page.openSessionSheet();
-  assert.equal(page.activeSheetVisible, true, 'verification must not delay the sheet opening');
-  assert.equal(page.sessionSheetStatus, Status.CHECKING);
-  assert.equal(state.checks.length, 1);
-  check.resolve(Status.EXPIRED);
-  await flush();
+  assert.equal(page.activeSheetVisible, true);
   assert.equal(page.sessionSheetStatus, Status.EXPIRED);
   assert.equal(page.sessionSheetInfo.name, 'Current session');
+  page.willDisappear(); page.didDisappear();
+  await page.openSessionSheet();
+  assert.equal(page.sessionSheetStatus, Status.EXPIRED);
   assert.equal(clears, 0);
+  assert.equal(state.checks.length, 0);
 });
 
-test('switching campus ignores a late verification result from the previous campus', async () => {
+test('account sheet displays independent saved campus states and ignores late reads', async () => {
   const { page, state } = harness();
+  await page.openSessionSheet();
+  assert.equal(page.sessionSheetStatus, Status.SAVED);
   const old = deferred();
-  state.verify = () => old.promise;
-  await page.openSessionSheet();
-  state.verify = async () => Status.CONNECTED;
-  await page.selectSessionCampus('BENBU');
-  await flush();
-  assert.equal(page.sessionSheetStatus, Status.CONNECTED);
-  old.resolve(Status.EXPIRED);
-  await flush();
-  assert.equal(page.sessionSheetCampus, 'BENBU');
-  assert.equal(page.sessionSheetStatus, Status.CONNECTED);
-});
-
-test('dismissal and relogin discard stale verification; reopening verifies again', async () => {
-  for (const leave of [page => page.willDisappear(), page => page.beginSessionLogin()]) {
-    const { page, state } = harness();
-    const old = deferred();
-    state.verify = () => old.promise;
-    await page.openSessionSheet();
-    leave(page);
-    old.resolve(Status.EXPIRED);
-    await flush();
-    assert.equal(page.sessionSheetStatus, Status.CHECKING);
-    page.willDisappear();
-    page.didDisappear();
-    state.verify = async () => Status.CONNECTED;
-    await page.openSessionSheet();
-    await flush();
-    assert.equal(state.checks.length, 2);
-    assert.equal(page.sessionSheetStatus, Status.CONNECTED);
-  }
-});
-
-test('verification failure shows unknown; an empty saved session does not trigger network verification', async () => {
-  const { page, state } = harness();
-  state.verify = async () => { throw Error('offline'); };
-  await page.openSessionSheet();
-  await flush();
-  assert.equal(page.sessionSheetStatus, Status.UNKNOWN);
-  assert.deepEqual(state.toasts, []);
-  state.load = async () => undefined;
+  state.load = () => old.promise;
+  const pending = page.selectSessionCampus('BENBU');
+  state.load = async campus => ({ campus, loginExpired: false });
   await page.selectSessionCampus('SHENZHEN');
+  old.resolve({ campus: 'BENBU', loginExpired: true }); await pending;
+  assert.equal(page.sessionSheetCampus, 'SHENZHEN');
+  assert.equal(page.sessionSheetStatus, Status.SAVED);
+  assert.equal(state.checks.length, 0);
+});
+
+test('missing session and completed relogin use local state without automatic validation', async () => {
+  const { page, state } = harness();
+  state.load = async () => undefined;
+  await page.openSessionSheet();
   assert.equal(page.sessionSheetInfo, undefined);
-  assert.equal(state.checks.length, 1);
+  page.willDisappear(); page.didDisappear();
+  state.load = async campus => ({ campus, loginExpired: false });
+  await page.openSessionSheet();
+  assert.equal(page.sessionSheetStatus, Status.SAVED);
+  assert.equal(state.checks.length, 0);
+  assert.doesNotMatch(home, /checkSessionStatus\(|verifySessionSheet\(/);
 });

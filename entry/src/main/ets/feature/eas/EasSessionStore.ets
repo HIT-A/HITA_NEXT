@@ -10,10 +10,23 @@ import { EasCampus, EasSession } from './EasSession';
 const STORE_NAME: string = 'hitanext_store';
 const SESSION_PREFIX: string = 'eas_session_';
 const LAST_CAMPUS_KEY: string = 'eas_last_campus';
+export const EAS_SESSION_REVISION_KEY: string = 'hita_eas_session_revision';
 
 export class EasSessionStore {
   private static instance: EasSessionStore | undefined = undefined;
   private store: preferences.Preferences | undefined = undefined;
+  private mutation: Promise<void> = Promise.resolve();
+
+  private enqueue(action: () => Promise<void>): Promise<void> {
+    const pending = this.mutation.then(action);
+    this.mutation = pending.catch(() => {});
+    return pending;
+  }
+
+  private notifyChanged(): void {
+    const revision: number = AppStorage.get<number>(EAS_SESSION_REVISION_KEY) ?? 0;
+    AppStorage.setOrCreate(EAS_SESSION_REVISION_KEY, revision + 1);
+  }
 
   static getInstance(): EasSessionStore {
     if (EasSessionStore.instance === undefined) {
@@ -72,17 +85,40 @@ export class EasSessionStore {
     return undefined;
   }
 
-  /** 保存某校区会话（sessionGeneration 自增由调用方控制，这里只落盘）。 */
+  /** 仅在网页登录成功后调用；与失效标记串行，避免旧请求覆盖新登录。 */
   async save(session: EasSession): Promise<void> {
-    if (this.store === undefined) {
-      return;
-    }
-    try {
-      await this.store.put(this.keyOf(session.campus), session.encode());
-      await this.store.put(LAST_CAMPUS_KEY, session.campus.toString());
-      await this.store.flush();
-    } catch (e) {
-    }
+    return this.enqueue(async () => {
+      if (this.store === undefined) return;
+      try {
+        const previous = await this.load(session.campus);
+        session.sessionGeneration = Math.max(Date.now(), (previous?.sessionGeneration ?? 0) + 1);
+        session.loginExpired = false;
+        await this.store.put(this.keyOf(session.campus), session.encode());
+        await this.store.put(LAST_CAMPUS_KEY, session.campus.toString());
+        await this.store.flush();
+        this.notifyChanged();
+      } catch (_) {}
+    });
+  }
+
+  /** 只修改发起该请求的同一会话；保留身份资料、凭据和当前校区选择。 */
+  async markExpired(requestSession: EasSession): Promise<void> {
+    return this.enqueue(async () => {
+      if (this.store === undefined) return;
+      try {
+        const current = await this.load(requestSession.campus);
+        if (current === undefined || current.loginExpired ||
+          current.sessionGeneration !== requestSession.sessionGeneration ||
+          current.getStudentType() !== requestSession.getStudentType() ||
+          current.webBaseUrl !== requestSession.webBaseUrl ||
+          current.accessToken !== requestSession.accessToken ||
+          EasSession.buildCookieHeader(current.webCookies) !== EasSession.buildCookieHeader(requestSession.webCookies)) return;
+        current.loginExpired = true;
+        await this.store.put(this.keyOf(current.campus), current.encode());
+        await this.store.flush();
+        this.notifyChanged();
+      } catch (_) {}
+    });
   }
 
   /** 最近一次完成登录的校区，用于多校区并存时选择正确的数据会话。 */
@@ -109,17 +145,15 @@ export class EasSessionStore {
 
   /** 清除某校区会话（退出登录）。 */
   async clear(campus: EasCampus): Promise<void> {
-    if (this.store === undefined) {
-      return;
-    }
-    try {
-      await this.store.delete(this.keyOf(campus));
-      const last: EasCampus | undefined = await this.loadLastCampus();
-      if (last === campus) {
-        await this.store.delete(LAST_CAMPUS_KEY);
-      }
-      await this.store.flush();
-    } catch (e) {
-    }
+    return this.enqueue(async () => {
+      if (this.store === undefined) return;
+      try {
+        await this.store.delete(this.keyOf(campus));
+        const last = await this.loadLastCampus();
+        if (last === campus) await this.store.delete(LAST_CAMPUS_KEY);
+        await this.store.flush();
+        this.notifyChanged();
+      } catch (_) {}
+    });
   }
 }

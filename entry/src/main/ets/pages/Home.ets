@@ -27,13 +27,15 @@ import { DockLightController } from '../common/util/DockLightEffect';
 import { DOCK_HOLD_DELAY_MS, DockNavigationGuard } from '../common/util/DockNavigationGuard';
 import { DeleteEffectController } from '../common/util/DeleteEffectController';
 import { CourseColorEditor } from '../feature/timetable/views/CourseColorEditor';
+import { CourseControlHost } from '../feature/timetable/views/CourseControlHost';
 import { TimetableCardMaterials } from '../feature/timetable/views/TimetableCardMaterials';
 import { TimetableCardPainter } from '../feature/timetable/views/TimetableCardPainter';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTermSubject, EasTimetable } from '../common/model/timetable/TimetableModels';
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
-import { EasSessionStore } from '../feature/eas/EasSessionStore';
+import { EasSessionStore, EAS_SESSION_REVISION_KEY } from '../feature/eas/EasSessionStore';
+import { SheetContent } from '../common/components/SheetContent';
 import { EasApiClient } from '../feature/eas/EasApiClient';
 import { EasDataProvider } from '../feature/eas/EasDataProvider';
 import { EasSessionStatus } from '../feature/eas/EasSessionStatus';
@@ -42,6 +44,7 @@ import { EasUserMessages } from '../feature/eas/EasUserMessages';
 import { EasLoginPage } from '../feature/eas/webLogin/EasLoginPage';
 import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
 import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
+import { hasEveningCourse, eveningHintVisible } from '../feature/timetable/data/EveningCourseHint';
 import { TimetableBackgroundStore } from '../feature/timetable/data/TimetableBackgroundStore';
 import { ClassReminderStore } from '../feature/timetable/data/ClassReminderStore';
 import { ClassReminderScheduler, ClassReminderSyncResult } from '../feature/timetable/data/ClassReminderScheduler';
@@ -137,6 +140,7 @@ struct Home {
   @State nextClass: EasEventItem | undefined = undefined;
   @State nowTick: number = Date.now();
   @State sessionInfo: EasSession | undefined = undefined;
+  @StorageProp(EAS_SESSION_REVISION_KEY) @Watch('onSessionRevisionChanged') sessionRevision: number = 0;
   @State activeSheetVisible: boolean = false;
   @State sessionSheetOpen: boolean = false;
   @State sessionSheetCampus: string = 'WEIHAI';
@@ -183,6 +187,7 @@ struct Home {
   private timetableAreaW: number = 0;
   private timetableAreaH: number = 0;
   @State private timetableCanvasHeight: number = 0;
+  @State private showEveningCourseHint: boolean = false;
   @State timetableFadeOpacity: number = 0;
   @State moreHeaderMaskOpacity: number = 0;
   @State selectedNav: number = TAB_TODAY;
@@ -258,6 +263,21 @@ struct Home {
     this.tabTransitionRunning = false;
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.OFFSET);
     this.stopTimetableMarquee();
+  }
+
+  private async onSessionRevisionChanged(): Promise<void> {
+    const revision = this.sessionRevision;
+    const store = EasSessionStore.getInstance();
+    const session = await store.loadPreferred();
+    if (revision !== this.sessionRevision) return;
+    this.sessionInfo = session;
+    if (this.sessionSheetOpen) {
+      const campus = this.sessionSheetCampus;
+      const selected = await store.load(Home.campusFromCode(campus));
+      if (revision !== this.sessionRevision || !this.sessionSheetOpen || campus !== this.sessionSheetCampus) return;
+      this.sessionSheetInfo = selected;
+      this.sessionSheetStatus = selected?.loginExpired ? EasSessionStatus.EXPIRED : EasSessionStatus.SAVED;
+    }
   }
 
   private onAppearanceChanged(): void {
@@ -381,7 +401,7 @@ struct Home {
     if (generation !== this.summaryRequestGeneration || this.skippingCourse) {
       return;
     }
-    if (found !== undefined && real === undefined && selected === undefined &&
+    if (found !== undefined && !found.loginExpired && real === undefined && selected === undefined &&
       !this.importing && !this.importRequested) {
       await this.importTimetable(false);
       return;
@@ -412,7 +432,9 @@ struct Home {
       return;
     }
     const keepWeek: boolean = preserveWeek && this.currentTimetable?.id === display?.id;
-    this.sessionInfo = found;
+    const latestSession = await EasSessionStore.getInstance().loadPreferred();
+    if (generation !== this.summaryRequestGeneration || this.skippingCourse) return;
+    this.sessionInfo = latestSession;
     this.timetableCount = allTimetables.length;
     this.recentTimetable = recent;
     this.hasTimetable = display !== undefined;
@@ -523,6 +545,7 @@ struct Home {
     if (this.timetableCanvasHeight !== canvasHeight) {
       this.timetableCanvasHeight = canvasHeight;
     }
+    this.updateEveningCourseHint();
     const cardLayer: TimetableCardLayer = new TimetableCardLayer();
     // The grid shares the page's resource-backed background with the heading.
     const labels: TimetablePlaceLabel[] = drawTimetableWeek(this.timetableCanvas,
@@ -552,6 +575,20 @@ struct Home {
     }
     const max: number = this.currentTimetable.getWeekNumber(this.currentTimetable.endTime - 1);
     return max > 0 ? max : 1;
+  }
+
+  private showReturnToCurrentWeek(): boolean {
+    const week: number = this.currentTimetable?.getWeekNumber(this.nowTick) ?? -1;
+    return week > 0 && week <= this.maxTimetableWeek() && week !== this.timetableWeek;
+  }
+
+  private returnToCurrentWeek(): void {
+    if (!this.canOpenSheet() || this.timetableAnimating) return;
+    const now: number = Date.now();
+    const week: number = this.currentTimetable?.getWeekNumber(now) ?? -1;
+    if (week < 1 || week > this.maxTimetableWeek() || week === this.timetableWeek) return;
+    this.nowTick = now;
+    this.animateTimetableWeek(week - this.timetableWeek);
   }
 
   private shiftTimetableWeek(delta: number): void {
@@ -956,6 +993,17 @@ struct Home {
     this.drawTimetableNow();
   }
 
+  private updateEveningCourseHint(): void {
+    if (this.currentTimetable === undefined || this.timetableAreaH <= 0) {
+      this.showEveningCourseHint = false;
+      return;
+    }
+    const weekEvents = eventsOfWeek(this.currentTimetable, this.timetableEvents, this.timetableWeek);
+    const maxOffset = Math.max(0, this.timetableChromeH + this.timetableCanvasHeight - this.timetableAreaH);
+    this.showEveningCourseHint = eveningHintVisible(hasEveningCourse(weekEvents),
+      this.timetableScroller.currentOffset().yOffset, maxOffset);
+  }
+
   private hasTimetableBackground(): boolean {
     return this.timetableBgUri.length > 0;
   }
@@ -1277,10 +1325,10 @@ struct Home {
       }
       this.sessionSheetCampus = campus.toString();
       this.sessionSheetInfo = session;
-      this.sessionSheetStatus = EasSessionStatus.CHECKING;
+      this.sessionSheetStatus = EasSessionStatus.UNKNOWN;
       this.sessionSheetOpen = true;
       this.activeSheetVisible = true;
-      this.verifySessionSheet(session, generation);
+      this.sessionSheetStatus = session?.loginExpired ? EasSessionStatus.EXPIRED : EasSessionStatus.SAVED;
     } catch (_) {
       if (generation === this.sheetRequestGeneration && this.canOpenSheet()) {
         this.getUIContext().getPromptAction().showToast({ message: '教务会话读取失败，请重试' });
@@ -1299,33 +1347,17 @@ struct Home {
     const generation: number = ++this.sheetRequestGeneration;
     this.sessionSheetCampus = code;
     this.sessionSheetInfo = undefined;
-    this.sessionSheetStatus = EasSessionStatus.CHECKING;
+    this.sessionSheetStatus = EasSessionStatus.UNKNOWN;
     try {
       const session: EasSession | undefined = await EasSessionStore.getInstance().load(Home.campusFromCode(code));
       if (generation === this.sheetRequestGeneration && this.activeSheetVisible && this.sessionSheetOpen) {
         this.sessionSheetInfo = session;
-        this.verifySessionSheet(session, generation);
+        this.sessionSheetStatus = session?.loginExpired ? EasSessionStatus.EXPIRED : EasSessionStatus.SAVED;
       }
     } catch (_) {
       if (generation === this.sheetRequestGeneration && this.activeSheetVisible && this.sessionSheetOpen) {
         this.getUIContext().getPromptAction().showToast({ message: '教务会话读取失败，请重试' });
       }
-    }
-  }
-
-  private async verifySessionSheet(session: EasSession | undefined, generation: number): Promise<void> {
-    if (session === undefined) {
-      return;
-    }
-    let status: EasSessionStatus = EasSessionStatus.UNKNOWN;
-    try {
-      status = await new EasDataProvider(new EasApiClient()).checkSessionStatus(session);
-    } catch (_) {
-      status = EasSessionStatus.UNKNOWN;
-    }
-    if (generation === this.sheetRequestGeneration && this.activeSheetVisible && this.sessionSheetOpen &&
-      this.sessionSheetCampus === session.campus.toString()) {
-      this.sessionSheetStatus = status;
     }
   }
 
@@ -1636,52 +1668,54 @@ struct Home {
 
   @Builder
   activeSheet() {
-    if (this.loginSheetOpen) {
-      EasLoginPage({
-        campusCode: this.loginCampusCode,
-        studentType: '1',
-        onCancel: () => {
-          this.closeActiveSheet();
-        },
-        onLoggedIn: (session: EasSession) => {
-          if (!this.activeSheetVisible || !this.loginSheetOpen) {
-            return;
-          }
-          this.closeActiveSheet();
-          this.sessionSheetInfo = session;
-          this.refreshSummaries();
-        }
-      })
-        .width('100%')
-        .height('100%')
-        .attributeModifier(new CompatibleLightModifier(24, CompatibleSheetMaterial.isEnabled(), true));
-    } else if (this.timetablePaletteOpen) {
-      Column() {
-        CourseColorEditor({
-          initialColor: (0xFF000000 | parseInt(this.timetableTextColor.substring(1), 16)) >>> 0,
-          textMode: true,
-          immersiveControls: true,
-          previewDark: this.darkMode,
-          previewWallpaper: this.hasTimetableBackground(),
-          presets: TimetableTheme.PALETTE.map((color: string): number =>
-            (0xFF000000 | parseInt(color.substring(1), 16)) >>> 0),
-          onSave: async (color: number) => {
-            const generation: number = this.sheetRequestGeneration;
-            await this.setTimetableTextColor('#' + (color & 0xFFFFFF).toString(16).padStart(6, '0').toUpperCase());
-            if (generation === this.sheetRequestGeneration && this.timetablePaletteOpen) {
-              this.closeActiveSheet();
-            }
+    SheetContent({ fillHeight: this.loginSheetOpen }) {
+      if (this.loginSheetOpen) {
+        EasLoginPage({
+          campusCode: this.loginCampusCode,
+          studentType: '1',
+          onCancel: () => {
+            this.closeActiveSheet();
           },
-          onCancel: () => { this.closeActiveSheet(); }
+          onLoggedIn: (session: EasSession) => {
+            if (!this.activeSheetVisible || !this.loginSheetOpen) {
+              return;
+            }
+            this.closeActiveSheet();
+            this.sessionSheetInfo = session;
+            this.refreshSummaries();
+          }
         })
-      }.width('100%').padding({ left: 20, right: 20, top: 4, bottom: 20 })
-        .attributeModifier(new CompatibleLightModifier(24, CompatibleSheetMaterial.isEnabled(), true));
-    } else if (this.courseSheetOpen && this.selectedCourse !== undefined) {
-      this.courseDetailSheet(this.selectedCourse as EasEventItem);
-    } else if (this.calendarExportSheetOpen && this.calendarExportTimetable !== undefined) {
-      this.calendarExportConfirmationSheet(this.calendarExportTimetable as EasTimetable);
-    } else if (this.sessionSheetOpen) {
-      this.sessionSheet();
+          .width('100%')
+          .height('100%')
+          .attributeModifier(new CompatibleLightModifier(24, CompatibleSheetMaterial.isEnabled(), true));
+      } else if (this.timetablePaletteOpen) {
+        Column() {
+          CourseColorEditor({
+            initialColor: (0xFF000000 | parseInt(this.timetableTextColor.substring(1), 16)) >>> 0,
+            textMode: true,
+            immersiveControls: true,
+            previewDark: this.darkMode,
+            previewWallpaper: this.hasTimetableBackground(),
+            presets: TimetableTheme.PALETTE.map((color: string): number =>
+              (0xFF000000 | parseInt(color.substring(1), 16)) >>> 0),
+            onSave: async (color: number) => {
+              const generation: number = this.sheetRequestGeneration;
+              await this.setTimetableTextColor('#' + (color & 0xFFFFFF).toString(16).padStart(6, '0').toUpperCase());
+              if (generation === this.sheetRequestGeneration && this.timetablePaletteOpen) {
+                this.closeActiveSheet();
+              }
+            },
+            onCancel: () => { this.closeActiveSheet(); }
+          })
+        }.width('100%').padding({ left: 20, right: 20, top: 0, bottom: 20 })
+          .attributeModifier(new CompatibleLightModifier(24, CompatibleSheetMaterial.isEnabled(), true));
+      } else if (this.courseSheetOpen && this.selectedCourse !== undefined) {
+        this.courseDetailSheet(this.selectedCourse as EasEventItem);
+      } else if (this.calendarExportSheetOpen && this.calendarExportTimetable !== undefined) {
+        this.calendarExportConfirmationSheet(this.calendarExportTimetable as EasTimetable);
+      } else if (this.sessionSheetOpen) {
+        this.sessionSheet();
+      }
     }
   }
 
@@ -1741,7 +1775,7 @@ struct Home {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .padding({ left: 20, right: 20, top: 4, bottom: 20 })
+    .padding({ left: 20, right: 20, top: 0, bottom: 20 })
     .attributeModifier(new CompatibleLightModifier(24, CompatibleSheetMaterial.isEnabled(), true));
   }
 
@@ -2265,6 +2299,7 @@ struct Home {
           .scrollBar(BarState.Off)
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
           .onDidScroll(() => {
+            this.updateEveningCourseHint();
             if (this.hasTimetableBackground()) {
               this.timetableFadeOpacity = 0;
               return;
@@ -2411,6 +2446,51 @@ struct Home {
           }
         }
       })
+
+      if (this.currentTimetable !== undefined && this.showEveningCourseHint) {
+        Row() {
+          CourseControlHost({ barHeight: 48 }) {
+            Button({ type: ButtonType.Circle }) {
+              SymbolGlyph($r('sys.symbol.chevron_down'))
+                .fontSize(24)
+                .fontColor([CompatibleMaterialModifier.foreground(COLOR_PRIMARY)])
+            }
+            .id('timetable-evening-hint')
+            .width(48)
+            .height(48)
+            .backgroundColor(COLOR_NAV_ACTIVE)
+            .attributeModifier(new CompatibleMaterialModifier(COLOR_NAV_ACTIVE))
+            .accessibilityText('下方还有晚间课程，点击查看')
+            .onClick(() => this.timetableScroller.scrollEdge(Edge.Bottom, { velocity: 1200 }))
+          }
+        }
+        .width(48)
+        .height(48)
+        .position({ right: 18, bottom: this.dockPageInset() + 20 })
+      }
+
+      if (this.showReturnToCurrentWeek()) {
+        Row() {
+          CourseControlHost({ barHeight: 48 }) {
+            Button({ type: ButtonType.Circle }) {
+              SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+                .fontSize(24)
+                .fontColor([CompatibleMaterialModifier.foreground(COLOR_PRIMARY)])
+            }
+            .id('timetable-return-current-week')
+            .width(48)
+            .height(48)
+            .backgroundColor(COLOR_NAV_ACTIVE)
+            .attributeModifier(new CompatibleMaterialModifier(COLOR_NAV_ACTIVE))
+            .accessibilityText('回到本周')
+            .enabled(!this.timetableAnimating)
+            .onClick(() => this.returnToCurrentWeek())
+          }
+        }
+        .width(48)
+        .height(48)
+        .position({ right: 18, bottom: this.dockPageInset() + (this.showEveningCourseHint ? 80 : 20) })
+      }
     }
     .width('100%')
     .height('100%')
@@ -2496,7 +2576,7 @@ struct Home {
                 this.getUIContext().getRouter().pushUrl({ url: 'pages/ExamPage' });
               });
             this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '成绩管理',
-              '查看学期成绩与绩点', () => {
+              '按学期查询成绩、官方统计与本地均分', () => {
                 this.getUIContext().getRouter().pushUrl({ url: 'pages/ScorePage' });
               });
             this.moreNavigationRow($r('sys.symbol.magnifyingglass'), '空教室',
@@ -2698,12 +2778,14 @@ struct Home {
       .width(40)
       .height(40)
       .borderRadius(20)
+      .id('eas-account-avatar')
       .backgroundColor(this.sessionInfo === undefined ? $r('app.color.hita_disabled_aab4c1') :
-        $r('app.color.hita_primary_fill'))
+        (this.sessionInfo.loginExpired ? $r('app.color.hita_error') : $r('app.color.hita_primary_fill')))
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center);
       Column() {
         Text(this.sessionInfo === undefined ? '未登录教务' :
+          this.sessionInfo.loginExpired ? '已过期教务' :
           (this.sessionInfo.name.length > 0 ? this.sessionInfo.name :
             (this.sessionInfo.username.length > 0 ? this.sessionInfo.username :
               (this.sessionInfo.stuId.length > 0 ? this.sessionInfo.stuId : '已登录教务'))))
@@ -2711,6 +2793,7 @@ struct Home {
           .fontWeight(FontWeight.Bold)
           .fontColor(COLOR_TEXT_PRIMARY);
         Text(this.sessionInfo === undefined ? '点击进行教务登录' :
+          this.sessionInfo.loginExpired ? Home.campusName(this.sessionInfo.campus) + ' · 点击重新登录' :
           ((this.sessionInfo.stuId.length > 0 ? this.sessionInfo.stuId + '\n' : '') +
             Home.campusName(this.sessionInfo.campus) +
             (this.sessionInfo.school.length > 0 ? ' · ' + this.sessionInfo.school : '') +
@@ -2842,7 +2925,7 @@ struct Home {
       }
     }
     .width('100%')
-    .padding({ left: 20, right: 20, top: 4, bottom: 20 })
+    .padding({ left: 20, right: 20, top: 0, bottom: 20 })
     .attributeModifier(new CompatibleLightModifier(24, CompatibleSheetMaterial.isEnabled(), true));
   }
 
@@ -2977,11 +3060,11 @@ struct Home {
           Text(this.sessionSheetStatus)
             .fontSize(12)
             .fontWeight(FontWeight.Medium)
-            .fontColor(this.sessionSheetStatus === EasSessionStatus.CONNECTED ? $r('app.color.hita_success') :
+            .fontColor(this.sessionSheetStatus === EasSessionStatus.SAVED ? $r('app.color.hita_success') :
               this.sessionSheetStatus === EasSessionStatus.EXPIRED ? $r('app.color.hita_error') :
                 COLOR_TEXT_SECONDARY)
             .padding({ left: 9, right: 9, top: 5, bottom: 5 })
-            .backgroundColor(this.sessionSheetStatus === EasSessionStatus.CONNECTED ?
+            .backgroundColor(this.sessionSheetStatus === EasSessionStatus.SAVED ?
               $r('app.color.hita_success_surface') : this.sessionSheetStatus === EasSessionStatus.EXPIRED ?
                 $r('app.color.hita_error_surface') : $r('app.color.hita_control'))
             .flexShrink(0)
@@ -3082,7 +3165,7 @@ struct Home {
       }
     }
     .width('100%')
-    .padding({ left: 20, right: 20, top: 4, bottom: 22 })
+    .padding({ left: 20, right: 20, top: 0, bottom: 22 })
     .attributeModifier(new CompatibleLightModifier(24, CompatibleSheetMaterial.isEnabled(), true));
   }
 

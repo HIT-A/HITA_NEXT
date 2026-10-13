@@ -74,13 +74,8 @@ export struct EasLoginPage {
       this.clearPageLoadTimer();
       const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
       EasSessionStore.getInstance().init(ctx).then(() => {
-        return EasSessionStore.getInstance().load(session.campus);
-      }).then((oldSession: EasSession | undefined) => {
         if (!this.pageActive || generation !== this.callbackGeneration) {
           return Promise.resolve();
-        }
-        if (oldSession !== undefined && oldSession.sessionGeneration > 0) {
-          session.sessionGeneration = oldSession.sessionGeneration + 1;
         }
         return EasSessionStore.getInstance().save(session);
       }).then(() => {

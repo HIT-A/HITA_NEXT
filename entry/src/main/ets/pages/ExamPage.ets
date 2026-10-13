@@ -1,3 +1,4 @@
+import { SheetContent } from '../common/components/SheetContent';
 /**
  * ExamPage.ets — 考试查询。
  *
@@ -790,26 +791,28 @@ struct ExamPage {
 
   @Builder
   private examSheetContent() {
-    if (this.examSheetMode === 2) {
-      EventEditorForm({
-        eventId: this.sheetEventId,
-        targetTimetableId: this.targetTimetableId,
-        initialType: 'EXAM',
-        sheetMode: true,
-        onCancel: () => {
-          this.closeSheet();
-        },
-        onSaved: (_event: EasEventItem) => {
-          this.closeSheet();
-          this.loadExams();
-        }
-      })
-        .width('100%')
-        .height('100%');
-    } else if (this.examSheetMode === 3 && this.selectedRemote !== undefined) {
-      this.remoteDetailSheet(this.selectedRemote as EasExamItem);
-    } else if (this.selectedExam !== undefined) {
-      this.examDetailSheet(this.selectedExam as EasEventItem);
+    SheetContent({ fillHeight: this.examSheetMode === 2 }) {
+      if (this.examSheetMode === 2) {
+        EventEditorForm({
+          eventId: this.sheetEventId,
+          targetTimetableId: this.targetTimetableId,
+          initialType: 'EXAM',
+          sheetMode: true,
+          onCancel: () => {
+            this.closeSheet();
+          },
+          onSaved: (_event: EasEventItem) => {
+            this.closeSheet();
+            this.loadExams();
+          }
+        })
+          .width('100%')
+          .height('100%');
+      } else if (this.examSheetMode === 3 && this.selectedRemote !== undefined) {
+        this.remoteDetailSheet(this.selectedRemote as EasExamItem);
+      } else if (this.selectedExam !== undefined) {
+        this.examDetailSheet(this.selectedExam as EasEventItem);
+      }
     }
   }
 
@@ -891,7 +894,7 @@ struct ExamPage {
       }
     }
     .width('100%')
-    .padding({ left: 20, right: 20, top: 4, bottom: 20 })
+    .padding({ left: 20, right: 20, top: 0, bottom: 20 })
   }
 
   @Builder
@@ -969,7 +972,7 @@ struct ExamPage {
       }
     }
     .width('100%')
-    .padding({ left: 20, right: 20, top: 4, bottom: 20 })
+    .padding({ left: 20, right: 20, top: 0, bottom: 20 })
   }
 
   @Builder

@@ -30,6 +30,8 @@ export class EasSession {
   electronicExpToken: string = '';
   /** 会话代数：用于失效/刷新判定，每次重登 +1 */
   sessionGeneration: number = 0;
+  /** 仅在实际教务请求确认认证失效后置为 true；重新登录成功时清除。 */
+  loginExpired: boolean = false;
 
   // —— 自有后端 token（本整合可不使用）——
   accessToken: string = '';
@@ -127,6 +129,7 @@ export class EasSession {
       'webBaseUrl': this.webBaseUrl,
       'electronicExpToken': this.electronicExpToken,
       'sessionGeneration': this.sessionGeneration,
+      'loginExpired': this.loginExpired,
       'accessToken': this.accessToken,
       'refreshToken': this.refreshToken,
       'username': this.username,
@@ -167,6 +170,7 @@ export class EasSession {
       s.webBaseUrl = str('webBaseUrl');
       s.electronicExpToken = str('electronicExpToken');
       s.sessionGeneration = Number(o['sessionGeneration'] ?? 0);
+      s.loginExpired = o['loginExpired'] === true;
       s.accessToken = str('accessToken');
       s.refreshToken = str('refreshToken');
       s.username = str('username');

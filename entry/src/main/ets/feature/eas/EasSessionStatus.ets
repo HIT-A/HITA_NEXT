@@ -1,6 +1,10 @@
-import { EasApiResponse } from './EasApiClient';
+export interface EasSessionResponse {
+  statusCode: number;
+  body: string;
+}
 
 export enum EasSessionStatus {
+  SAVED = '已登录',
   CHECKING = '验证中',
   CONNECTED = '已连接',
   EXPIRED = '已过期',
@@ -8,7 +12,7 @@ export enum EasSessionStatus {
 }
 
 /** A saved cookie is not proof of a live session; require an authentication failure from the server. */
-export function isExpiredEasResponse(response: EasApiResponse): boolean {
+export function isExpiredEasResponse(response: EasSessionResponse): boolean {
   if (response.statusCode === 401) {
     return true;
   }

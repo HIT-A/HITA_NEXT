@@ -150,3 +150,109 @@ test('session probes disable the underlying HTTP response cache', async () => {
   assert.equal(requests[0].options.usingCache, false);
   assert.match(requests[0].options.header.Cookie, /JSESSIONID=synthetic-session/);
 });
+
+const { EasSessionStore } = load('feature/eas/EasSessionStore.ets');
+function storedSessions(data = new Map()) {
+  const state = new Map();
+  global.AppStorage = { get: key => state.get(key), setOrCreate: (key, value) => state.set(key, value) };
+  const store = new EasSessionStore();
+  store.store = {
+    get: async (key, fallback) => data.has(key) ? data.get(key) : fallback,
+    put: async (key, value) => { data.set(key, value); },
+    delete: async key => { data.delete(key); }, flush: async () => {}
+  };
+  return { store, data, state };
+}
+
+test('saved expiry persists across store reloads and does not erase the account, cookies or selected campus', async () => {
+  const { store, data } = storedSessions();
+  const saved = session(Campus.SHENZHEN); saved.name = 'Fixture';
+  await store.save(saved);
+  await store.save(session(Campus.BENBU));
+  await store.markExpired(saved);
+  const current = await storedSessions(data).store.load(Campus.SHENZHEN);
+  assert.equal(current.loginExpired, true);
+  assert.equal(current.name, 'Fixture');
+  assert.equal(current.webCookies.get('JSESSIONID'), 'synthetic-session');
+  assert.equal(current.isLogin(), true);
+  assert.equal(await store.loadLastCampus(), Campus.BENBU);
+  assert.equal((await store.load(Campus.BENBU)).loginExpired, false);
+  const legacy = JSON.parse(saved.encode()); delete legacy.loginExpired;
+  assert.equal(EasSession.decode(JSON.stringify(legacy)).loginExpired, false);
+});
+
+test('real request path marks only definite authentication failures for each campus', async () => {
+  const previousStore = EasSessionStore.instance;
+  const previousHttp = EasApiClient.doHttp;
+  try {
+    for (const campus of Object.values(Campus)) {
+      for (const result of [response('', 401), response('{"code":"LOGIN_EXPIRED"}'),
+        response('<form action="/loginCAS"><input type="password"></form>')]) {
+        const { store } = storedSessions(); EasSessionStore.instance = store;
+        const saved = session(campus); await store.save(saved);
+        EasApiClient.doHttp = async () => result;
+        assert.equal(await new EasApiClient().request(saved, easWebLoginConfigFor(campus, '1'),
+          '/fixture-business', new EasApiClientOptions()), result);
+        assert.equal((await store.load(campus)).loginExpired, true);
+      }
+    }
+  } finally { EasApiClient.doHttp = previousHttp; EasSessionStore.instance = previousStore; }
+});
+
+test('network and non-auth failures never mark an account expired; arbitrary success does not clear known expiry', async () => {
+  const previousStore = EasSessionStore.instance;
+  const previousHttp = EasApiClient.doHttp;
+  try {
+    for (const result of [response('', 0), response('maintenance', 503), response('Forbidden', 403),
+      response('Not allowed', 405), response('rate limit', 429), response('unrecognized'),
+      response('<a href="/loginCAS">退出登录</a>'+terms('xnxq'))]) {
+      const { store } = storedSessions(); EasSessionStore.instance = store;
+      const saved = session(Campus.WEIHAI); await store.save(saved);
+      EasApiClient.doHttp = async () => result;
+      await new EasApiClient().request(saved, easWebLoginConfigFor(saved.campus, '1'),
+        '/fixture-business', new EasApiClientOptions());
+      assert.equal((await store.load(saved.campus)).loginExpired, false);
+    }
+    const { store } = storedSessions(); EasSessionStore.instance = store;
+    const saved = session(Campus.WEIHAI); await store.save(saved); await store.markExpired(saved);
+    EasApiClient.doHttp = async () => response(terms('xnxq'));
+    await new EasApiClient().request(saved, easWebLoginConfigFor(saved.campus, '1'),
+      '/fixture-business', new EasApiClientOptions());
+    assert.equal((await store.load(saved.campus)).loginExpired, true);
+    await store.save(saved);
+    assert.equal((await store.load(saved.campus)).loginExpired, false);
+  } finally { EasApiClient.doHttp = previousHttp; EasSessionStore.instance = previousStore; }
+});
+
+test('late old request cannot expire a new login or recreate a logged-out session', async () => {
+  const previousStore = EasSessionStore.instance;
+  const previousHttp = EasApiClient.doHttp;
+  try {
+    const { store } = storedSessions(); EasSessionStore.instance = store;
+    const saved = session(Campus.SHENZHEN); await store.save(saved);
+    let release;
+    EasApiClient.doHttp = () => new Promise(resolve => { release = resolve; });
+    const pending = new EasApiClient().request(saved, easWebLoginConfigFor(saved.campus, '1'),
+      '/fixture-business', new EasApiClientOptions());
+    const renewed = session(saved.campus); await store.save(renewed);
+    release(response('', 401)); await pending;
+    assert.ok(renewed.sessionGeneration > saved.sessionGeneration);
+    assert.equal((await store.load(saved.campus)).loginExpired, false);
+    await store.clear(saved.campus); await store.markExpired(renewed);
+    assert.equal(await store.load(saved.campus), undefined);
+  } finally { EasApiClient.doHttp = previousHttp; EasSessionStore.instance = previousStore; }
+});
+
+test('login and expiry writes are serialized so a fresh login always clears the old flag', async () => {
+  for (const expiryFirst of [true, false]) {
+    const { store } = storedSessions();
+    const old = session(Campus.BENBU); await store.save(old);
+    const fresh = session(Campus.BENBU);
+    const actions = expiryFirst ? [store.markExpired(old), store.save(fresh)] :
+      [store.save(fresh), store.markExpired(old)];
+    await Promise.all(actions);
+    const loaded = await store.load(old.campus);
+    assert.equal(loaded.loginExpired, false);
+    assert.equal(loaded.sessionGeneration, fresh.sessionGeneration);
+  }
+});
