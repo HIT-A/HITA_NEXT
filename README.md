@@ -156,6 +156,7 @@ node scripts/static-checks.cjs
 
 使用和验证说明：
 
+- [0.3.0 版本说明](docs/release-0.3.0.md)
 - [0.2.1 版本说明](docs/release-0.2.1.md)
 
 - [使用说明](docs/usage.md)
