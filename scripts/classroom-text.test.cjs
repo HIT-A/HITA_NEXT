@@ -53,6 +53,26 @@ function storedEvent(place, type = 'CLASS') {
   }));
 }
 
+test('legacy section labels remain separate from the clock times printed beneath them', () => {
+  for (const [label, begin, count] of [
+    ['第1-2节<br>08:00~09:45', 1, 2],
+    ['第3，4节<br>10:00～11:45', 3, 2],
+    ['第5,6节<br>13:45~15:30', 5, 2],
+    ['第7-8节 15:45-17:30', 7, 2],
+    ['第9、10节 18:30～20:15', 9, 2],
+    ['第11至12节 20:30-22:15', 11, 2],
+    ['第5节<br>13：45～14：35', 5, 1]
+  ]) {
+    const body = schedule('A101').replace('<td>1-2</td>', `<td>${label}</td>`);
+    const courses = parser.parseScheduleHtml(body);
+    assert.equal(courses.length, 1, label);
+    assert.equal(courses[0].beginSection, begin, label);
+    assert.equal(courses[0].sectionCount, count, label);
+    assert.equal(courses[0].dayOfWeek, 1);
+    assert.deepEqual(courses[0].weekNumbers, [1, 2]);
+  }
+});
+
 for (const space of spaces) {
   test(`legacy classrooms decode whitespace ${JSON.stringify(space)}`, () => {
     const courses = parser.parseScheduleHtml(schedule(space));

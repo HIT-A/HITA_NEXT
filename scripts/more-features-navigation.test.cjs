@@ -7,6 +7,16 @@ global.$r = name => ({ id: -1, type: 10001, params: [name] });
 
 const root = path.resolve(__dirname, '../entry/src/main/ets');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const EasCampus = { BENBU: 'BENBU', SHENZHEN: 'SHENZHEN', WEIHAI: 'WEIHAI' };
+
+function campusPortals() {
+  const mod = { exports: {} };
+  const code = ts.transpileModule(read('feature/portal/CampusPortal.ets'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
+  }).outputText;
+  new Function('require', 'module', 'exports', code)(() => ({ EasCampus }), mod, mod.exports);
+  return mod.exports;
+}
 
 test('assistant, news and campus links are registered routes in More, after academic tools and before settings', () => {
   const home = read('pages/Home.ets');
@@ -50,11 +60,15 @@ function pageClass(name, mocks = {}, moduleCache = new Map()) {
   const timers = new Map();
   let timerId = 0;
   const ui = {
-    modes: [], scrolls: [], routes: [], stopped: 0, cleared: 0,
+    modes: [], scrolls: [], routes: [], toasts: [], clipboard: [], stopped: 0, cleared: 0,
     getHostContext: () => ({}),
     setKeyboardAvoidMode: value => ui.modes.push(value),
     getFocusController: () => ({ clearFocus: () => { ui.cleared++; } }),
-    getRouter: () => ({ pushUrl: route => ui.routes.push(route) })
+    getRouter: () => ({ pushUrl: route => {
+      ui.routes.push(route);
+      if (mocks.openFails) return Promise.reject(Error('route unavailable'));
+    } }),
+    getPromptAction: () => ({ showToast: options => ui.toasts.push(options.message) })
   };
   const settings = class {
     provider = 'deepseek';
@@ -62,10 +76,24 @@ function pageClass(name, mocks = {}, moduleCache = new Map()) {
     hasCloudModel() { return false; }
   };
   const platform = spec => {
-    if (spec.endsWith('/EasSession')) return { EasCampus: { BENBU: 'BENBU', SHENZHEN: 'SHENZHEN', WEIHAI: 'WEIHAI' } };
-    if (spec.endsWith('/EasSessionStore')) return { EasSessionStore: { getInstance: () => ({
-      init: async () => {}, loadLastCampus: mocks.loadLastCampus || (async () => undefined)
-    }) } };
+    if (spec.endsWith('/EasSession')) return { EasCampus };
+    if (spec.endsWith('/EasSessionStore')) return {
+      EAS_SESSION_REVISION_KEY: 'hita_eas_session_revision',
+      EasSessionStore: { getInstance: () => ({
+        init: async () => {},
+        loadLastCampus: mocks.loadLastCampus || (async () => undefined),
+        loadPreferred: mocks.loadPreferred || (async () => undefined)
+      }) }
+    };
+    if (spec.endsWith('/CampusPortal')) return campusPortals();
+    if (spec === '@kit.BasicServicesKit') return { pasteboard: {
+      MIMETYPE_TEXT_PLAIN: 'text/plain',
+      createData: (mime, text) => ({ mime, text }),
+      getSystemPasteboard: () => ({ setData: async data => {
+        if (mocks.copyFails) throw Error('clipboard unavailable');
+        ui.clipboard.push(data);
+      } })
+    } };
     if (spec.endsWith('/AssistantConversation')) {
       if (!moduleCache.has(spec)) {
         const state = { exports: {} };
@@ -327,38 +355,165 @@ test('returning from notice website authentication refreshes the campus list onc
   assert.equal(requests, 2);
 });
 
-test('six campus links are grouped into school sites and course resources, and open in the in-app browser', () => {
-  const source = read('feature/portal/CampusPortal.ets');
-  const mod = { exports: {} };
-  const compiled = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
-  }).outputText;
-  new Function('module', 'exports', compiled)(mod, mod.exports);
-  const groups = mod.exports.CampusPortal.GROUPS;
-  assert.deepEqual(groups.map(group => [group.title, group.portals.length]),
-    [['学校官网', 3], ['课程资源', 3]]);
-  const entries = groups.flatMap(group => group.portals);
-  assert.deepEqual(entries.map(portal => [portal.title, portal.url]), [
-    ['哈工大官网', 'https://www.hit.edu.cn/'],
-    ['哈工大深圳', 'https://www.hitsz.edu.cn/'],
-    ['哈工大威海', 'https://www.hitwh.edu.cn/'],
-    ['HOA 课程攻略', 'https://hoa.moe/'],
-    ['薪火笔记', 'https://fireworks.jwyihao.top/'],
-    ['深校课程平台', 'https://course.hitsz.edu.cn/']
-  ]);
-  assert.doesNotMatch(source, /今日哈工大|today\.hit\.edu\.cn/);
+test('each campus has the four Android link groups and its own academic systems', () => {
+  const { CampusPortal } = campusPortals();
+  for (const [campus, name, sizes, undergraduate, postgraduate] of [
+    ['BENBU', '本部', [5, 7, 2, 1], 'http://jwes.hit.edu.cn', 'http://jwts.hit.edu.cn'],
+    ['SHENZHEN', '深圳', [6, 6, 4, 3], 'https://jw.hitsz.edu.cn/', 'https://lab.hitsz.edu.cn/'],
+    ['WEIHAI', '威海', [6, 6, 6, 1], 'http://jwts.hitwh.edu.cn/', 'https://yjsgl.hitwh.edu.cn/']
+  ]) {
+    const groups = CampusPortal.groupsFor(campus);
+    assert.equal(CampusPortal.campusName(campus), name);
+    assert.deepEqual(groups.map(group => group.title), ['教学学习', '信息与事务', '网络与系统', '资源']);
+    assert.deepEqual(groups.map(group => group.portals.length), sizes);
+    assert.ok(groups[0].portals.some(portal => portal.url === undergraduate));
+    assert.ok(groups[0].portals.some(portal => portal.url === postgraduate));
+    const urls = groups.flatMap(group => group.portals.map(portal => portal.url));
+    assert.equal(new Set(urls).size, urls.length);
+    for (const group of groups) {
+      for (const portal of group.portals) {
+        assert.ok(portal.title.length && portal.icon);
+        assert.ok(['http:', 'https:'].includes(new URL(portal.url).protocol));
+      }
+    }
+  }
+  assert.deepEqual(CampusPortal.groupsFor(undefined), []);
+  assert.deepEqual(CampusPortal.groupsFor('invalid'), []);
+  assert.equal(CampusPortal.campusName(undefined), '');
+});
+
+test('campus links display URLs and support mutually exclusive tap and long-press actions', async () => {
   const portals = read('pages/PortalsPage.ets');
-  assert.match(portals, /ForEach\(CampusPortal\.GROUPS/);
+  assert.match(portals, /ForEach\(this\.groups/);
   assert.match(portals, /ListItemGroup\(\{ header: this\.groupHeader\(group\.title\)/);
+  assert.match(portals, /\(group: CampusPortalGroup\) => \(this\.campus \?\? ''\) \+ ':' \+ group\.title/);
   assert.match(portals, /ForEach\(group\.portals/);
-  assert.match(portals, /this\.open\(portal\)/);
-  assert.doesNotMatch(portals, /NewsService|fetchCategory|aboutToAppear|Refresh\(/);
+  assert.match(portals, /Text\(portal\.url\)/);
+  assert.match(portals, /GestureGroup\(GestureMode\.Exclusive,\s*LongPressGesture/);
+  assert.match(portals, /LongPressGesture[^;]+this\.copy\(portal\)/);
+  assert.match(portals, /TapGesture[^;]+this\.open\(portal\)/);
+  assert.match(portals, /@StorageProp\(EAS_SESSION_REVISION_KEY\) @Watch\('onSessionChanged'\)/);
+  assert.doesNotMatch(portals, /NewsService|fetchCategory|EasApiClient|@kit\.NetworkKit|Refresh\(/);
+  const { CampusPortal } = campusPortals();
+  const entries = Object.values(EasCampus).flatMap(campus =>
+    CampusPortal.groupsFor(campus).flatMap(group => group.portals));
   const { Page, ui } = pageClass('PortalsPage');
   const page = new Page();
-  for (const portal of entries) page.open(portal);
+  for (const portal of entries) await page.open(portal);
   assert.deepEqual(ui.routes, entries.map(portal => ({
     url: 'pages/WebBrowserPage', params: { url: portal.url, title: portal.title }
   })));
+  assert.deepEqual(ui.clipboard, []);
+});
+
+test('campus links follow the preferred local session even when expired, and clear after logout', async () => {
+  let session;
+  const { Page, ui } = pageClass('PortalsPage', { loadPreferred: async () => session });
+  const page = new Page();
+  page.aboutToAppear();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(page.loading, false);
+  assert.deepEqual(page.groups, []);
+  assert.equal(page.campus, undefined);
+
+  for (const campus of Object.values(EasCampus)) {
+    session = { campus, loginExpired: true };
+    page.onSessionChanged();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(page.campus, campus);
+    assert.equal(page.groups.length, 4);
+  }
+  session = undefined;
+  page.onSessionChanged();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(page.groups, []);
+  assert.equal(page.campus, undefined);
+  assert.deepEqual(ui.routes, []);
+});
+
+test('returning from a campus website preserves scroll unless the account campus changed', async () => {
+  let campus = 'WEIHAI';
+  let reads = 0;
+  const { Page, ui } = pageClass('PortalsPage', {
+    loadPreferred: async () => { reads++; return { campus }; }
+  });
+  const page = new Page();
+  page.aboutToAppear();
+  page.onPageShow();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reads, 1);
+  ui.scrolls.length = 0;
+  page.fadeOpacity = 0.8;
+  page.onPageHide();
+  page.onSessionChanged();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reads, 1);
+  page.onPageShow();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(ui.scrolls, []);
+  assert.equal(page.fadeOpacity, 0.8);
+  page.onPageHide();
+  campus = 'BENBU';
+  page.onPageShow();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(ui.scrolls, ['top']);
+  assert.equal(page.fadeOpacity, 0);
+  assert.equal(page.campus, 'BENBU');
+});
+
+test('slow local session reads cannot replace a newer campus or update a closed page', async () => {
+  for (const closePage of [false, true]) {
+    const pending = deferred();
+    let firstRead = true;
+    const { Page } = pageClass('PortalsPage', {
+      loadPreferred: () => {
+        if (firstRead) { firstRead = false; return pending.promise; }
+        return Promise.resolve({ campus: 'WEIHAI' });
+      }
+    });
+    const page = new Page();
+    page.aboutToAppear();
+    await new Promise(resolve => setImmediate(resolve));
+    if (closePage) page.aboutToDisappear();
+    else await page.reload();
+    pending.resolve({ campus: 'BENBU' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(page.campus, closePage ? undefined : 'WEIHAI');
+    assert.equal(page.groups.length, closePage ? 0 : 4);
+  }
+});
+
+test('local session read failure leaves a usable empty page and a later login recovers', async () => {
+  let fail = true;
+  const { Page } = pageClass('PortalsPage', {
+    loadPreferred: async () => {
+      if (fail) throw Error('preferences unavailable');
+      return { campus: 'SHENZHEN' };
+    }
+  });
+  const page = new Page();
+  page.aboutToAppear();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(page.loading, false);
+  assert.deepEqual(page.groups, []);
+  fail = false;
+  page.onSessionChanged();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(page.campus, 'SHENZHEN');
+});
+
+test('copying a campus link retains the full URL and reports clipboard or browser failures accurately', async () => {
+  const portal = { title: '实验室系统', url: 'http://openlab.hitwh.edu.cn/#/login?redirect=/index' };
+  for (const options of [{}, { copyFails: true }, { openFails: true }]) {
+    const { Page, ui } = pageClass('PortalsPage', options);
+    const page = new Page();
+    page.aboutToAppear();
+    if (options.openFails) await page.open(portal);
+    else await page.copy(portal);
+    assert.deepEqual(ui.clipboard, options.copyFails ? [] : [{ mime: 'text/plain', text: portal.url }]);
+    assert.deepEqual(ui.toasts, [options.copyFails ? '复制失败，请重试' : '已复制链接']);
+    assert.equal(ui.routes.length, options.openFails ? 1 : 0);
+  }
 });
 
 test('switching news categories resets scrolling and ignores stale responses', async () => {

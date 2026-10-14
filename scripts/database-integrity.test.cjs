@@ -41,12 +41,26 @@ function load(file, overrides = {}, cache = new Map()) {
 }
 
 const { RdbHelper } = load('common/db/RdbHelper.ets');
-const { EasTimetable, EasTermSubject, EasEventItem, EasEventType } = load('common/model/timetable/TimetableModels.ets');
+const { EasTimetable, EasTimePeriodInDay, EasTermSubject, EasEventItem, EasEventType } =
+  load('common/model/timetable/TimetableModels.ets');
 const { EasTimetableImporter } = load('feature/eas/EasTimetableImporter.ets');
 const { EasSession, EasCampus } = load('feature/eas/EasSession.ets');
 const { EasCourseItem, EasTermItem } = load('feature/eas/model/EasModels.ets');
 const day = 86400000;
 const start = new Date(2026, 7, 31).getTime();
+const legacyBenbuTimes = [
+  [8, 0, 8, 50], [8, 55, 9, 45], [10, 5, 10, 55], [11, 0, 11, 50],
+  [13, 30, 14, 20], [14, 25, 15, 15], [15, 25, 16, 15], [16, 20, 17, 10],
+  [17, 20, 18, 10], [18, 30, 19, 20], [19, 30, 20, 20], [20, 30, 21, 20]
+];
+// Android CampusDefaultSchedule.BENBU_UNDERGRADUATE, checked on 2026-10-14.
+const benbuTimes = [
+  [8, 0, 8, 50], [8, 55, 9, 45], [10, 0, 10, 50], [10, 55, 11, 45],
+  [13, 45, 14, 35], [14, 40, 15, 30], [15, 45, 16, 35], [16, 40, 17, 30],
+  [18, 30, 19, 20], [19, 25, 20, 15], [20, 30, 21, 20], [21, 25, 22, 15]
+];
+const periods = rows => rows.map(row => EasTimePeriodInDay.ofHour(...row));
+const periodRows = rows => rows.map(p => [p.from.hour, p.from.minute, p.to.hour, p.to.minute]);
 
 function rowsResult(rows) {
   let index = -1;
@@ -292,6 +306,131 @@ test('ICS imports publish all records before changing the active timetable', asy
         assert.equal(result.success, true);
         assert.deepEqual(selected, [result.timetableId]);
         assert.equal(f.sql.prepare('SELECT count(*) AS n FROM events WHERE timetableId=?').get(result.timetableId).n, 2);
+      }
+    } finally { f.sql.close(); }
+  }
+});
+
+test('Benbu imports convert every section to the undergraduate bell schedule, independently of other campuses', async () => {
+  assert.deepEqual(periodRows(EasTimetableImporter.scheduleStructure(EasCampus.BENBU)), benbuTimes);
+  assert.deepEqual(periodRows(EasTimetableImporter.scheduleStructure(EasCampus.SHENZHEN)),
+    periodRows(EasTimetable.getDefaultTimeStructure()));
+  assert.deepEqual(periodRows(EasTimetableImporter.scheduleStructure(EasCampus.WEIHAI)),
+    periodRows(EasTimetable.getWeihaiTimeStructure()));
+  const modified = EasTimetableImporter.scheduleStructure(EasCampus.BENBU);
+  modified[4].from.minute = 0;
+  assert.equal(EasTimetableImporter.scheduleStructure(EasCampus.BENBU)[4].from.minute, 45);
+  const f = database();
+  try {
+    const session = Object.assign(new EasSession(), { campus: EasCampus.BENBU });
+    const term = Object.assign(new EasTermItem(), { yearCode: '2026-2027', termCode: '1' });
+    const courses = benbuTimes.map((_, i) => Object.assign(new EasCourseItem(), {
+      name: `Course ${i + 1}`, dayOfWeek: 3, beginSection: i + 1, sectionCount: 1, weekNumbers: [1, 2]
+    }));
+    await EasTimetableImporter.saveCourses(f.db, session, term, courses,
+      EasTimetableImporter.scheduleStructure(EasCampus.BENBU), start);
+    const lessons = f.sql.prepare('SELECT * FROM events').all();
+    assert.equal(lessons.length, 24);
+    for (const lesson of lessons) {
+      const time = benbuTimes[lesson.fromNumber - 1];
+      const date = new Date(lesson.fromTime);
+      assert.equal(date.getDay(), 3);
+      assert.deepEqual([date.getHours(), date.getMinutes()], time.slice(0, 2));
+      const end = new Date(lesson.toTime);
+      assert.deepEqual([end.getHours(), end.getMinutes()], time.slice(2));
+    }
+  } finally { f.sql.close(); }
+});
+
+async function seedLegacyBenbu(db) {
+  const timetable = table();
+  timetable.scheduleStructure = periods(legacyBenbuTimes);
+  await db.saveTimetable(timetable);
+  await db.saveSubject(subject());
+  for (let i = 0; i < 12; i += 2) {
+    const times = timetable.getTimestamps(2, 3, i + 1, i + 2);
+    await db.saveEvent(Object.assign(event(`legacy-${i}`), {
+      from: times[0], to: times[1], fromNumber: i + 1, lastNumber: i + 2
+    }));
+  }
+  const fifth = timetable.getTimestamps(1, 1, 5, 6);
+  await db.saveEvent(Object.assign(event('edited'), {
+    from: fifth[0] + 60000, to: fifth[1], fromNumber: 5, lastNumber: 6
+  }));
+  for (const [id, type] of [['exam', EasEventType.EXAM], ['memo', EasEventType.OTHER]]) {
+    await db.saveEvent(Object.assign(event(id, type), {
+      from: fifth[0], to: fifth[1], fromNumber: 5, lastNumber: 6
+    }));
+  }
+  await db.saveEvent(Object.assign(event('invalid-section'), { fromNumber: 99, lastNumber: 100 }));
+  await db.saveEvent(Object.assign(event('no-section'), { fromNumber: 0, lastNumber: 0 }));
+}
+
+test('saved Benbu courses are repaired once while preserving dates, identity, edits and non-course events', async () => {
+  const f = database();
+  try {
+    await seedLegacyBenbu(f.db);
+    const before = f.snapshot();
+    await f.db.repairLegacyBenbuTimetables();
+    const after = f.snapshot();
+    const saved = await f.db.getTimetableById('a');
+    assert.deepEqual(periodRows(saved.scheduleStructure), benbuTimes);
+    assert.deepEqual(after[0].map(row => ({ ...row })), before[0].map(row => ({
+      ...row, scheduleStructure: EasTimetable.encodeStructure(periods(benbuTimes))
+    })));
+    assert.deepEqual(after[1], before[1]);
+    for (const row of after[2]) {
+      const original = before[2].find(item => item.id === row.id);
+      if (!row.id.startsWith('legacy-')) {
+        assert.deepEqual(row, original);
+        continue;
+      }
+      const expected = saved.getTimestamps(2, 3, row.fromNumber, row.lastNumber);
+      assert.deepEqual({ ...row }, { ...original, fromTime: expected[0], toTime: expected[1] });
+    }
+    await f.db.repairLegacyBenbuTimetables();
+    assert.deepEqual(f.snapshot(), after);
+    const source = read('common/db/RdbHelper.ets');
+    assert.match(source.slice(source.indexOf('private async openStore('),
+      source.indexOf('private async ensureEventColorColumn(')), /await this\.repairLegacyBenbuTimetables\(\)/);
+  } finally { f.sql.close(); }
+});
+
+test('Benbu repair does not touch other campuses, local timetables or any customized schedule', async () => {
+  const f = database();
+  try {
+    const variants = [
+      ['weihai', 'WEIHAI:2026-20271', periods(legacyBenbuTimes)],
+      ['shenzhen', 'SHENZHEN:2026-20271', periods(legacyBenbuTimes)],
+      ['local', '', periods(legacyBenbuTimes)],
+      ['correct', 'BENBU:2025-20261', periods(benbuTimes)],
+      ['custom', 'BENBU:2025-20262', periods(legacyBenbuTimes)]
+    ];
+    variants[4][2][9].from.minute = 35;
+    for (const [id, code, scheduleStructure] of variants) {
+      await f.db.saveTimetable(Object.assign(table(id), { code, scheduleStructure }));
+      await f.db.saveEvent(event(id, EasEventType.CLASS, id));
+    }
+    const before = f.snapshot();
+    await f.db.repairLegacyBenbuTimetables();
+    assert.deepEqual(f.snapshot(), before);
+  } finally { f.sql.close(); }
+});
+
+test('Benbu repair rolls back every timestamp and the schedule if a write or commit fails', async () => {
+  for (const failCommit of [false, true]) {
+    const f = database();
+    try {
+      await seedLegacyBenbu(f.db);
+      const before = f.snapshot();
+      if (failCommit) f.rejectCommit();
+      else f.sql.exec("CREATE TRIGGER fail_repair BEFORE UPDATE ON events WHEN OLD.id='legacy-4' BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+      await assert.rejects(f.db.repairLegacyBenbuTimetables(), failCommit ? /commit failed/ : /disk full/);
+      assert.deepEqual(f.snapshot(), before);
+      if (!failCommit) {
+        f.sql.exec('DROP TRIGGER fail_repair');
+        await f.db.repairLegacyBenbuTimetables();
+        assert.deepEqual(periodRows((await f.db.getTimetableById('a')).scheduleStructure), benbuTimes);
       }
     } finally { f.sql.close(); }
   }

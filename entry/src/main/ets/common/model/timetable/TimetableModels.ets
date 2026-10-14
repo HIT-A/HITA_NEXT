@@ -198,6 +198,24 @@ export class EasTimetable {
     return res;
   }
 
+  /** 本部本科作息，与安卓端 CampusDefaultSchedule 的本部表一致。 */
+  static getBenbuTimeStructure(): EasTimePeriodInDay[] {
+    return [
+      EasTimePeriodInDay.ofHour(8, 0, 8, 50),
+      EasTimePeriodInDay.ofHour(8, 55, 9, 45),
+      EasTimePeriodInDay.ofHour(10, 0, 10, 50),
+      EasTimePeriodInDay.ofHour(10, 55, 11, 45),
+      EasTimePeriodInDay.ofHour(13, 45, 14, 35),
+      EasTimePeriodInDay.ofHour(14, 40, 15, 30),
+      EasTimePeriodInDay.ofHour(15, 45, 16, 35),
+      EasTimePeriodInDay.ofHour(16, 40, 17, 30),
+      EasTimePeriodInDay.ofHour(18, 30, 19, 20),
+      EasTimePeriodInDay.ofHour(19, 25, 20, 15),
+      EasTimePeriodInDay.ofHour(20, 30, 21, 20),
+      EasTimePeriodInDay.ofHour(21, 25, 22, 15)
+    ];
+  }
+
   /** 威海校区作息（与安卓端 WeihaiEASWebSource 保持一致）。 */
   static getWeihaiTimeStructure(): EasTimePeriodInDay[] {
     const res: EasTimePeriodInDay[] = [];

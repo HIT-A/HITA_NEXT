@@ -293,9 +293,11 @@ export class EasLegacyTimetableParser {
   }
 
   private static resolvePeriod(raw: string, fallback: number): number[] {
-    const normalized: string = raw.replace(/\u00a0/g, '').replace(/\s/g, '')
+    // Remove clock times before compacting "第5,6节 13:45~15:30" into a section label.
+    const normalized: string = raw.replace(/\d{1,2}\s*[:：]\s*\d{2}/g, '')
+      .replace(/\u00a0/g, '').replace(/\s/g, '')
       .replace(/第/g, '').replace(/节/g, '').replace(/，/g, ',');
-    const range: RegExpExecArray | null = /(\d+)\s*[-,]\s*(\d+)/.exec(normalized);
+    const range: RegExpExecArray | null = /(\d+)\s*[-,、至~～—–]\s*(\d+)/.exec(normalized);
     if (range !== null) {
       const begin: number = Number(range[1]);
       const end: number = Number(range[2]);

@@ -37,12 +37,6 @@ export class EasTermStartResult {
 }
 
 export class EasTimetableImporter {
-  private static readonly BENBU_TIMES: number[][] = [
-    [8, 0, 8, 50], [8, 55, 9, 45], [10, 5, 10, 55], [11, 0, 11, 50],
-    [13, 30, 14, 20], [14, 25, 15, 15], [15, 25, 16, 15], [16, 20, 17, 10],
-    [17, 20, 18, 10], [18, 30, 19, 20], [19, 30, 20, 20], [20, 30, 21, 20]
-  ];
-
   /**
    * 导入当前学期。传入参数时复用同一条链路导入指定学期，并使用页面编辑后的
    * 开学日期和节次结构。这让“导入课表”页面和首页快捷导入共享完全相同的
@@ -465,13 +459,10 @@ export class EasTimetableImporter {
     if (campus === EasCampus.WEIHAI) {
       return EasTimetable.getWeihaiTimeStructure();
     }
-    const source: number[][] = EasTimetableImporter.BENBU_TIMES;
-    const out: EasTimePeriodInDay[] = [];
-    for (let i: number = 0; i < source.length; i++) {
-      const t: number[] = source[i];
-      out.push(EasTimePeriodInDay.ofHour(t[0], t[1], t[2], t[3]));
+    if (campus === EasCampus.SHENZHEN) {
+      return EasTimetable.getDefaultTimeStructure();
     }
-    return out;
+    return EasTimetable.getBenbuTimeStructure();
   }
 
   /** Preserve a saved date only when the calendar is unavailable, and report that fallback. */

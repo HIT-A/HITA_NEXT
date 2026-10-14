@@ -17,7 +17,6 @@ import {
   EasSubjectColor,
   EasSubjectType,
   EasTermSubject,
-  EasTimeInDay,
   EasTimePeriodInDay,
   EasTimetable
 } from '../model/timetable/TimetableModels';
@@ -94,6 +93,7 @@ export class RdbHelper {
     await this.execSql(CREATE_EVENTS);
     await this.ensureEventColorColumn();
     await this.repairLegacyWeihaiTimetables();
+    await this.repairLegacyBenbuTimetables();
     await this.repairLegacyImportedWeeks();
   }
 
@@ -244,6 +244,45 @@ export class RdbHelper {
     }
   }
 
+  /** Correct only untouched legacy Benbu course times, atomically with their bell schedule. */
+  private async repairLegacyBenbuTimetables(): Promise<void> {
+    const timetables: EasTimetable[] = await this.getTimetables();
+    for (const timetable of timetables) {
+      if (!timetable.code.startsWith('BENBU:') || !RdbHelper.isLegacyBenbuSchedule(timetable)) continue;
+      await this.writeTransaction(async (transaction: relationalStore.Transaction): Promise<void> => {
+        const predicate: relationalStore.RdbPredicates = new relationalStore.RdbPredicates('timetable')
+          .equalTo('id', timetable.id).equalTo('code', timetable.code);
+        const rows: relationalStore.ResultSet = await transaction.query(predicate, ['scheduleStructure']);
+        try {
+          if (!rows.goToFirstRow()) return;
+          timetable.scheduleStructure = EasTimetable.decodeStructure(rows.getString(rows.getColumnIndex('scheduleStructure')));
+        } finally { rows.close(); }
+        if (!RdbHelper.isLegacyBenbuSchedule(timetable)) return;
+        const previous: EasTimePeriodInDay[] = timetable.scheduleStructure;
+        const correct: EasTimePeriodInDay[] = EasTimetable.getBenbuTimeStructure();
+        const events: EasEventItem[] = RdbHelper.readRows(await transaction.query(
+          new relationalStore.RdbPredicates('events').equalTo('timetableId', timetable.id)
+            .equalTo('type', EasEventType.CLASS)), RdbHelper.eventMapper);
+        for (const event of events) {
+          if (!Number.isInteger(event.fromNumber) || !Number.isInteger(event.lastNumber) ||
+            event.fromNumber < 1 || event.lastNumber < event.fromNumber || event.lastNumber > correct.length ||
+            !Number.isFinite(event.from) || !Number.isFinite(event.to)) continue;
+          const date: Date = new Date(event.from);
+          const dayStart: number = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+          if (event.from !== dayStart + previous[event.fromNumber - 1].from.toMills() ||
+            event.to !== dayStart + previous[event.lastNumber - 1].to.toMills()) continue;
+          await transaction.update({
+            fromTime: dayStart + correct[event.fromNumber - 1].from.toMills(),
+            toTime: dayStart + correct[event.lastNumber - 1].to.toMills()
+          }, new relationalStore.RdbPredicates('events').equalTo('id', event.id));
+        }
+        await transaction.update({
+          scheduleStructure: EasTimetable.encodeStructure(correct)
+        }, predicate);
+      });
+    }
+  }
+
   private async repairLegacyImportedWeeks(): Promise<void> {
     const timetables = await this.getTimetables();
     for (const timetable of timetables) {
@@ -261,12 +300,18 @@ export class RdbHelper {
     if (timetable.scheduleStructure.length !== 12) {
       return false;
     }
-    const first: EasTimePeriodInDay = timetable.scheduleStructure[0];
-    const sixth: EasTimePeriodInDay = timetable.scheduleStructure[5];
-    const seventh: EasTimePeriodInDay = timetable.scheduleStructure[6];
-    return first.from.equals(new EasTimeInDay(8, 0)) && first.to.equals(new EasTimeInDay(8, 50)) &&
-      sixth.from.equals(new EasTimeInDay(14, 25)) && sixth.to.equals(new EasTimeInDay(15, 15)) &&
-      seventh.from.equals(new EasTimeInDay(15, 25)) && seventh.to.equals(new EasTimeInDay(16, 15));
+    const legacy: number[][] = [
+      [8, 0, 8, 50], [8, 55, 9, 45], [10, 5, 10, 55], [11, 0, 11, 50],
+      [13, 30, 14, 20], [14, 25, 15, 15], [15, 25, 16, 15], [16, 20, 17, 10],
+      [17, 20, 18, 10], [18, 30, 19, 20], [19, 30, 20, 20], [20, 30, 21, 20]
+    ];
+    for (let i: number = 0; i < legacy.length; i++) {
+      const period: EasTimePeriodInDay = timetable.scheduleStructure[i];
+      const old: number[] = legacy[i];
+      if (period.from.hour !== old[0] || period.from.minute !== old[1] ||
+        period.to.hour !== old[2] || period.to.minute !== old[3]) return false;
+    }
+    return true;
   }
 
   // ------------------------------------------------------------------
