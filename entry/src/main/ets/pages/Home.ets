@@ -28,6 +28,7 @@ import { DOCK_HOLD_DELAY_MS, DockNavigationGuard } from '../common/util/DockNavi
 import { DeleteEffectController } from '../common/util/DeleteEffectController';
 import { CourseColorEditor } from '../feature/timetable/views/CourseColorEditor';
 import { CourseControlHost } from '../feature/timetable/views/CourseControlHost';
+import { TimetableFloatingActions } from '../feature/timetable/views/TimetableFloatingActions';
 import { TimetableCardMaterials } from '../feature/timetable/views/TimetableCardMaterials';
 import { TimetableCardPainter } from '../feature/timetable/views/TimetableCardPainter';
 import { RdbHelper } from '../common/db/RdbHelper';
@@ -171,8 +172,8 @@ struct Home {
   @State timetableAnimating: boolean = false;
   private importRequested: boolean = false;
   private clockTimer: number = -1;
-  private pageVisible: boolean = false;
-  private tabTransitionRunning: boolean = false;
+  @State private pageVisible: boolean = false;
+  @State private tabTransitionRunning: boolean = false;
   private timetablePlaceLabels: TimetablePlaceLabel[] = [];
   private timetableMarqueeCallback: TimetableMarqueeCallback | undefined = undefined;
   private timetableMarqueeGeneration: number = 0;
@@ -2447,50 +2448,16 @@ struct Home {
         }
       })
 
-      if (this.currentTimetable !== undefined && this.showEveningCourseHint) {
-        Row() {
-          CourseControlHost({ barHeight: 48 }) {
-            Button({ type: ButtonType.Circle }) {
-              SymbolGlyph($r('sys.symbol.chevron_down'))
-                .fontSize(24)
-                .fontColor([CompatibleMaterialModifier.foreground(COLOR_PRIMARY)])
-            }
-            .id('timetable-evening-hint')
-            .width(48)
-            .height(48)
-            .backgroundColor(COLOR_NAV_ACTIVE)
-            .attributeModifier(new CompatibleMaterialModifier(COLOR_NAV_ACTIVE))
-            .accessibilityText('下方还有晚间课程，点击查看')
-            .onClick(() => this.timetableScroller.scrollEdge(Edge.Bottom, { velocity: 1200 }))
-          }
-        }
-        .width(48)
-        .height(48)
-        .position({ right: 18, bottom: this.dockPageInset() + 20 })
-      }
-
-      if (this.showReturnToCurrentWeek()) {
-        Row() {
-          CourseControlHost({ barHeight: 48 }) {
-            Button({ type: ButtonType.Circle }) {
-              SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-                .fontSize(24)
-                .fontColor([CompatibleMaterialModifier.foreground(COLOR_PRIMARY)])
-            }
-            .id('timetable-return-current-week')
-            .width(48)
-            .height(48)
-            .backgroundColor(COLOR_NAV_ACTIVE)
-            .attributeModifier(new CompatibleMaterialModifier(COLOR_NAV_ACTIVE))
-            .accessibilityText('回到本周')
-            .enabled(!this.timetableAnimating)
-            .onClick(() => this.returnToCurrentWeek())
-          }
-        }
-        .width(48)
-        .height(48)
-        .position({ right: 18, bottom: this.dockPageInset() + (this.showEveningCourseHint ? 80 : 20) })
-      }
+      TimetableFloatingActions({
+        active: this.pageVisible && this.currentTab === TAB_TIMETABLE,
+        eveningVisible: this.currentTimetable !== undefined && this.showEveningCourseHint,
+        returnVisible: this.showReturnToCurrentWeek(),
+        returnEnabled: !this.timetableAnimating,
+        interactionBlocked: this.tabTransitionRunning || this.timetableAnimating || this.activeSheetVisible,
+        bottomInset: this.dockPageInset(),
+        onEvening: (): void => { this.timetableScroller.scrollEdge(Edge.Bottom, { velocity: 1200 }); },
+        onReturn: (): void => { this.returnToCurrentWeek(); }
+      })
     }
     .width('100%')
     .height('100%')
