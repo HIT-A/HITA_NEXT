@@ -5,7 +5,7 @@ export const EVENING_START_MINUTES: number = 18 * 60 + 30;
 /** Input is the displayed week's events, not today's events or the whole semester. */
 export function hasEveningCourse(weekEvents: EasEventItem[]): boolean {
   return weekEvents.some((event: EasEventItem): boolean => {
-    if (event.type !== EasEventType.CLASS) return false;
+    if (event.type !== EasEventType.CLASS && event.type !== EasEventType.EXAM) return false;
     const start = new Date(event.from);
     return start.getHours() * 60 + start.getMinutes() >= EVENING_START_MINUTES;
   });

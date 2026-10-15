@@ -150,7 +150,7 @@ test('score errors never reveal raw server content or internal paths', () => {
   assert.match(scores.scoreErrorMessage('教务会话已失效，请重新登录'), /重新登录/);
 });
 
-test('evening hint uses displayed week, 18:30 boundary, course type and remaining scroll distance', () => {
+test('evening hint includes exams, respects the displayed week and the 18:30 boundary', () => {
   const { hasEveningCourse, eveningHintVisible } = load('feature/timetable/data/EveningCourseHint.ets');
   const { eventsOfWeek } = load('feature/timetable/views/TimetableWeekDraw.ets');
   const { EasTimetable, EasEventItem, EasEventType } = load('common/model/timetable/TimetableModels.ets');
@@ -159,7 +159,21 @@ test('evening hint uses displayed week, 18:30 boundary, course type and remainin
   const early = event(12, 18, 29), late = event(19, 18, 30);
   assert.equal(hasEveningCourse(eventsOfWeek(table, [early, late], 1)), false);
   assert.equal(hasEveningCourse(eventsOfWeek(table, [early, late], 2)), true);
-  late.type = EasEventType.EXAM; assert.equal(hasEveningCourse([late]), false);
+  early.type = EasEventType.EXAM;
+  late.type = EasEventType.EXAM;
+  assert.equal(hasEveningCourse(eventsOfWeek(table, [early, late], 1)), false);
+  assert.equal(hasEveningCourse(eventsOfWeek(table, [early, late], 2)), true);
+  const onlyExam = event(12, 20, 0);
+  onlyExam.type = EasEventType.EXAM;
+  assert.equal(eveningHintVisible(hasEveningCourse([onlyExam]), 0, 300), true);
+  assert.equal(eveningHintVisible(hasEveningCourse([onlyExam]), 236, 300), false);
+  late.type = EasEventType.TAG;
+  assert.equal(hasEveningCourse([late]), false);
+  assert.equal(hasEveningCourse([]), false);
+});
+
+test('evening hint disappears near the bottom and when no scrolling or evening event remains', () => {
+  const { eveningHintVisible } = load('feature/timetable/data/EveningCourseHint.ets');
   assert.equal(eveningHintVisible(true, 0, 300), true);
   assert.equal(eveningHintVisible(true, 235, 300), true);
   assert.equal(eveningHintVisible(true, 236, 300), false);

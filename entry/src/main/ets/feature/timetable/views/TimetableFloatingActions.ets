@@ -101,7 +101,7 @@ export struct TimetableFloatingActions {
       .height(48)
       .backgroundColor($r('app.color.hita_selected'))
       .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_selected')))
-      .accessibilityText(evening ? '下方还有晚间课程，点击查看' : '回到本周')
+      .accessibilityText(evening ? '下方还有晚间课程或考试，点击查看' : '回到本周')
       // Week transitions block input separately so the button keeps its normal color.
       .enabled(this.active && (evening ? this.eveningVisible : this.returnVisible))
       .onClick(() => {

@@ -95,6 +95,13 @@ const TIMETABLE_SLIDE_MS: number = 220;
 const COURSE_DETAIL_ICON_SIZE: number = 38;
 const COURSE_DETAIL_TEXT_GAP: number = 12;
 
+interface MoreShortcutOptions {
+  symbol: Resource;
+  title: string;
+  subtitle: string;
+  action: () => void;
+}
+
 @Extend(Column)
 function tabPage(bottomInset: number, background: ResourceColor) {
   .width('100%')
@@ -2495,22 +2502,28 @@ struct Home {
           this.userCard();
 
           Row() {
-            this.moreShortcut($r('sys.symbol.calendar'), '最近课表',
-              this.recentTimetable === undefined ? '暂无课表' : this.recentTimetable.name,
-              () => {
+            this.moreShortcut({
+              symbol: $r('sys.symbol.calendar'),
+              title: '最近课表',
+              subtitle: this.recentTimetable === undefined ? '暂无课表' : this.recentTimetable.name,
+              action: () => {
                 if (this.recentTimetable !== undefined) {
                   this.getUIContext().getRouter().pushUrl({
                     url: 'pages/TimetableDetailPage',
                     params: { 'timetableId': this.recentTimetable.id }
                   });
                 }
-              });
+              }
+            });
             Blank().width(8);
-            this.moreShortcut($r('sys.symbol.doc_plaintext'), '课表管理',
-              this.timetableCount === 0 ? '暂无课表' : '共 ' + this.timetableCount.toString() + ' 张课表',
-              () => {
+            this.moreShortcut({
+              symbol: $r('sys.symbol.doc_plaintext'),
+              title: '课表管理',
+              subtitle: this.timetableCount === 0 ? '暂无课表' : '共 ' + this.timetableCount.toString() + ' 张课表',
+              action: () => {
                 this.getUIContext().getRouter().pushUrl({ url: 'pages/TimetableManagerPage' });
-              });
+              }
+            });
           }
           .width('100%')
           .padding({ top: 8 });
@@ -3162,10 +3175,10 @@ struct Home {
   }
 
   @Builder
-  moreShortcut(symbol: Resource, title: string, subtitle: string, action: () => void) {
+  moreShortcut(options: MoreShortcutOptions) {
     Row() {
       Stack() {
-        SymbolGlyph(symbol)
+        SymbolGlyph(options.symbol)
           .fontSize(22)
           .fontColor([COLOR_PRIMARY]);
       }
@@ -3175,12 +3188,12 @@ struct Home {
       .alignContent(Alignment.Center)
       .backgroundColor(COLOR_NAV_ACTIVE);
       Column() {
-        Text(title)
+        Text(options.title)
           .fontSize(12)
           .fontColor(COLOR_TEXT_SECONDARY)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis });
-        Text(subtitle)
+        Text(options.subtitle)
           .fontSize(14)
           .fontColor(COLOR_TEXT_PRIMARY)
           .margin({ top: 4 })
@@ -3200,7 +3213,7 @@ struct Home {
     .alignItems(VerticalAlign.Center)
     .backgroundColor(COLOR_CARD)
     .borderRadius(16)
-    .onClick(action);
+    .onClick(options.action);
   }
 
   @Builder

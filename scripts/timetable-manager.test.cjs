@@ -73,3 +73,98 @@ test('export uses the current timetable rather than the first row and handles mi
   assert.equal(calls.exported.length, 2);
   assert.equal(calls.toasts.length, 1);
 });
+
+const home = fs.readFileSync(path.resolve(__dirname, '../entry/src/main/ets/pages/Home.ets'), 'utf8');
+const homeMethod = (start, end) => home.slice(home.indexOf(start), home.indexOf(end, home.indexOf(start)));
+
+function summaryHarness() {
+  const table = id => ({ id, name: id, code: 'LOCAL:' + id, startTime: 0, getWeekNumber: () => 1 });
+  const state = { tables: ['a', 'b', 'c'].map(table), selectedId: 'a', events: async () => [] };
+  const rdb = {
+    init: async () => {},
+    getTimetables: async () => state.tables.slice(),
+    getTimetableById: async id => state.tables.find(item => item.id === id),
+    getEventsOfTimetable: () => state.events(),
+    getSubjectsOfTimetable: async () => []
+  };
+  const resolver = fs.readFileSync(path.resolve(__dirname,
+    '../entry/src/main/ets/feature/timetable/data/TimetableResolver.ets'), 'utf8');
+  const module = { exports: {} };
+  new Function('exports', ts.transpileModule(resolver, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
+  }).outputText)(module.exports);
+  const code = `class Home {
+    summaryRequestGeneration = 0; skippingCourse = false; nowTick = Date.now();
+    courseDeleteEffects = { resume() {} };
+    getUIContext() { return { getHostContext: () => ({}), setKeyboardAvoidMode() {} }; }
+    startClock() {}
+    updateTodayHighlights() {}
+    drawTimetableNow() {}
+    static defaultCanvasColor() { return 1; }
+    ${homeMethod('  async onPageShow()', '  onPageHide()')}
+    ${homeMethod('  async refreshSummaries(', '  private classReminderSubtitle()')}
+  }`;
+  const page = new Function('RdbHelper', 'EasSessionStore', 'TimetableSelectionStore', 'TimetableResolver',
+    'EasEventType', 'DAY_MS', 'KeyboardAvoidMode', ts.transpileModule(code, {
+      compilerOptions: { target: ts.ScriptTarget.ES2020 }
+    }).outputText + '; return new Home();')(
+    { getInstance: () => rdb },
+    { getInstance: () => ({ loadPreferred: async () => undefined }) },
+    { getInstance: () => ({
+      load: async () => state.selectedId,
+      clearIf: async id => { if (state.selectedId === id) state.selectedId = ''; }
+    }) }, module.exports.TimetableResolver, { EXAM: 'EXAM' }, 86400000, { NONE: 0 });
+  return { page, state, table };
+}
+
+test('returning from the manager refreshes count and recent timetable after deletions, including the last one', async () => {
+  const { page, state, table } = summaryHarness();
+  await page.onPageShow();
+  assert.equal(page.timetableCount, 3);
+  assert.equal(page.recentTimetable.id, 'a');
+  state.tables = state.tables.filter(item => item.id !== 'a');
+  await page.onPageShow();
+  assert.equal(page.timetableCount, 2);
+  assert.equal(page.recentTimetable.id, 'b');
+  assert.equal(page.currentTimetable.id, 'b');
+  assert.equal(state.selectedId, '', 'clear the selection of a removed timetable');
+  state.tables = [];
+  await page.onPageShow();
+  assert.equal(page.timetableCount, 0);
+  assert.equal(page.recentTimetable, undefined);
+  assert.equal(page.currentTimetable, undefined);
+  assert.equal(page.hasTimetable, false);
+  state.tables = [table('new')];
+  await page.onPageShow();
+  assert.equal(page.timetableCount, 1);
+  assert.equal(page.recentTimetable.id, 'new');
+});
+
+test('a refresh started before deletion cannot restore the old count after returning to More', async () => {
+  const { page, state } = summaryHarness();
+  let finish, notifyRead;
+  const readStarted = new Promise(resolve => { notifyRead = resolve; });
+  state.events = () => {
+    notifyRead();
+    return new Promise(resolve => { finish = resolve; });
+  };
+  const oldRefresh = page.onPageShow();
+  await readStarted;
+  state.tables = [];
+  await page.onPageShow();
+  finish([]);
+  await oldRefresh;
+  assert.equal(page.timetableCount, 0);
+  assert.equal(page.recentTimetable, undefined);
+  assert.equal(page.hasTimetable, false);
+});
+
+test('More shortcuts bind changing count and recent name by reference instead of freezing builder values', () => {
+  assert.match(home, /moreShortcut\(options: MoreShortcutOptions\)/);
+  assert.match(home, /this\.moreShortcut\(\{\s*symbol: [^\n]+\s*title: '最近课表',\s*subtitle: this\.recentTimetable/);
+  assert.match(home, /this\.moreShortcut\(\{\s*symbol: [^\n]+\s*title: '课表管理',\s*subtitle: this\.timetableCount/);
+  const builder = homeMethod('  moreShortcut(', '  moreSectionTitle(');
+  assert.match(builder, /Text\(options\.subtitle\)/);
+  assert.match(builder, /\.onClick\(options\.action\)/);
+  assert.doesNotMatch(builder, /const .* = options\.subtitle/);
+});
