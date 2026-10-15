@@ -45,6 +45,26 @@ const session = campus => {
 };
 const terms = name => `<select name="${name}"><option value="2026-20271">秋季</option></select>`;
 const shenzhenTerms = JSON.stringify({ code: 200, data: [{ xn: '2026-2027', xq: '1' }] });
+// Minimal markup from the public, unauthenticated Benbu EAS redirect observed on 2026-10-15.
+const benbuVpnShortcut = '<html><head><title>Loading...</title>' +
+  '<script src="./old/jssdk/shortcut_api.js?v=fixture"></script>' +
+  '<script src="./old/shortcut_main.js?v=fixture"></script></head>' +
+  '<body><div id="loading">Loading...</div></body></html>';
+// Reduced from the HTTP 200 returned with the affected saved session; no real token or identity.
+const benbuVpnVerify = `<html><head><script>
+    var sfDomainParam = "";
+    var locationUrl = "https://ivpn.hit.edu.cn:443/controller/v1/public/verify?t=fixture";
+    try {
+        var args = location.search, pos = args.search('__sdpData=');
+        var search = pos === -1 ? args : args.substring(0, pos - 1);
+        sessionStorage.setItem('sdp-app-url-data', search + location.hash);
+    } catch (e) {}
+    if (sfDomainParam) {
+        var delimiter = locationUrl.indexOf("?") === -1 ? "?" : "&";
+        sfDomainParam = delimiter + "sfDomain=" + sfDomainParam;
+    }
+    navigator.userAgent.search('ms-office') == -1 && location.replace(locationUrl + sfDomainParam);
+</script></head></html>`;
 
 test('all campuses require authenticated business data rather than the presence of saved credentials', async () => {
   for (const campus of Object.values(Campus)) {
@@ -108,6 +128,93 @@ test('offline, maintenance, permission failures and unrecognized pages are never
   const provider = new Provider({ request: async () => { throw Error('offline'); } });
   assert.equal(await provider.checkSessionStatus(session(Campus.BENBU)), Status.UNKNOWN);
   assert.equal(isExpiredEasResponse(response('<a href="/loginCAS">退出登录</a>' + terms('xnxq'))), false);
+});
+
+test('Benbu VPN authentication bootstrap is expired, but generic loading pages and gateway errors are not', async () => {
+  for (const body of [benbuVpnShortcut, benbuVpnShortcut.replaceAll('./old/', 'https://ivpn.hit.edu.cn/portal/old/'),
+    benbuVpnShortcut.replaceAll('?v=fixture', '').replaceAll('"', "'")]) {
+    assert.equal(isExpiredEasResponse(response(body)), true);
+    const provider = new Provider({ request: async () => response(body) });
+    assert.equal(await provider.checkSessionStatus(session(Campus.BENBU)), Status.EXPIRED);
+  }
+  for (const value of [
+    response('<title>Loading...</title><div id="loading">Loading...</div>'),
+    response('<script src="./old/jssdk/shortcut_api.js"></script>'),
+    response('<script src="./old/shortcut_main.js"></script>'),
+    response('<!--' + benbuVpnShortcut + '-->' + terms('xnxq')),
+    response(benbuVpnShortcut, 503),
+    response(benbuVpnShortcut, 0)
+  ]) {
+    assert.equal(isExpiredEasResponse(value), false);
+  }
+});
+
+test('Benbu SDP verification redirects through a variable require re-login instead of reporting missing terms', async () => {
+  for (const body of [benbuVpnVerify, benbuVpnVerify.replace(':443', ''),
+    benbuVpnVerify.replaceAll('"', "'"),
+    benbuVpnVerify.replaceAll('locationUrl', 'verifyTarget'),
+    benbuVpnVerify.replace('location.replace(', 'window.location.assign(')]) {
+    assert.equal(isExpiredEasResponse(response(body)), true);
+    const provider = new Provider({ request: async () => response(body) });
+    assert.equal(await provider.checkSessionStatus(session(Campus.BENBU)), Status.EXPIRED);
+    await assert.rejects(provider.getAllTerms(session(Campus.BENBU)), /教务会话已失效，请重新登录/);
+  }
+});
+
+test('a VPN URL alone, ordinary redirects, and failed network requests do not prove session expiry', () => {
+  for (const result of [
+    response(benbuVpnVerify, 0), response(benbuVpnVerify, 503),
+    response(benbuVpnVerify.replace('location.replace(locationUrl + sfDomainParam)', 'console.log(locationUrl)')),
+    response(benbuVpnVerify.replace('/public/verify?', '/public/verifyHelp?')),
+    response(benbuVpnVerify.replace('ivpn.hit.edu.cn', 'example.com')),
+    response('<!--' + benbuVpnVerify + '-->' + terms('xnxq')),
+    response('<script>/* ' + benbuVpnVerify.replace(/<[^>]*>/g, '') + ' */</script>' + terms('xnxq')),
+    response('<a href="https://ivpn.hit.edu.cn/controller/v1/public/verify">VPN</a>' + terms('xnxq')),
+    response('<script>var locationUrl="/kbcx/queryGrkb";location.replace(locationUrl);</script>')
+  ]) {
+    assert.equal(isExpiredEasResponse(result), false);
+  }
+});
+
+test('term reads use the shared expiry decision and stop on either authenticated endpoint failure', async () => {
+  const authResponses = [response('', 401), response(benbuVpnShortcut), response(benbuVpnVerify),
+    response('<script>top.location.href="/loginCAS?service=/kbcx/queryGrkb";</script>'),
+    response('<form action="/loginCAS?service=/kbcx/queryGrkb"><input type="password"></form>'),
+    response('{"code":"LOGIN_EXPIRED"}')];
+  for (const campus of [Campus.BENBU, Campus.WEIHAI]) {
+    for (const failedEndpoint of [0, 1]) {
+      for (const auth of authResponses) {
+        let calls = 0;
+        const provider = new Provider({ request: async (_s, _cfg, _path, options) => {
+          assert.equal(options.useCache, false);
+          assert.equal(options.extraHeaders.get('Cache-Control'), 'no-cache');
+          return calls++ === failedEndpoint ? auth : response(terms('pageXnxq'));
+        } });
+        await assert.rejects(provider.getAllTerms(session(campus)), /教务会话已失效，请重新登录/);
+        assert.equal(calls, failedEndpoint + 1, 'stop fetching once reauthentication is required');
+      }
+    }
+  }
+});
+
+test('missing terms and transient failures are distinguished from expiry and retain valid endpoint fallback', async () => {
+  for (const failure of [response('', 0), response('Forbidden', 403), response('maintenance', 503),
+    response('<html>Unrecognized page</html>'), response('<select name="xnxq"></select>')]) {
+    const provider = new Provider({ request: async () => failure });
+    await assert.rejects(provider.getAllTerms(session(Campus.BENBU)),
+      failure.statusCode === 0 ? /学期请求网络失败/ : /未获取到学期列表/);
+    for (const validFirst of [true, false]) {
+      let count = 0;
+      const fallback = new Provider({ request: async () =>
+        ((count++ === 0) === validFirst) ? response(terms(validFirst ? 'pageXnxq' : 'xnxq')) : failure });
+      assert.equal((await fallback.getAllTerms(session(Campus.BENBU))).length, 1);
+    }
+  }
+  for (const campus of Object.values(Campus)) {
+    const saved = session(campus); saved.loginExpired = true;
+    const provider = new Provider({ request: async () => assert.fail('known expiry must ask for login directly') });
+    await assert.rejects(provider.getAllTerms(saved), /教务会话已失效，请重新登录/);
+  }
 });
 
 test('fallback term endpoints still verify deployments with different schemas', async () => {
@@ -195,6 +302,50 @@ test('real request path marks only definite authentication failures for each cam
           '/fixture-business', new EasApiClientOptions()), result);
         assert.equal((await store.load(campus)).loginExpired, true);
       }
+    }
+  } finally { EasApiClient.doHttp = previousHttp; EasSessionStore.instance = previousStore; }
+});
+
+test('Benbu term failure persists expiry, updates the session revision and displays the re-login message', async () => {
+  const previousStore = EasSessionStore.instance;
+  const previousHttp = EasApiClient.doHttp;
+  const { EasUserMessages } = load('feature/eas/EasUserMessages.ets');
+  try {
+    const { store, state } = storedSessions(); EasSessionStore.instance = store;
+    const saved = session(Campus.BENBU); saved.name = 'Fixture';
+    await store.save(saved);
+    const revision = state.get('hita_eas_session_revision');
+    EasApiClient.doHttp = async () => response(benbuVpnVerify);
+    const provider = new Provider(new EasApiClient());
+    await assert.rejects(provider.getAllTerms(saved), error => {
+      assert.equal(EasUserMessages.fromError(error.message, '稍后再试'), '教务登录已过期，请重新登录后重试');
+      return true;
+    });
+    const persisted = await store.load(Campus.BENBU);
+    assert.equal(persisted.loginExpired, true);
+    assert.equal(persisted.name, 'Fixture');
+    assert.equal(persisted.webCookies.get('JSESSIONID'), 'synthetic-session');
+    assert.equal(state.get('hita_eas_session_revision'), revision + 1);
+    assert.equal((await store.loadPreferred()).loginExpired, true);
+    assert.equal(EasUserMessages.fromError('学期请求网络失败', '稍后再试'), '无法连接教务系统，请检查网络后重试');
+  } finally { EasApiClient.doHttp = previousHttp; EasSessionStore.instance = previousStore; }
+});
+
+test('retry callbacks use the same auth decision and never treat ordinary redirects as expiry', async () => {
+  const previousStore = EasSessionStore.instance;
+  const previousHttp = EasApiClient.doHttp;
+  try {
+    for (const result of [response(benbuVpnShortcut), response(benbuVpnVerify), response('', 302),
+      response('<a href="/loginCAS">教务首页</a>' + terms('xnxq'))]) {
+      const { store } = storedSessions(); EasSessionStore.instance = store;
+      const saved = session(Campus.BENBU); await store.save(saved);
+      let retries = 0;
+      const api = new EasApiClient();
+      api.setReloginHandler(async () => { retries++; return false; });
+      EasApiClient.doHttp = async () => result;
+      await api.request(saved, easWebLoginConfigFor(saved.campus, '1'),
+        '/kbcx/queryGrkb', new EasApiClientOptions());
+      assert.equal(retries, isExpiredEasResponse(result) ? 1 : 0);
     }
   } finally { EasApiClient.doHttp = previousHttp; EasSessionStore.instance = previousStore; }
 });

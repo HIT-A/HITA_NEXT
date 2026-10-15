@@ -51,7 +51,7 @@ export class EasApiClient {
   }
 
   /**
-   * 发起数据请求：合并校区 Cookie 到请求头，遇到会话失效（HTTP 401 / 302 到登录页 / JSESSIONID 缺失）
+   * 发起数据请求：合并校区 Cookie 到请求头，遇到明确的认证失效响应
    * 触发重登回调。
    */
   async request(session: EasSession, cfg: EasCampusConfig, path: string,
@@ -86,42 +86,16 @@ export class EasApiClient {
         options.timeoutMs, options.useCache);
       if (isExpiredEasResponse(resp)) {
         await EasSessionStore.getInstance().markExpired(session);
-      }
-      if (resp.statusCode === 401 || this.isSessionInvalidResponse(resp, cfg)) {
         if (this.reloginHandler !== undefined && i + 1 < attempts) {
           const ok: boolean = await this.reloginHandler('session invalid on ' + path);
           if (ok) {
             continue; // 重登成功后重试一次
           }
         }
-        return resp;
       }
       return resp;
     }
     return new EasApiResponse(); // 理论不可达
-  }
-
-  /** 是否命中登录页重定向（302 → 门户登录特征，抓包期校准）。 */
-  private isSessionInvalidResponse(resp: EasApiResponse, cfg: EasCampusConfig): boolean {
-    if (cfg.campus.toString() === 'SHENZHEN') {
-      const t: string = resp.body;
-      return resp.statusCode === 302 || (t.indexOf('authentication/require') >= 0) ||
-        (t.indexOf('/cas/login') >= 0);
-    }
-    if (resp.statusCode === 302 || resp.statusCode === 303) {
-      return true;
-    }
-    const body: string = resp.body.toLowerCase();
-    // Do not treat ordinary EAS pages as expired just because their menu
-    // contains a link back to loginCAS.  Match the actual login/re-auth form.
-    const hasLoginForm: boolean = (body.indexOf('<form') >= 0 &&
-      (body.indexOf('logincas') >= 0 || body.indexOf('name="password"') >= 0 ||
-        body.indexOf('name="mm"') >= 0 || body.indexOf('action="/login') >= 0));
-    const hasReAuthPage: boolean = body.indexOf('reauth') >= 0 &&
-      body.indexOf('reauth_success') < 0;
-    const explicitExpired: boolean = body.indexOf('会话已失效') >= 0 ||
-      body.indexOf('会话超时') >= 0 || body.indexOf('未登录') >= 0;
-    return hasLoginForm || hasReAuthPage || explicitExpired;
   }
 
   /** 数据基址：深圳用 webBaseUrl；威海用 webvpn 前缀；本部按培养层次选 jwts/yjsgl 域。 */

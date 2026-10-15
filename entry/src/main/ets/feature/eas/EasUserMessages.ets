@@ -24,6 +24,7 @@ export class EasUserMessages {
       case '未获取到考试安排':
         return '暂时无法获取考试安排，请稍后重试或手动添加';
       case '课表请求网络失败':
+      case '学期请求网络失败':
       case '成绩请求网络失败':
       case '考试请求网络失败':
         return '无法连接教务系统，请检查网络后重试';

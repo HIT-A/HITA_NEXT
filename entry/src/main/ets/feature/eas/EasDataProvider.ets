@@ -155,6 +155,9 @@ export class EasDataProvider {
   }
 
   async getAllTerms(session: EasSession): Promise<EasTermItem[]> {
+    if (session.loginExpired) {
+      throw new Error('教务会话已失效，请重新登录');
+    }
     if (session.campus === EasCampus.SHENZHEN) {
       return await this.getShenzhenTerms(session);
     }
@@ -164,19 +167,16 @@ export class EasDataProvider {
 
     const scorePath: string = EasDataProvider.scoreTermsPathOf(session);
     const timetablePath: string = EasDataProvider.timetableTermsPathOf(session);
-    const scoreResp: EasApiResponse = await this.getHtml(session, scorePath);
-    const timetableResp: EasApiResponse = await this.getHtml(session, timetablePath);
-
+    const scoreResp: EasApiResponse = await this.getHtml(session, scorePath, 20000, false);
     hilog.info(DOMAIN, TAG, 'terms score path=%{public}s status=%{public}d len=%{public}d',
       scorePath, scoreResp.statusCode, scoreResp.body.length);
+    if (isExpiredEasResponse(scoreResp)) {
+      throw new Error('教务会话已失效，请重新登录');
+    }
+    const timetableResp: EasApiResponse = await this.getHtml(session, timetablePath, 20000, false);
     hilog.info(DOMAIN, TAG, 'terms timetable path=%{public}s status=%{public}d len=%{public}d',
       timetablePath, timetableResp.statusCode, timetableResp.body.length);
-
-    const scoreAuth: boolean = EasDataProvider.isLoginResponse(scoreResp.body) ||
-      scoreResp.statusCode === 401 || scoreResp.statusCode === 403;
-    const timetableAuth: boolean = EasDataProvider.isLoginResponse(timetableResp.body) ||
-      timetableResp.statusCode === 401 || timetableResp.statusCode === 403;
-    if (scoreAuth && timetableAuth) {
+    if (isExpiredEasResponse(timetableResp)) {
       throw new Error('教务会话已失效，请重新登录');
     }
 
@@ -188,6 +188,9 @@ export class EasDataProvider {
     hilog.info(DOMAIN, TAG, 'terms parsed score=%{public}d timetable=%{public}d merged=%{public}d',
       scoreTerms.length, timetableTerms.length, terms.length);
     if (terms.length === 0) {
+      if (scoreResp.statusCode === 0 || timetableResp.statusCode === 0) {
+        throw new Error('学期请求网络失败');
+      }
       throw new Error('未获取到学期列表');
     }
     return terms;

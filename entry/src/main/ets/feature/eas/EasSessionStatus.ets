@@ -11,6 +11,31 @@ export enum EasSessionStatus {
   UNKNOWN = '无法验证'
 }
 
+/** The Benbu SDP gateway uses a variable-based browser redirect before its VPN login page. */
+function isBenbuVerificationRedirect(html: string): boolean {
+  const scripts: RegExp = /<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi;
+  let scriptMatch: RegExpExecArray | null = scripts.exec(html);
+  while (scriptMatch !== null) {
+    const script: string = scriptMatch[1].replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/[^\r\n]*/gm, '');
+    const targets: RegExp =
+      /\b(?:var|let|const)\s+([A-Za-z_$][\w$]*)\s*=\s*["']https:\/\/ivpn\.hit\.edu\.cn(?::443)?\/controller\/v1\/public\/verify(?:\?[^"']*)?["']/gi;
+    let target: RegExpExecArray | null = targets.exec(script);
+    while (target !== null) {
+      const variable: string = target[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const redirect: RegExp = new RegExp('\\blocation\\s*\\.\\s*(?:replace|assign)\\s*\\(\\s*' +
+        variable + '\\s*(?=[+),])');
+      // A link or an unused URL declaration alone is not an authentication failure.
+      if (redirect.test(script)) {
+        return true;
+      }
+      target = targets.exec(script);
+    }
+    scriptMatch = scripts.exec(html);
+  }
+  return false;
+}
+
 /** A saved cookie is not proof of a live session; require an authentication failure from the server. */
 export function isExpiredEasResponse(response: EasSessionResponse): boolean {
   if (response.statusCode === 401) {
@@ -34,6 +59,15 @@ export function isExpiredEasResponse(response: EasSessionResponse): boolean {
     }
   }
   const html: string = body.replace(/<!--[\s\S]*?-->/g, '');
+  if (isBenbuVerificationRedirect(html)) {
+    return true;
+  }
+  // Benbu's VPN returns this HTTP 200 bootstrap instead of the requested EAS page
+  // when its authentication is unavailable. A generic loading page is not evidence.
+  if (/<script\b[^>]*\bsrc\s*=\s*["'][^"']*\/old\/jssdk\/shortcut_api\.js(?:[?"'])/i.test(html) &&
+    /<script\b[^>]*\bsrc\s*=\s*["'][^"']*\/old\/shortcut_main\.js(?:[?"'])/i.test(html)) {
+    return true;
+  }
   const markup: string = html.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '');
   if (/<input\b[^>]*(?:type\s*=\s*["']?password\b|name\s*=\s*["']?(?:password|mm)\b)/i.test(markup) ||
     /<form\b[^>]*action\s*=\s*["'][^"']*(?:login|authentication\/require)/i.test(markup)) {
