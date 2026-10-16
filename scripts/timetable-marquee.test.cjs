@@ -30,6 +30,8 @@ const { drawTimetableWeek, drawTimetablePlaces, TimetablePlaceLabel, timetableEv
 const { TimetableCardPainter } = load('feature/timetable/views/TimetableCardPainter.ets');
 const { EasEventItem, EasTimetable } = load('common/model/timetable/TimetableModels.ets');
 const { TimetableTheme } = load('common/theme/TimetableTheme.ets');
+const { TimetableDisplayOptions } = load('feature/timetable/data/TimetableDisplayOptions.ets');
+const { TimetableBackdropPixels } = load('common/theme/TimetableBackdrop.ets');
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 0.0001, `${actual} != ${expected}`);
 
 test('fitting classrooms stay still and do not request animation frames', () => {
@@ -120,6 +122,61 @@ function luminance(argb) {
   return 0.2126 * linear(16) + 0.7152 * linear(8) + 0.0722 * linear(0);
 }
 
+test('the grid switch hides time lines and day dividers without changing labels or courses', () => {
+  const { timetable, events } = fixture();
+  const visible = canvas(), hidden = canvas();
+  const before = new TimetableCardLayer(), after = new TimetableCardLayer();
+  const options = new TimetableDisplayOptions();
+  options.drawTimeLines = false;
+  drawTimetableWeek(visible, 380, 830, timetable, events, 1, false, 50, 0, false, false, '', false, before);
+  drawTimetableWeek(hidden, 380, 830, timetable, events, 1, false, 50, 0, false, false, '', false, after, options);
+  assert.deepEqual(after, before);
+  assert.deepEqual(hidden.paints.filter(p => p.method === 'fillText'), visible.paints.filter(p => p.method === 'fillText'));
+  assert.equal(hidden.paints.filter(p => p.method === 'stroke').length, 0, 'no background dividers remain');
+  assert.equal(visible.paints.filter(p => p.method === 'stroke').length, 37);
+  assert.equal(hidden.calls.some(c => c[0] === 'setLineDash' && c[1].length > 0), false);
+});
+
+test('custom time-line color applies in both themes while course colors and date labels are retained', () => {
+  const { timetable, events } = fixture();
+  const options = new TimetableDisplayOptions();
+  options.timeLineColor = '#E53935';
+  for (const dark of [false, true]) {
+    const ctx = canvas();
+    drawTimetableWeek(ctx, 380, 830, timetable, events, 1, false, 50, 0, false, false, '#135ABC', dark, undefined, options);
+    const strokes = ctx.paints.filter(p => p.method === 'stroke');
+    assert.equal(strokes.filter(p => p.color === (dark ? 'rgba(229,57,53,0.22)' : '#E53935')).length, 16);
+    assert.equal(strokes.filter(p => p.color === (dark ? 'rgba(229,57,53,0.09)' : 'rgba(229,57,53,0.35)')).length, 21);
+    assert.equal(ctx.paints.find(p => p.method === 'fillText' && p.args[0] === '8:00').color, '#135ABC');
+  }
+});
+
+test('wallpaper grid uses translucent colors, retains today highlight when disabled and never changes card paint', () => {
+  const { timetable, events } = fixture();
+  const background = new TimetableBackdropPixels(1, 1, 4, new Uint8Array([0, 0, 0, 255]), false)
+    .colors(false, 0, 380, 830, 200, 64, 3);
+  const options = new TimetableDisplayOptions();
+  const before = new TimetableCardLayer(), after = new TimetableCardLayer();
+  const visible = canvas();
+  drawTimetableWeek(visible, 380, 830, timetable, events, 1, true, 50, 0, false, false,
+    '#FFFFFF', false, before, options, background, true);
+  assert.equal(visible.paints.filter(p => p.method === 'stroke' && p.color === background.line).length, 16);
+  assert.equal(visible.paints.filter(p => p.method === 'stroke' && p.color === background.minorLine).length, 21);
+  options.drawTimeLines = false;
+  const hidden = canvas();
+  drawTimetableWeek(hidden, 380, 830, timetable, events, 1, true, 50, 0, false, false,
+    '#FFFFFF', false, after, options, background, true);
+  assert.deepEqual(before, after);
+  assert.equal(hidden.paints.filter(p => p.method === 'stroke').length, 0);
+  assert.ok(hidden.paints.some(p => p.method === 'fillRect' && p.color === background.todayMask));
+  options.drawTimeLines = true; options.timeLineColor = '#FFFFFF';
+  const custom = canvas();
+  drawTimetableWeek(custom, 380, 830, timetable, events, 1, true, 50, 0, false, false,
+    '#FFFFFF', false, new TimetableCardLayer(), options, background, true);
+  assert.ok(custom.paints.filter(p => p.method === 'stroke')
+    .every(p => ['rgba(255,255,255,0.22)', 'rgba(255,255,255,0.09)'].includes(p.color)));
+});
+
 test('dark timetable changes the canvas surface and labels without moving or recoloring courses', () => {
   const { timetable, events } = fixture();
   const light = canvas(), dark = canvas();
@@ -140,8 +197,8 @@ test('dark timetable does not paint a solid background over a wallpaper or overw
   drawTimetableWeek(ctx, 380, 830, timetable, events, 1, false, 50, 64, true, false, '#FFFFFF', true);
   assert.equal(ctx.paints.filter(p => p.method === 'fillRect').length, 0);
   assert.ok(ctx.paints.filter(p => p.method === 'fillText').every(p => p.color === '#FFFFFF'));
-  assert.equal(TimetableTheme.resolveText('#14213D', true, false), '#ECEFF4');
-  assert.equal(TimetableTheme.resolveText('#14213D', false, false), '#14213D');
+  assert.equal(TimetableTheme.resolveText('auto', true, false), '#ECEFF4');
+  assert.equal(TimetableTheme.resolveText('auto', false, false), '#14213D');
   for (const custom of TimetableTheme.PALETTE) {
     assert.equal(TimetableTheme.resolveText(custom, true, true), custom);
     if (custom !== TimetableTheme.DEFAULT_TEXT) {

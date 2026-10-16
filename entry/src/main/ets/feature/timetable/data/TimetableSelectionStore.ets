@@ -1,10 +1,12 @@
 /** Persists the timetable selected for the main timetable/today views. */
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
+import { TimetableTheme } from '../../../common/theme/TimetableTheme';
 
 const STORE_NAME: string = 'hitanext_store';
 const ACTIVE_TIMETABLE_KEY: string = 'active_timetable_id';
 const TEXT_COLOR_KEY: string = 'timetable_text_color';
+const CUSTOM_TEXT_COLOR_KEY: string = 'timetable_text_color_custom';
 
 export class TimetableSelectionStore {
   private static instance: TimetableSelectionStore | undefined = undefined;
@@ -76,17 +78,29 @@ export class TimetableSelectionStore {
     try {
       const raw: preferences.ValueType = await this.store.get(TEXT_COLOR_KEY, fallback);
       const color: string = raw === undefined || raw === null ? fallback : String(raw);
-      return color.length > 0 ? color : fallback;
+      const custom = await this.store.get(CUSTOM_TEXT_COLOR_KEY, false);
+      // Older versions saved the default theme color as if it were a manual choice.
+      if (color.toUpperCase() === TimetableTheme.DEFAULT_TEXT && custom !== true) return TimetableTheme.AUTO_TEXT;
+      return color === TimetableTheme.AUTO_TEXT || /^#[0-9A-Fa-f]{6}$/.test(color) ? color : fallback;
     } catch (e) {
       return fallback;
     }
   }
 
   async saveTextColor(color: string): Promise<void> {
-    if (this.store === undefined || !/^#[0-9A-Fa-f]{6}$/.test(color)) {
+    if (this.store === undefined || (color !== TimetableTheme.AUTO_TEXT && !/^#[0-9A-Fa-f]{6}$/.test(color))) {
       throw new Error('Text color store unavailable or invalid color');
     }
-    await this.store.put(TEXT_COLOR_KEY, color);
-    await this.store.flush();
+    const previous = await this.store.get(TEXT_COLOR_KEY, TimetableTheme.AUTO_TEXT);
+    const wasCustom = await this.store.get(CUSTOM_TEXT_COLOR_KEY, false);
+    try {
+      await this.store.put(TEXT_COLOR_KEY, color);
+      await this.store.put(CUSTOM_TEXT_COLOR_KEY, color !== TimetableTheme.AUTO_TEXT);
+      await this.store.flush();
+    } catch (_) {
+      await this.store.put(TEXT_COLOR_KEY, previous);
+      await this.store.put(CUSTOM_TEXT_COLOR_KEY, wasCustom);
+      throw new Error('Text color save failed');
+    }
   }
 }

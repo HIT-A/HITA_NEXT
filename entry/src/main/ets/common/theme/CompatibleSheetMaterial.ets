@@ -9,10 +9,10 @@ export class CompatibleSheetMaterial {
     return false;
   }
 
-  static options(options: SheetOptions, requested: boolean = true): SheetOptions {
+  static options(options: SheetOptions, requested: boolean = true, interactive: boolean = true): SheetOptions {
     if (deviceInfo.apiAvailable('26.0.0')) {
       if (requested && CompatibleSheetMaterial.isEnabled()) {
-        return SheetMaterial.options(options);
+        return SheetMaterial.options(options, interactive);
       }
     }
     return options;

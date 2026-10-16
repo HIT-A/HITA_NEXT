@@ -43,6 +43,8 @@ export class AppearanceStore {
   private contentReady: boolean = false;
   private saving: boolean = false;
   private barUpdate: Promise<void> = Promise.resolve();
+  private pageStatusColor: string = '';
+  private pageNavigationColor: string = '';
 
   static getInstance(): AppearanceStore {
     if (AppearanceStore.instance === undefined) {
@@ -74,6 +76,17 @@ export class AppearanceStore {
   detachWindow(): void {
     this.mainWindow = undefined;
     this.contentReady = false;
+    this.pageStatusColor = '';
+    this.pageNavigationColor = '';
+  }
+
+  setPageBarColors(status: string = '', navigation: string = ''): void {
+    const nextStatus = /^#[0-9a-fA-F]{6}$/.test(status) ? status : '';
+    const nextNavigation = /^#[0-9a-fA-F]{6}$/.test(navigation) ? navigation : '';
+    if (this.pageStatusColor === nextStatus && this.pageNavigationColor === nextNavigation) return;
+    this.pageStatusColor = nextStatus;
+    this.pageNavigationColor = nextNavigation;
+    this.updateBars();
   }
 
   onContentReady(): void {
@@ -146,6 +159,8 @@ export class AppearanceStore {
   private updateBars(): void {
     const target: window.Window | undefined = this.mainWindow;
     const dark: boolean = this.dark;
+    const status = this.pageStatusColor || (dark ? '#ECEFF4' : '#14213D');
+    const navigation = this.pageNavigationColor || (dark ? '#BCC3CF' : '#4E5C72');
     if (target === undefined) {
       return;
     }
@@ -156,9 +171,9 @@ export class AppearanceStore {
       await target.setWindowBackgroundColor(dark ? '#101214' : '#F4F7FC');
       await target.setWindowSystemBarProperties({
         statusBarColor: '#00000000',
-        statusBarContentColor: dark ? '#ECEFF4' : '#14213D',
+        statusBarContentColor: status,
         navigationBarColor: '#00000000',
-        navigationBarContentColor: dark ? '#BCC3CF' : '#4E5C72'
+        navigationBarContentColor: navigation
       });
     }).catch(() => {
       hilog.warn(0x0000, 'HitaAppearance', 'Unable to update system bars');

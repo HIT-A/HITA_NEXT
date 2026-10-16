@@ -12,12 +12,16 @@ const compile = source => ts.transpileModule(source, {
 
 function compatible(api, supported = true) {
   const calls = [];
+  const interactions = [];
   const native = {};
   Object.defineProperty(native, 'SheetMaterial', { get() {
     assert.equal(api, 26, 'other APIs must not evaluate the native sheet module');
     return {
       supported: () => supported,
-      options: options => { calls.push(options); return { ...options, immersive: true }; }
+      options: (options, interactive) => {
+        calls.push(options); interactions.push(interactive);
+        return { ...options, immersive: true };
+      }
     };
   } });
   const source = read('ets/common/theme/CompatibleSheetMaterial.ets');
@@ -27,7 +31,7 @@ function compatible(api, supported = true) {
     name => name === '@kit.BasicServicesKit' ? { deviceInfo: {
       apiAvailable: version => api >= Number(version.split('.')[0])
     } } : native, mod, mod.exports, { Transparent: 'transparent' }, name => name);
-  return { Sheet: mod.exports.CompatibleSheetMaterial, calls };
+  return { Sheet: mod.exports.CompatibleSheetMaterial, calls, interactions };
 }
 
 function nativeMaterial(overrides = {}) {
@@ -90,6 +94,21 @@ test('sheet material retains sizing, mask, dismissal and callback identities wit
   for (const [key, value] of Object.entries(retained)) assert.equal(result[key], value, key);
 });
 
+test('display settings keep sheet material without deforming switches and sliders', () => {
+  const { Sheet, interactions } = compatible(26);
+  const input = { height: 'fit-content', dragBar: true };
+  Sheet.options(input, true, false);
+  assert.deepEqual(interactions, [false]);
+  const output = nativeMaterial().options({ ...input }, false);
+  assert.equal(output.systemMaterial.interactive, false);
+  assert.equal(output.height, input.height);
+  const home = read('ets/pages/Home.ets');
+  const display = home.slice(home.indexOf('        TimetableDisplaySettings({'),
+    home.indexOf('      } else if (this.courseSheetOpen && this.selectedCourse'));
+  assert.doesNotMatch(display, /CompatibleLightModifier/);
+  assert.match(read('ets/feature/timetable/views/TimetableDisplaySettings.ets'), /CompatibleMaterialModifier/);
+});
+
 test('unavailable capability and constructor failures preserve sheet fallback options', () => {
   assert.equal(nativeMaterial({ isImmersiveMaterialSupported: () => false }).supported(), false);
   assert.equal(nativeMaterial({ isImmersiveMaterialSupported() { throw Error('unavailable'); } }).supported(), false);
@@ -117,7 +136,7 @@ test('Home retains one sheet lifecycle for authentication, timetable and calenda
   const home = read('ets/pages/Home.ets');
   assert.equal((home.match(/\.bindSheet\(/g) || []).length, 1);
   assert.match(home, /\.bindSheet\(\$\$this.activeSheetVisible, this.activeSheet\(\), CompatibleSheetMaterial.options\(\{/);
-  assert.match(home, /\}, this.loginSheetOpen \|\| this.sessionSheetOpen \|\| this.courseSheetOpen \|\| this.timetablePaletteOpen \|\|\s*this.calendarExportSheetOpen\)\)/);
+  assert.match(home, /\}, this.loginSheetOpen \|\| this.sessionSheetOpen \|\| this.courseSheetOpen \|\| this.timetableDisplayOpen \|\|\s*this.calendarExportSheetOpen, !this.timetableDisplayOpen\)\)/);
   assert.match(home, /showClose: false/);
   assert.match(home, /height: this.loginSheetOpen \? SheetSize.LARGE : SheetSize.FIT_CONTENT/);
   assert.match(home, /onWillDisappear: \(\) => \{\s*this.closeActiveSheet\(\)/);
@@ -151,9 +170,11 @@ test('course palette button keeps a stable circle host, original preview and tog
 
 test('course and timetable text color actions share the material footer while retaining the legacy fallback', () => {
   const home = read('ets/pages/Home.ets');
-  assert.equal((home.match(/immersiveControls: true/g) || []).length, 2);
+  assert.equal((home.match(/immersiveControls: true/g) || []).length, 1);
   assert.match(home, /initialColor: event.color,\s*immersiveControls: true/);
-  assert.match(home, /textMode: true,\s*immersiveControls: true/);
+  const display = read('ets/feature/timetable/views/TimetableDisplaySettings.ets');
+  assert.match(display, /textMode: this\.editing === 'text',[\s\S]*immersiveControls: true/);
+  assert.match(display, /new CompatibleMaterialModifier/);
   assert.doesNotMatch(read('ets/pages/ExamPage.ets'), /immersiveControls/);
   const editor = read('ets/feature/timetable/views/CourseColorEditor.ets');
   assert.match(editor, /@Prop immersiveControls: boolean = false/);

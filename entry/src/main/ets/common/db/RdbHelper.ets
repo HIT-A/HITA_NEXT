@@ -511,6 +511,15 @@ export class RdbHelper {
     const pred: relationalStore.RdbPredicates = new relationalStore.RdbPredicates('subject');
     pred.equalTo('timetableId', timetableId);
     pred.orderByDesc('credit');
+    return this.readSubjects(pred);
+  }
+
+  /** Credit statistics aggregate all saved timetables, with deduplication in the credit feature. */
+  async getAllSubjects(): Promise<EasTermSubject[]> {
+    return this.readSubjects(new relationalStore.RdbPredicates('subject').orderByDesc('createdAt'));
+  }
+
+  private async readSubjects(pred: relationalStore.RdbPredicates): Promise<EasTermSubject[]> {
     const rs: relationalStore.ResultSet | null = await this.qry(pred);
     return RdbHelper.readRows(rs, (col: (name: string) => ValueGetter) => {
       const s: EasTermSubject = new EasTermSubject();

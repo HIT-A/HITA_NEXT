@@ -11,12 +11,12 @@ export class SheetMaterial {
     }
   }
 
-  static options(options: SheetOptions): SheetOptions {
+  static options(options: SheetOptions, interactive: boolean = true): SheetOptions {
     try {
       const material: uiMaterial.ImmersiveMaterial = new uiMaterial.ImmersiveMaterial({
         style: uiMaterial.ImmersiveStyle.THICK,
         colorInvert: false,
-        interactive: true,
+        interactive: interactive,
         lightEffect: null
       });
       // Callers pass fresh sheet options; retain their sizing and lifecycle callbacks.

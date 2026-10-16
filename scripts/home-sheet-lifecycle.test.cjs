@@ -261,15 +261,15 @@ test('switching campus ignores out-of-order results and recovers from a failed r
 });
 
 
-test('text palette keeps its close guard until dismissal finishes', () => {
+test('display settings keep their close guard until dismissal finishes', () => {
   const { page } = harness();
-  page.timetablePaletteOpen = true;
+  page.timetableDisplayOpen = true;
   page.activeSheetVisible = true;
   page.willDisappear();
   assert.equal(page.canOpenSheet(), false);
-  assert.equal(page.timetablePaletteOpen, true);
+  assert.equal(page.timetableDisplayOpen, true);
   page.didDisappear();
-  assert.equal(page.timetablePaletteOpen, false);
+  assert.equal(page.timetableDisplayOpen, false);
   assert.equal(page.canOpenSheet(), true);
 });
 

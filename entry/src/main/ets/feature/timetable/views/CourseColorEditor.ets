@@ -12,6 +12,7 @@ export struct CourseColorEditor {
   @Prop previewDark: boolean = false;
   @Prop previewWallpaper: boolean = false;
   @Prop textMode: boolean = false;
+  @Prop lineMode: boolean = false;
   @Prop examMode: boolean = false;
   @Prop initialColor: number = 0xFF2E86E8;
   @Prop textColor: string = '#FFFFFF';
@@ -74,16 +75,22 @@ export struct CourseColorEditor {
 
   build() {
     Column({ space: 8 }) {
-      Text(this.textMode ? '时间表文字颜色' : (this.examMode ? '考试颜色' : '课程颜色'))
+      Text(this.lineMode ? '背景时间虚线颜色' : (this.textMode ? '时间表文字颜色' : (this.examMode ? '考试颜色' : '课程颜色')))
         .fontSize(20).fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.hita_text')).width('100%');
-      Text(this.textMode ? '调整标题、日期和时间刻度的颜色。' :
+      Text(this.lineMode ? '调整时间网格及每天分隔线的颜色。' : this.textMode ? '调整标题、日期和时间刻度的颜色。' :
         (this.examMode ? '仅应用到这场考试；过亮颜色会自动压暗。' :
           '应用到这门课程的所有课块；过亮颜色会自动压暗。'))
         .fontSize(13).fontColor($r('app.color.hita_text_secondary')).width('100%');
       Row({ space: 12 }) {
         Text(this.hex()).fontColor($r('app.color.hita_text')).layoutWeight(1);
-        if (this.textMode || this.examMode) {
+        if (this.lineMode) {
+          Row({ space: 6 }) {
+            ForEach([0, 1, 2, 3, 4, 5], (index: number) => {
+              Row().width(8).height(2).backgroundColor(this.hex())
+            })
+          }.padding(16).borderRadius(12).backgroundColor($r('app.color.hita_page'))
+        } else if (this.textMode || this.examMode) {
           Text(this.textMode ? '周一 08:00' : '考试预览')
             .fontColor(this.textMode ? TimetableTheme.resolveText(this.hex(), this.previewDark, this.previewWallpaper) : '#FFFFFF').fontSize(15)
             .padding(16).borderRadius(12)

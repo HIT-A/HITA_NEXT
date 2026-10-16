@@ -14,6 +14,7 @@ import { ImmersiveEventCard } from '../common/components/ImmersiveEventCard';
 import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
 import { TimetableTheme } from '../common/theme/TimetableTheme';
+import { TimetableBackdropColors, TimetableBackdropPixels } from '../common/theme/TimetableBackdrop';
 import { AppearanceMode, AppearanceStore } from '../common/theme/AppearanceStore';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { CompatibleDockModifier } from '../common/theme/CompatibleDockModifier';
@@ -47,6 +48,10 @@ import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
 import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
 import { hasEveningCourse, eveningHintVisible } from '../feature/timetable/data/EveningCourseHint';
 import { TimetableBackgroundStore } from '../feature/timetable/data/TimetableBackgroundStore';
+import { TimetableWallpaperSampler } from '../feature/timetable/data/TimetableWallpaperSampler';
+import { TimetableDisplayOptions } from '../feature/timetable/data/TimetableDisplayOptions';
+import { TimetableDisplayStore } from '../feature/timetable/data/TimetableDisplayStore';
+import { TimetableDisplaySettings } from '../feature/timetable/views/TimetableDisplaySettings';
 import { ClassReminderStore } from '../feature/timetable/data/ClassReminderStore';
 import { ClassReminderScheduler, ClassReminderSyncResult } from '../feature/timetable/data/ClassReminderScheduler';
 import { IcsImportResult, TimetableIcsImporter } from '../feature/timetable/data/TimetableIcsImporter';
@@ -133,7 +138,7 @@ struct Home {
   @State appearanceExpanded: boolean = false;
   @State todayItems: EasEventItem[] = [];
   @State timelineText: string = '暂无今日日程';
-  @State currentTab: number = 0;
+  @State @Watch('updateTimetableSystemBars') currentTab: number = 0;
   @State hasTimetable: boolean = false;
   @State timetableCount: number = 0;
   @State calendarExporting: boolean = false;
@@ -149,7 +154,7 @@ struct Home {
   @State nowTick: number = Date.now();
   @State sessionInfo: EasSession | undefined = undefined;
   @StorageProp(EAS_SESSION_REVISION_KEY) @Watch('onSessionRevisionChanged') sessionRevision: number = 0;
-  @State activeSheetVisible: boolean = false;
+  @State @Watch('updateTimetableSystemBars') activeSheetVisible: boolean = false;
   @State sessionSheetOpen: boolean = false;
   @State sessionSheetCampus: string = 'WEIHAI';
   @State sessionSheetInfo: EasSession | undefined = undefined;
@@ -179,7 +184,7 @@ struct Home {
   @State timetableAnimating: boolean = false;
   private importRequested: boolean = false;
   private clockTimer: number = -1;
-  @State private pageVisible: boolean = false;
+  @State @Watch('updateTimetableSystemBars') private pageVisible: boolean = false;
   @State private tabTransitionRunning: boolean = false;
   private timetablePlaceLabels: TimetablePlaceLabel[] = [];
   private timetableMarqueeCallback: TimetableMarqueeCallback | undefined = undefined;
@@ -200,8 +205,16 @@ struct Home {
   @State moreHeaderMaskOpacity: number = 0;
   @State selectedNav: number = TAB_TODAY;
   @State timetableBgUri: string = '';
-  @State timetableTextColor: string = TimetableTheme.DEFAULT_TEXT;
-  @State timetablePaletteOpen: boolean = false;
+  @State timetableTextColor: string = TimetableTheme.AUTO_TEXT;
+  @State @Watch('updateTimetableSystemBars') private timetableBackdrop: TimetableBackdropColors = new TimetableBackdropColors(false);
+  private timetableWallpaperPixels: TimetableBackdropPixels | undefined = undefined;
+  private timetableWallpaperGeneration: number = 0;
+  private timetableBackdropKey: string = '';
+  private timetableViewportW: number = 360;
+  private timetableViewportH: number = 800;
+  @State timetableDisplayOpen: boolean = false;
+  @State timetableDisplay: TimetableDisplayOptions = new TimetableDisplayOptions();
+  @State timetableMaskDepth: number = 0;
   @State timetableChromeH: number = TIMETABLE_CHROME_FALLBACK;
   @StorageProp('hita_status_bar_vp') statusBarInset: number = STATUS_BAR_INSET_FALLBACK;
   @StorageProp('hita_nav_bar_vp') navBarInset: number = NAV_BAR_INSET_FALLBACK;
@@ -239,7 +252,16 @@ struct Home {
     const bgPath: string = TimetableBackgroundStore.loadPath(ctx);
     this.timetableBgUri = bgPath.length > 0 ? TimetableBackgroundStore.toDisplayUri(bgPath) : '';
     this.timetableTextColor = await TimetableSelectionStore.getInstance()
-      .loadTextColor(TimetableTheme.DEFAULT_TEXT);
+      .loadTextColor(TimetableTheme.AUTO_TEXT);
+    try {
+      await TimetableDisplayStore.getInstance().init(ctx);
+      this.timetableDisplay = await TimetableDisplayStore.getInstance().load();
+      this.timetableMaskDepth = this.timetableDisplay.wallpaperMask;
+    } catch (_) {
+      // Keep the existing appearance if preferences are temporarily unavailable.
+    }
+    this.drawTimetableNow();
+    this.loadTimetableWallpaperColors(bgPath);
     const params: Object | undefined = this.getUIContext().getRouter().getParams();
     if (params !== undefined && params !== null) {
       const record: Record<string, string> = params as Record<string, string>;
@@ -292,8 +314,42 @@ struct Home {
     this.drawTimetableNow();
   }
 
-  private timetableInk(): string {
-    return TimetableTheme.resolveText(this.timetableTextColor, this.darkMode, this.hasTimetableBackground());
+  private timetableInk(region: string = 'title'): string {
+    const adaptive = region === 'time' ? this.timetableBackdrop.timeText :
+      (region === 'date' ? this.timetableBackdrop.dateText : this.timetableBackdrop.titleText);
+    return TimetableTheme.resolveText(this.timetableTextColor, this.darkMode,
+      this.hasTimetableBackground(), adaptive);
+  }
+
+  private refreshTimetableBackdrop(): void {
+    const today = EasTimetable.dowOfMs(this.nowTick);
+    const key = [this.timetableBgUri, this.darkMode, this.timetableMaskDepth, this.timetableViewportW,
+      this.timetableViewportH, this.timetableChromeH, today, this.statusBarInset, this.navBarInset].join('|');
+    if (key === this.timetableBackdropKey) return;
+    this.timetableBackdropKey = key;
+    this.timetableBackdrop = this.hasTimetableBackground() && this.timetableWallpaperPixels !== undefined ?
+      this.timetableWallpaperPixels.colors(this.darkMode, this.timetableMaskDepth, this.timetableViewportW,
+        this.timetableViewportH, this.timetableChromeH, TIMETABLE_HEADER_HEIGHT, today,
+        this.statusBarInset, this.navBarInset) :
+      new TimetableBackdropColors(this.darkMode);
+  }
+
+  private updateTimetableSystemBars(): void {
+    const visible = this.pageVisible && this.currentTab === TAB_TIMETABLE && this.hasTimetableBackground();
+    AppearanceStore.getInstance().setPageBarColors(visible ? this.timetableBackdrop.statusText : '',
+      visible && !this.activeSheetVisible ? this.timetableBackdrop.navigationText : '');
+  }
+
+  private async loadTimetableWallpaperColors(path: string): Promise<void> {
+    const generation = ++this.timetableWallpaperGeneration;
+    this.timetableWallpaperPixels = undefined;
+    this.timetableBackdropKey = '';
+    this.drawTimetableNow();
+    const pixels = await TimetableWallpaperSampler.read(path);
+    if (generation !== this.timetableWallpaperGeneration) return;
+    this.timetableWallpaperPixels = pixels;
+    this.timetableBackdropKey = '';
+    this.drawTimetableNow();
   }
 
   private async selectAppearance(mode: AppearanceMode): Promise<void> {
@@ -312,6 +368,7 @@ struct Home {
 
   aboutToDisappear(): void {
     this.pageVisible = false;
+    this.timetableWallpaperGeneration++;
     this.resetDockInteraction();
     this.closeActiveSheet();
     this.courseDeleteEffects.pause();
@@ -534,6 +591,7 @@ struct Home {
   }
 
   private drawTimetableNow(): void {
+    this.refreshTimetableBackdrop();
     if (this.courseSkipAnimating) {
       return;
     }
@@ -559,7 +617,8 @@ struct Home {
     const labels: TimetablePlaceLabel[] = drawTimetableWeek(this.timetableCanvas,
       this.timetableAreaW, canvasHeight,
       this.currentTimetable, weekEvents, this.timetableWeek, current === this.timetableWeek,
-      hourHeight, 0, false, false, this.timetableInk(), this.darkMode, cardLayer);
+      hourHeight, 0, false, false, this.timetableInk('time'), this.darkMode, cardLayer, this.timetableDisplay,
+      this.timetableBackdrop, this.hasTimetableBackground());
     const cards: TimetableCardSurface[] = cardLayer.surfaces;
     if (cards.length !== this.timetableCardSurfaces.length ||
       cards.some((card: TimetableCardSurface, index: number): boolean =>
@@ -1002,7 +1061,7 @@ struct Home {
   }
 
   private updateEveningCourseHint(): void {
-    if (this.currentTimetable === undefined || this.timetableAreaH <= 0) {
+    if (!this.timetableDisplay.eveningHint || this.currentTimetable === undefined || this.timetableAreaH <= 0) {
       this.showEveningCourseHint = false;
       return;
     }
@@ -1046,7 +1105,7 @@ struct Home {
       }
       this.timetableBgUri = TimetableBackgroundStore.toDisplayUri(path);
       this.timetableFadeOpacity = 0;
-      this.drawTimetableNow();
+      await this.loadTimetableWallpaperColors(path);
     } catch (e) {
       this.getUIContext().getPromptAction().showToast({ message: '选择图片失败' });
     }
@@ -1056,12 +1115,24 @@ struct Home {
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     TimetableBackgroundStore.remove(ctx);
     this.timetableBgUri = '';
+    this.timetableWallpaperGeneration++;
+    this.timetableWallpaperPixels = undefined;
+    this.timetableBackdropKey = '';
     this.drawTimetableNow();
   }
 
   private async setTimetableTextColor(color: string): Promise<void> {
     await TimetableSelectionStore.getInstance().saveTextColor(color);
     this.timetableTextColor = color;
+    this.drawTimetableNow();
+  }
+
+  private async saveTimetableDisplay(options: TimetableDisplayOptions): Promise<void> {
+    const store = TimetableDisplayStore.getInstance();
+    await store.init(this.getUIContext().getHostContext() as common.Context);
+    await store.save(options);
+    this.timetableDisplay = options.copy();
+    this.timetableMaskDepth = options.wallpaperMask;
     this.drawTimetableNow();
   }
 
@@ -1086,7 +1157,7 @@ struct Home {
   private canOpenSheet(): boolean {
     return !this.skippingCourse && this.pageVisible && !this.tabTransitionRunning && !this.activeSheetVisible &&
       !this.sessionSheetOpen && !this.loginSheetOpen && !this.courseSheetOpen &&
-      !this.calendarExportSheetOpen && !this.timetablePaletteOpen;
+      !this.calendarExportSheetOpen && !this.timetableDisplayOpen;
   }
 
   private closeActiveSheet(): void {
@@ -1644,14 +1715,14 @@ struct Home {
         this.sessionSheetOpen = false;
         this.loginSheetOpen = false;
         this.courseSheetOpen = false;
-        this.timetablePaletteOpen = false;
+        this.timetableDisplayOpen = false;
         this.selectedCourse = undefined;
         this.calendarExportSheetOpen = false;
         this.calendarExportTimetable = undefined;
         this.finishCourseSheetDismissal();
       }
-    }, this.loginSheetOpen || this.sessionSheetOpen || this.courseSheetOpen || this.timetablePaletteOpen ||
-      this.calendarExportSheetOpen));
+    }, this.loginSheetOpen || this.sessionSheetOpen || this.courseSheetOpen || this.timetableDisplayOpen ||
+      this.calendarExportSheetOpen, !this.timetableDisplayOpen));
   }
 
   @Builder
@@ -1696,27 +1767,22 @@ struct Home {
           .width('100%')
           .height('100%')
           .attributeModifier(new CompatibleLightModifier(24, CompatibleSheetMaterial.isEnabled(), true));
-      } else if (this.timetablePaletteOpen) {
-        Column() {
-          CourseColorEditor({
-            initialColor: (0xFF000000 | parseInt(this.timetableTextColor.substring(1), 16)) >>> 0,
-            textMode: true,
-            immersiveControls: true,
-            previewDark: this.darkMode,
-            previewWallpaper: this.hasTimetableBackground(),
-            presets: TimetableTheme.PALETTE.map((color: string): number =>
-              (0xFF000000 | parseInt(color.substring(1), 16)) >>> 0),
-            onSave: async (color: number) => {
-              const generation: number = this.sheetRequestGeneration;
-              await this.setTimetableTextColor('#' + (color & 0xFFFFFF).toString(16).padStart(6, '0').toUpperCase());
-              if (generation === this.sheetRequestGeneration && this.timetablePaletteOpen) {
-                this.closeActiveSheet();
-              }
-            },
-            onCancel: () => { this.closeActiveSheet(); }
-          })
-        }.width('100%').padding({ left: 20, right: 20, top: 0, bottom: 20 })
-          .attributeModifier(new CompatibleLightModifier(24, CompatibleSheetMaterial.isEnabled(), true));
+      } else if (this.timetableDisplayOpen) {
+        TimetableDisplaySettings({
+          options: this.timetableDisplay,
+          textColor: this.timetableTextColor,
+          darkMode: this.darkMode,
+          hasWallpaper: this.hasTimetableBackground(),
+          adaptiveTextColor: this.timetableBackdrop.titleText,
+          adaptiveLineColor: this.timetableBackdrop.linePicker,
+          onSave: async (options: TimetableDisplayOptions) => { await this.saveTimetableDisplay(options); },
+          onTextColorSave: async (color: string) => { await this.setTimetableTextColor(color); },
+          onMaskPreview: (value: number) => {
+            this.timetableMaskDepth = value;
+            this.drawTimetableNow();
+          },
+          onClose: () => { this.closeActiveSheet(); }
+        })
       } else if (this.courseSheetOpen && this.selectedCourse !== undefined) {
         this.courseDetailSheet(this.selectedCourse as EasEventItem);
       } else if (this.calendarExportSheetOpen && this.calendarExportTimetable !== undefined) {
@@ -2204,23 +2270,23 @@ struct Home {
         .width(48)
         .fontSize(11)
         .fontWeight(FontWeight.Bold)
-        .fontColor(this.timetableInk())
+        .fontColor(this.timetableInk('date'))
         .textAlign(TextAlign.Center)
       ForEach(DOW_NAMES, (name: string, dayIndex: number) => {
         Column() {
           Text(name)
             .fontSize(this.timetableHeaderIsToday(dayIndex) ? 11 : 10)
             .fontWeight(FontWeight.Bold)
-            .fontColor(this.timetableInk())
+            .fontColor(this.timetableInk('date'))
           Text(this.timetableHeaderDate(dayIndex))
             .fontSize(10)
-            .fontColor(this.timetableInk())
+            .fontColor(this.timetableInk('date'))
             .margin({ top: 4 })
         }
         .layoutWeight(1)
         .height('100%')
         .justifyContent(FlexAlign.Center)
-        .backgroundColor(Color.Transparent)
+        .backgroundColor(this.timetableHeaderIsToday(dayIndex) ? this.timetableBackdrop.todayHeader : Color.Transparent)
       }, (name: string, dayIndex: number) => dayIndex.toString() + name)
     }
     .width('100%')
@@ -2240,6 +2306,13 @@ struct Home {
           .width('100%')
           .height('100%')
           .objectFit(ImageFit.Cover)
+          .hitTestBehavior(HitTestMode.None)
+          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+        Row()
+          .width('100%')
+          .height('100%')
+          .backgroundColor(Color.Black)
+          .opacity(this.timetableMaskDepth / 100)
           .hitTestBehavior(HitTestMode.None)
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
       }
@@ -2398,7 +2471,7 @@ struct Home {
             .onClick(() => this.openAddCourse())
 
             Button({ type: ButtonType.Circle }) {
-              SymbolGlyph($r('sys.symbol.paintpalette'))
+              SymbolGlyph($r('sys.symbol.slider_horizontal_2'))
                 .fontSize(20)
                 .fontColor([CompatibleMaterialModifier.foreground(COLOR_PRIMARY)]);
             }
@@ -2408,10 +2481,10 @@ struct Home {
             .attributeModifier(new CompatibleMaterialModifier(COLOR_NAV_ACTIVE))
             .flexShrink(0)
             .margin({ left: 8 })
-            .accessibilityText('选择时间表字体颜色')
+            .accessibilityText('时间表显示设置')
             .onClick(() => {
               if (this.canOpenSheet()) {
-                this.timetablePaletteOpen = true;
+                this.timetableDisplayOpen = true;
                 this.activeSheetVisible = true;
               }
             })
@@ -2470,6 +2543,15 @@ struct Home {
     .height('100%')
     .backgroundColor(COLOR_SURFACE)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    .onAreaChange((oldValue: Area, newValue: Area) => {
+      const width = newValue.width as number;
+      const height = newValue.height as number;
+      if (width > 0 && height > 0 && (width !== this.timetableViewportW || height !== this.timetableViewportH)) {
+        this.timetableViewportW = width;
+        this.timetableViewportH = height;
+        this.drawTimetableNow();
+      }
+    })
   }
 
   @Builder
@@ -2558,6 +2640,10 @@ struct Home {
             this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '成绩管理',
               '按学期查询成绩、官方统计与本地均分', () => {
                 this.getUIContext().getRouter().pushUrl({ url: 'pages/ScorePage' });
+              });
+            this.moreNavigationRow($r('sys.symbol.graduationcap'), '学分查询',
+              '培养方案完成度与分类学分统计', () => {
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/CreditPage' });
               });
             this.moreNavigationRow($r('sys.symbol.magnifyingglass'), '空教室',
               '查询可用教室与空闲时段', () => {

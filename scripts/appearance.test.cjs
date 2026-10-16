@@ -188,6 +188,31 @@ test('system bars follow the effective theme and preserve transparent insets', a
   assert.equal(env.calls.bars.length, count);
 });
 
+test('wallpaper can adapt system-bar text without changing app appearance and restore it when leaving', async () => {
+  const env = setup();
+  env.store.attachWindow(env.nativeWindow); env.store.onContentReady();
+  env.store.setPageBarColors('#FFFFFF', '#FFFFFF');
+  await env.flushBars();
+  assert.equal(env.calls.bars.at(-1).statusBarContentColor, '#FFFFFF');
+  assert.equal(env.calls.backgrounds.at(-1), '#F4F7FC');
+  const count = env.calls.bars.length;
+  env.store.setPageBarColors('#FFFFFF', '#FFFFFF');
+  await env.flushBars();
+  assert.equal(env.calls.bars.length, count);
+  // A light bottom sheet needs its normal navigation indicator, while the dark wallpaper remains above it.
+  env.store.setPageBarColors('#FFFFFF', '');
+  await env.flushBars();
+  assert.equal(env.calls.bars.at(-1).navigationBarContentColor, '#4E5C72');
+  await env.store.select('dark');
+  env.store.setPageBarColors('#333333', '#333333');
+  await env.flushBars();
+  assert.equal(env.calls.bars.at(-1).statusBarContentColor, '#333333');
+  env.store.setPageBarColors();
+  await env.flushBars();
+  assert.equal(env.calls.bars.at(-1).statusBarContentColor, '#ECEFF4');
+  assert.equal(env.calls.bars.at(-1).navigationBarContentColor, '#BCC3CF');
+});
+
 function colors(qualifier) {
   return JSON.parse(read(`resources/${qualifier}/element/color.json`)).color;
 }

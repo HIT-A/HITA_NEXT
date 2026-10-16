@@ -18,9 +18,9 @@ test('timetable photo picker copies a gallery image and covers the page without 
   const home = read('pages/Home.ets');
   const tab = home.slice(home.indexOf('  tabTimetable()'), home.indexOf('  statusBanner('));
   assert.match(tab, /sys\.symbol\.picture/);
-  assert.match(tab, /sys\.symbol\.paintpalette/);
+  assert.match(tab, /sys\.symbol\.slider_horizontal_2/);
   assert.doesNotMatch(tab, /sys\.symbol\.camera|Text\('A'\)/);
-  assert.match(tab, /this\.canOpenSheet\(\)[\s\S]*this\.timetablePaletteOpen = true;[\s\S]*this\.activeSheetVisible = true;/);
+  assert.match(tab, /this\.canOpenSheet\(\)[\s\S]*this\.timetableDisplayOpen = true;[\s\S]*this\.activeSheetVisible = true;/);
   assert.match(tab, /this\.onTimetableBackgroundTap\(\)/);
   assert.match(home, /text: '更换壁纸'/);
   assert.match(home, /text: '移除壁纸'/);
@@ -32,9 +32,12 @@ test('timetable photo picker copies a gallery image and covers the page without 
   assert.match(tab, /hitTestBehavior\(HitTestMode\.None\)/);
   assert.match(tab, /expandSafeArea\(\[SafeAreaType\.SYSTEM\], \[SafeAreaEdge\.TOP, SafeAreaEdge\.BOTTOM\]\)/);
   assert.match(tab, /backgroundColor\(Color\.Transparent\)/);
-  assert.match(tab, /accessibilityText\('选择时间表字体颜色'\)/);
-  assert.match(home, /CourseColorEditor\([\s\S]*textMode: true,[\s\S]*TimetableTheme\.PALETTE/);
-  assert.match(home, /drawTimetableWeek\([\s\S]*hourHeight, 0, false, false, this\.timetableInk\(\), this\.darkMode, cardLayer\)/);
+  assert.match(tab, /accessibilityText\('时间表显示设置'\)/);
+  assert.match(home, /TimetableDisplaySettings\([\s\S]*onTextColorSave:[\s\S]*this\.setTimetableTextColor\(color\)/);
+  const display = read('feature/timetable/views/TimetableDisplaySettings.ets');
+  assert.match(display, /CourseColorEditor\([\s\S]*textMode: this\.editing === 'text',[\s\S]*TimetableTheme\.PALETTE/);
+  assert.match(home, /drawTimetableWeek\([\s\S]*hourHeight, 0, false, false, this\.timetableInk\('time'\), this\.darkMode, cardLayer, this\.timetableDisplay,\s*this\.timetableBackdrop, this\.hasTimetableBackground\(\)\)/);
+  assert.match(tab, /Image\(this\.timetableBgUri\)[\s\S]*backgroundColor\(Color\.Black\)[\s\S]*opacity\(this\.timetableMaskDepth \/ 100\)/);
   assert.match(tab, /\.backgroundColor\(COLOR_SURFACE\)/,
     'heading and grid share one theme resource instead of independently painted backgrounds');
   assert.match(tab, /timetableDateHeader\(\)/);

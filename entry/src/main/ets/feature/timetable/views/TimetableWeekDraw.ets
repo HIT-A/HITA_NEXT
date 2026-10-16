@@ -18,6 +18,8 @@ import {
   EasTimetable
 } from '../../../common/model/timetable/TimetableModels';
 import { PlaceMarqueeFrame, placeMarqueeFrame } from './PlaceMarquee';
+import { TimetableDisplayOptions } from '../data/TimetableDisplayOptions';
+import { TimetableBackdropColors, timetableLineInk } from '../../../common/theme/TimetableBackdrop';
 
 export const DOW_NAMES: string[] = ['一', '二', '三', '四', '五', '六', '日'];
 /** 轴起点 08:00（对应源 startTime=800）。 */
@@ -425,7 +427,10 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   isCurrentWeek: boolean, hourHeightOverride: number = 0,
   headerHeightOverride: number = 0, drawHeader: boolean = true,
   fillPage: boolean = true, labelColor: string = '', darkMode: boolean = false,
-  cardLayer: TimetableCardLayer | undefined = undefined): TimetablePlaceLabel[] {
+  cardLayer: TimetableCardLayer | undefined = undefined,
+  display: TimetableDisplayOptions = new TimetableDisplayOptions(),
+  backdrop: TimetableBackdropColors | undefined = undefined,
+  hasWallpaper: boolean = false): TimetablePlaceLabel[] {
   const surface: TimetableSurfaceColors = new TimetableSurfaceColors(darkMode);
   const scrollingPlaces: TimetablePlaceLabel[] = [];
   if (cardLayer !== undefined) {
@@ -464,32 +469,49 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   // top edge so the highlight continues through the intentional top padding
   // before the first 08:00 grid line instead of being cut by a white band.
   if (isCurrentWeek) {
-    ctx.fillStyle = surface.todayMask;
+    ctx.fillStyle = backdrop !== undefined ? backdrop.todayMask : surface.todayMask;
     const todayMaskTop: number = drawHeader ? gridTop : 0;
     ctx.fillRect(gridLeft + (todayDow - 1) * colW, todayMaskTop, colW,
       gridBottom - todayMaskTop);
   }
 
   // 网格（每小时一格）+ 左侧整点标签
-  ctx.strokeStyle = surface.gridLine;
   ctx.lineWidth = 1;
-  for (let i = 0; i <= hoursInDay; i++) {
-    const y: number = gridTop + i * hourH;
-    ctx.setLineDash([6, 8]);
-    ctx.beginPath();
-    ctx.moveTo(gridLeft, y);
-    ctx.lineTo(w, y);
-    ctx.stroke();
+  const muted = hasWallpaper || darkMode;
+  const majorLine = display.timeLineColor.length > 0 ?
+    (muted ? timetableLineInk(display.timeLineColor, 0.22) : display.timeLineColor) :
+    (backdrop !== undefined ? backdrop.line : display.lineColor(darkMode));
+  const minorLine = display.timeLineColor.length > 0 ?
+    timetableLineInk(display.timeLineColor, muted ? 0.09 : 0.35) :
+    (backdrop !== undefined ? backdrop.minorLine : surface.minorLine);
+  if (display.drawTimeLines) {
+    ctx.strokeStyle = majorLine;
+    for (let i = 0; i <= hoursInDay; i++) {
+      const y: number = gridTop + i * hourH;
+      ctx.setLineDash([6, 8]);
+      ctx.beginPath();
+      ctx.moveTo(gridLeft, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.strokeStyle = minorLine;
+    for (let i = 0; i < hoursInDay; i++) {
+      const y: number = gridTop + (i + 0.5) * hourH;
+      ctx.beginPath();
+      ctx.moveTo(gridLeft, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+    for (let d = 1; d < 7; d++) {
+      const x: number = gridLeft + d * colW;
+      ctx.beginPath();
+      ctx.moveTo(x, gridTop);
+      ctx.lineTo(x, gridBottom);
+      ctx.stroke();
+    }
   }
   ctx.setLineDash([]);
-  ctx.strokeStyle = surface.minorLine;
-  for (let i = 0; i < hoursInDay; i++) {
-    const y: number = gridTop + (i + 0.5) * hourH;
-    ctx.beginPath();
-    ctx.moveTo(gridLeft, y);
-    ctx.lineTo(w, y);
-    ctx.stroke();
-  }
   ctx.font = '10' + fontUnit;
   ctx.fillStyle = ink(labelColor, surface.textSub);
   for (let hour = AXIS_START_HOUR; hour < AXIS_END_HOUR; hour++) {
@@ -499,15 +521,6 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
     ctx.fillText(label, 8, y);
     ctx.textAlign = 'start';
   }
-  // 列分隔
-  for (let d = 1; d < 7; d++) {
-    const x: number = gridLeft + d * colW;
-    ctx.beginPath();
-    ctx.moveTo(x, gridTop);
-    ctx.lineTo(x, gridBottom);
-    ctx.stroke();
-  }
-
   // 事件块（课程/考试等全部类型）：真实时刻分钟映射。重叠时按 lane 缩窄，避免互相覆盖。
   const axisStartMsOffset: number = AXIS_START_HOUR * 60 * 60 * 1000;
   const m: number = TimetableDrawStyle.blockMargin;
