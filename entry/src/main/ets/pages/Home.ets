@@ -6,6 +6,7 @@
  * timetable/session data layer already used by the app.
  */
 import { common } from '@kit.AbilityKit';
+import { formProvider } from '@kit.FormKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { CommonModifier, FrameCallback, KeyboardAvoidMode, SymbolGlyphModifier } from '@kit.ArkUI';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
@@ -60,6 +61,7 @@ import {
   AXIS_END_HOUR,
   AXIS_START_HOUR,
   TIMETABLE_GRID_TOP_PADDING,
+  TIMETABLE_GUTTER_WIDTH,
   TIMETABLE_HEADER_HEIGHT,
   TIMETABLE_HOUR_HEIGHT,
   TimetableCardLayer,
@@ -2267,7 +2269,7 @@ struct Home {
   timetableDateHeader() {
     Row() {
       Text(this.timetableHeaderMonth())
-        .width(48)
+        .width(TIMETABLE_GUTTER_WIDTH)
         .fontSize(11)
         .fontWeight(FontWeight.Bold)
         .fontColor(this.timetableInk('date'))
@@ -2612,6 +2614,22 @@ struct Home {
 
           this.moreSectionTitle('课表工具');
           Column() {
+            this.moreNavigationRow($r('sys.symbol.clock'), '桌面服务卡片',
+              '下一节课倒计时 · 地点 · 教师', () => {
+                try {
+                  formProvider.openFormManager({
+                    bundleName: 'cn.berry.hitanext',
+                    abilityName: 'NextClassFormAbility',
+                    parameters: {
+                      'ohos.extra.param.key.form_dimension': 2,
+                      'ohos.extra.param.key.form_name': 'NextClassCard',
+                      'ohos.extra.param.key.module_name': 'entry'
+                    }
+                  });
+                } catch (_) {
+                  this.getUIContext().getPromptAction().showToast({ message: '请长按桌面 HITA 图标，选择服务卡片' });
+                }
+              });
             this.moreNavigationRow($r('sys.symbol.repeat_1'), '导入课表',
               this.importing ? '正在从教务系统同步' : '从教务系统同步当前学期', () => {
                 this.getUIContext().getRouter().pushUrl({ url: 'pages/ImportTimetablePage' });

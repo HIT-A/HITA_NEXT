@@ -22,6 +22,7 @@ import {
 } from '../model/timetable/TimetableModels';
 import { CourseDateSelection } from '../../feature/timetable/CourseDateSelection';
 import { normalizeHtmlSpaces } from '../util/HtmlSpaces';
+import { ScheduleChangeSignal } from '../util/ScheduleChangeSignal';
 
 // The first prototype shipped a different schema under this name.  Use a
 // versioned store so an upgrade cannot keep an incompatible old table layout.
@@ -126,6 +127,7 @@ export class RdbHelper {
   private async del(pred: relationalStore.RdbPredicates): Promise<void> {
     try {
       await this.s().delete(pred);
+      ScheduleChangeSignal.notify();
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'delete failed %{public}s', String(e));
       throw new Error(String(e));
@@ -138,6 +140,7 @@ export class RdbHelper {
       if (rowId < 0) {
         throw new Error('insert returned ' + rowId.toString());
       }
+      ScheduleChangeSignal.notify();
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'insert table=%{public}s failed %{public}s', table, String(e));
       throw new Error(String(e));
@@ -147,6 +150,7 @@ export class RdbHelper {
   private async upd(values: relationalStore.ValuesBucket, pred: relationalStore.RdbPredicates): Promise<void> {
     try {
       await this.s().update(values, pred);
+      ScheduleChangeSignal.notify();
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'update failed %{public}s', String(e));
       throw new Error(String(e));
@@ -195,6 +199,7 @@ export class RdbHelper {
     try {
       await action(transaction);
       await transaction.commit();
+      ScheduleChangeSignal.notify();
     } catch (error) {
       try { await transaction.rollback(); } catch (_) {}
       throw new Error(error instanceof Error ? error.message : String(error));
@@ -613,6 +618,7 @@ export class RdbHelper {
       try { await transaction.rollback(); } catch (_) {}
       throw new Error('课程未保存，请重试');
     }
+    ScheduleChangeSignal.notify();
   }
 
   /** Exam colors belong to individual events, never to their linked course. */
@@ -636,6 +642,7 @@ export class RdbHelper {
       if (count !== 1) {
         throw new Error('Event no longer exists');
       }
+      ScheduleChangeSignal.notify();
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'update event failed %{public}s', String(e));
       throw new Error(String(e));
@@ -723,6 +730,7 @@ export class RdbHelper {
     if (removed === 0) {
       throw new Error('Class occurrence no longer exists');
     }
+    ScheduleChangeSignal.notify();
   }
 
   /** 删除某科目全部课程事件。 */
@@ -746,6 +754,7 @@ export class RdbHelper {
         .equalTo('subjectId', subjectId).equalTo('timetableId', timetableId)
         .equalTo('type', EasEventType.CLASS));
       await transaction.commit();
+      ScheduleChangeSignal.notify();
     } catch (e) {
       try {
         await transaction.rollback();

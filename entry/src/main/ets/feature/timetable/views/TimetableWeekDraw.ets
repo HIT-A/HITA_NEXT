@@ -31,6 +31,8 @@ export const TIMETABLE_HEADER_HEIGHT: number = 64;
 export const TIMETABLE_HOUR_HEIGHT: number = 50;
 /** 安卓端在固定日期栏和首个整点之间保留 24dp。 */
 export const TIMETABLE_GRID_TOP_PADDING: number = 24;
+/** 日期栏月份格和 Canvas 时间轴共用的左侧栏宽度。 */
+export const TIMETABLE_GUTTER_WIDTH: number = 48;
 
 function ink(custom: string, fallback: string): string {
   return custom.length > 0 ? custom : fallback;
@@ -47,9 +49,8 @@ export class TimetableDrawStyle {
   /** 顶栏最低/占比。 */
   static headerMin: number = TIMETABLE_HEADER_HEIGHT;
   static headerRatio: number = 0.12;
-  /** 左侧整点标签列最低/占比。 */
-  static gutterMin: number = 48;
-  static gutterRatio: number = 0.11;
+  /** 左侧整点标签列宽度，必须与原生日期栏的月份格保持一致。 */
+  static gutterMin: number = TIMETABLE_GUTTER_WIDTH;
   /** 块外边距（源 1dp 量级，比例化）。 */
   static blockMargin: number = 3;
   static blockText: string = '#FFFFFF';
@@ -376,7 +377,7 @@ function drawWeekHeader(ctx: CanvasRenderingContext2D, w: number, headerH: numbe
   fillPage: boolean = true, labelColor: string = '', darkMode: boolean = false): void {
   const surface: TimetableSurfaceColors = new TimetableSurfaceColors(darkMode);
   const gridTop: number = headerH + 2;
-  const gridLeft: number = Math.max(TimetableDrawStyle.gutterMin, w * TimetableDrawStyle.gutterRatio);
+  const gridLeft: number = TimetableDrawStyle.gutterMin;
   const colW: number = (w - gridLeft) / 7;
   const fontUnit: string = 'vp sans-serif';
   const weekMonday: number = timetable.startTime + (weekNumber - 1) * WEEK_MILLIS;
@@ -447,7 +448,7 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
 
   const headerH: number = drawHeader ? (headerHeightOverride > 0 ? headerHeightOverride :
     Math.max(TimetableDrawStyle.headerMin, h * TimetableDrawStyle.headerRatio)) : 0;
-  const gutterW: number = Math.max(TimetableDrawStyle.gutterMin, w * TimetableDrawStyle.gutterRatio);
+  const gutterW: number = TimetableDrawStyle.gutterMin;
   const gridLeft: number = gutterW;
   const gridTop: number = drawHeader ? headerH + 2 : TIMETABLE_GRID_TOP_PADDING;
   const gridBottom: number = hourHeightOverride > 0 ?

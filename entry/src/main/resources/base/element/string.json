@@ -1,6 +1,14 @@
 {
   "string": [
     {
+      "name": "next_class_widget_name",
+      "value": "下一节课"
+    },
+    {
+      "name": "next_class_widget_description",
+      "value": "跟随当前课表，显示下一节课的开始倒计时、授课地点和教师"
+    },
+    {
       "name": "module_desc",
       "value": "HitaNEXT entry module"
     },

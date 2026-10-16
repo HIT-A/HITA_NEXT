@@ -12,6 +12,7 @@ import {
 import { ClassReminderScheduler } from '../feature/timetable/data/ClassReminderScheduler';
 import { ClassReminderStore } from '../feature/timetable/data/ClassReminderStore';
 import { AppearanceStore } from '../common/theme/AppearanceStore';
+import { NextClassWidgetService } from '../feature/widget/NextClassWidgetService';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'HitaNEXT';
@@ -23,6 +24,7 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate(NAV_BAR_INSET_KEY, NAV_BAR_INSET_FALLBACK);
     AppStorage.setOrCreate(KEYBOARD_INSET_KEY, KEYBOARD_INSET_FALLBACK);
     AppearanceStore.getInstance().initialize(this.context);
+    NextClassWidgetService.attach(this.context);
     void this.restoreClassReminders();
   }
 
@@ -114,6 +116,7 @@ export default class EntryAbility extends UIAbility {
 
   onForeground(): void {
     hilog.info(DOMAIN, TAG, 'Ability onForeground');
+    NextClassWidgetService.scheduleRefresh();
     void this.restoreClassReminders();
     AppearanceStore.getInstance().onConfigurationUpdate(this.context.config);
   }
@@ -124,6 +127,7 @@ export default class EntryAbility extends UIAbility {
 
   onBackground(): void {
     hilog.info(DOMAIN, TAG, 'Ability onBackground');
+    void NextClassWidgetService.refreshAll();
   }
 
   private async restoreClassReminders(): Promise<void> {

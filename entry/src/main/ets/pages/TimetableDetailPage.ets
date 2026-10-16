@@ -326,6 +326,14 @@ struct TimetableDetailPage {
     this.getUIContext().getPromptAction().showToast({ message: '学分已更新' });
   }
 
+  private currentSubjectRow(row: TimetableSubjectRow): TimetableSubjectRow {
+    // 稳定 key 的卡片会保留 builder；删除或重排后不能再使用创建时的数组下标。
+    const current: TimetableSubjectRow | undefined = this.subjectRows.find((item: TimetableSubjectRow): boolean =>
+      item.subject.id === row.subject.id && item.subject.timetableId === row.subject.timetableId);
+    // 离场动画结束前，已删除的节点仍可能读取 builder 参数。
+    return current === undefined ? row : current;
+  }
+
   private confirmDeleteCourse(row: TimetableSubjectRow): void {
     if (this.pendingDeleteCourseId.length > 0) {
       return;
@@ -963,16 +971,16 @@ struct TimetableDetailPage {
             }
             .width('100%')
           }
-          ForEach(this.subjectRows, (row: TimetableSubjectRow, index: number) => {
+          ForEach(this.subjectRows, (row: TimetableSubjectRow) => {
             ListItem() {
               DeleteParticleCard({
                 controller: this.deleteEffects,
                 effectId: row.subject.id
               }) {
                 this.courseGroupCard({
-                  subject: this.subjectRows[index].subject,
-                  classCount: this.subjectRows[index].classCount,
-                  sessions: this.subjectRows[index].sessions
+                  subject: this.currentSubjectRow(row).subject,
+                  classCount: this.currentSubjectRow(row).classCount,
+                  sessions: this.currentSubjectRow(row).sessions
                 })
               }
             }

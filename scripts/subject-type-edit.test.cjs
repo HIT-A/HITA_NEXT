@@ -143,8 +143,8 @@ test('a course removed during a write is not reinserted into the visible list', 
 });
 
 test('both nested builders receive reactive state by reference, without changing course identity keys', () => {
-  assert.match(source, /ForEach\(this\.subjectRows, \(row: TimetableSubjectRow, index: number\)/);
-  assert.match(source, /this\.courseGroupCard\(\{\s*subject: this\.subjectRows\[index\]\.subject,\s*classCount: this\.subjectRows\[index\]\.classCount,\s*sessions: this\.subjectRows\[index\]\.sessions\s*\}\)/);
+  assert.match(source, /ForEach\(this\.subjectRows, \(row: TimetableSubjectRow\)/);
+  assert.match(source, /this\.courseGroupCard\(\{\s*subject: this\.currentSubjectRow\(row\)\.subject,\s*classCount: this\.currentSubjectRow\(row\)\.classCount,\s*sessions: this\.currentSubjectRow\(row\)\.sessions\s*\}\)/);
   assert.match(source, /this\.subjectCard\(\{ subject: row\.subject, classCount: row\.classCount, sessions: row\.sessions \}\)/);
   assert.match(source, /\}, \(row: TimetableSubjectRow\) => row\.subject\.id\)/);
 });

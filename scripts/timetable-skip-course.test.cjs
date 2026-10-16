@@ -282,9 +282,10 @@ test('database deletion is scoped to explicit occurrence IDs, timetable and CLAS
     equalTo(key, value) { this.filters.push(row => row[key] === value); return this; }
     in(key, values) { this.filters.push(row => values.includes(row[key])); return this; }
   }
-  const db = new Function('relationalStore', 'EasEventType',
+  let widgetRefreshes = 0;
+  const db = new Function('relationalStore', 'EasEventType', 'ScheduleChangeSignal',
     compile(`class Db { ${method} };`) + '; return new Db();')(
-    { RdbPredicates: Predicate }, { CLASS: 'CLASS' });
+    { RdbPredicates: Predicate }, { CLASS: 'CLASS' }, { notify: () => widgetRefreshes++ });
   let rows = [
     { id: 'one', timetableId: 'a', type: 'CLASS' },
     { id: 'co-teacher', timetableId: 'a', type: 'CLASS' },
@@ -298,12 +299,14 @@ test('database deletion is scoped to explicit occurrence IDs, timetable and CLAS
     return before - rows.length;
   } });
   await db.deleteClassOccurrences(['one', 'co-teacher', 'exam'], 'a');
+  assert.equal(widgetRefreshes, 1);
   assert.deepEqual(rows.map(row => row.id), ['next-week', 'exam', 'one']);
   await assert.rejects(db.deleteClassOccurrences([], 'a'), /identity/);
   await assert.rejects(db.deleteClassOccurrences(['one'], ''), /identity/);
   await assert.rejects(db.deleteClassOccurrences(['missing'], 'a'), /no longer exists/);
   db.s = () => ({ delete: async () => { throw Error('disk full'); } });
   await assert.rejects(db.deleteClassOccurrences(['one'], 'b'), /disk full/);
+  assert.equal(widgetRefreshes, 1, 'failed deletes must not refresh cards');
 });
 
 function refreshHarness() {

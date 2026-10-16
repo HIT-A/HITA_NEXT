@@ -1,5 +1,6 @@
 {
   "color": [
+    { "name": "hita_widget_accent", "value": "#2365B2" },
     {
       "name": "hita_immersive_sheet_card",
       "value": "#8CFFFFFF"

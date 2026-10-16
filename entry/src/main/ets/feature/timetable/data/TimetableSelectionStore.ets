@@ -2,6 +2,7 @@
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import { TimetableTheme } from '../../../common/theme/TimetableTheme';
+import { ScheduleChangeSignal } from '../../../common/util/ScheduleChangeSignal';
 
 const STORE_NAME: string = 'hitanext_store';
 const ACTIVE_TIMETABLE_KEY: string = 'active_timetable_id';
@@ -46,6 +47,7 @@ export class TimetableSelectionStore {
     try {
       await this.store.put(ACTIVE_TIMETABLE_KEY, id);
       await this.store.flush();
+      ScheduleChangeSignal.notify();
     } catch (e) {
     }
   }
@@ -57,6 +59,7 @@ export class TimetableSelectionStore {
     try {
       await this.store.delete(ACTIVE_TIMETABLE_KEY);
       await this.store.flush();
+      ScheduleChangeSignal.notify();
     } catch (e) {
     }
   }
