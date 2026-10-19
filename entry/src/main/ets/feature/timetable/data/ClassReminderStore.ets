@@ -4,6 +4,7 @@ import { common } from '@kit.AbilityKit';
 
 const STORE_NAME: string = 'hitanext_store';
 const ENABLED_KEY: string = 'class_reminder_enabled';
+const LEAD_MINUTES_KEY: string = 'class_reminder_lead_minutes';
 const NOTIFIED_KEY: string = 'class_reminder_notified';
 const PLANS_KEY: string = 'class_reminder_plans';
 const SIGNATURE_KEY: string = 'class_reminder_signature';
@@ -59,6 +60,27 @@ export class ClassReminderStore {
       await this.store.flush();
     } catch (e) {
     }
+  }
+
+  static validLeadMinutes(value: number): boolean {
+    return Number.isInteger(value) && value >= 1 && value <= 120;
+  }
+
+  async loadLeadMinutes(): Promise<number> {
+    if (this.store === undefined) return 15;
+    try {
+      const value: number = Number(await this.store.get(LEAD_MINUTES_KEY, 15));
+      return ClassReminderStore.validLeadMinutes(value) ? value : 15;
+    } catch (_) {
+      return 15;
+    }
+  }
+
+  async saveLeadMinutes(value: number): Promise<void> {
+    if (!ClassReminderStore.validLeadMinutes(value)) throw new Error('请输入 1–120 的整数');
+    if (this.store === undefined) throw new Error('提醒设置暂时无法保存');
+    await this.store.put(LEAD_MINUTES_KEY, value);
+    await this.store.flush();
   }
 
   async hasNotified(key: string): Promise<boolean> {

@@ -10,7 +10,6 @@ import { EasEventItem, EasEventType } from '../../../common/model/timetable/Time
 import { EasTimeTools } from '../../../common/util/EasTimeTools';
 import { ClassReminderPlan, ClassReminderStore } from './ClassReminderStore';
 
-const LEAD_MS: number = 15 * 60 * 1000;
 const MAX_REMINDERS: number = 8;
 const MERGE_GAP_MS: number = 20 * 60 * 1000;
 const SLOT: notificationManager.SlotType = notificationManager.SlotType.SOCIAL_COMMUNICATION;
@@ -72,12 +71,13 @@ export class ClassReminderScheduler {
     const upcoming: EasEventItem[] = ClassReminderScheduler.upcomingClasses(events);
     result.pendingClasses = upcoming.length;
     result.scheduled = upcoming.length;
-    const signature: string = ClassReminderScheduler.signatureOf(upcoming);
     const store: ClassReminderStore = ClassReminderStore.getInstance();
+    const leadMinutes: number = await store.loadLeadMinutes();
+    const signature: string = leadMinutes.toString() + ':' + ClassReminderScheduler.signatureOf(upcoming);
     if (!force && signature.length > 0 && signature === await store.loadSignature()) {
       result.duePublished = await ClassReminderScheduler.dispatchDue(context, upcoming);
       if (upcoming.length > 0) {
-        result.nextFire = ClassReminderScheduler.nextFireText(upcoming[0]);
+        result.nextFire = ClassReminderScheduler.nextFireText(upcoming[0], leadMinutes);
       }
       return result;
     }
@@ -91,7 +91,7 @@ export class ClassReminderScheduler {
     }
     await store.savePlans(ClassReminderScheduler.plansFromEvents(upcoming));
     if (upcoming.length > 0) {
-      result.nextFire = ClassReminderScheduler.nextFireText(upcoming[0]);
+      result.nextFire = ClassReminderScheduler.nextFireText(upcoming[0], leadMinutes);
     }
     result.duePublished = await ClassReminderScheduler.dispatchDue(context, upcoming);
     if (seq === ClassReminderScheduler.syncSeq) {
@@ -104,11 +104,14 @@ export class ClassReminderScheduler {
   }
 
   static async dispatchDue(_context: common.UIAbilityContext, events: EasEventItem[]): Promise<number> {
+    const store: ClassReminderStore = ClassReminderStore.getInstance();
+    if (!(await store.loadEnabled())) return 0;
+    const leadMs: number = (await store.loadLeadMinutes()) * 60 * 1000;
     const upcoming: EasEventItem[] = ClassReminderScheduler.upcomingClasses(events);
     let published: number = 0;
     for (let i: number = 0; i < upcoming.length; i++) {
       const event: EasEventItem = upcoming[i];
-      if (event.from - Date.now() > LEAD_MS) {
+      if (event.from - Date.now() > leadMs) {
         continue;
       }
       const key: string = ClassReminderScheduler.notifyKey(event);
@@ -169,8 +172,8 @@ export class ClassReminderScheduler {
   private static copyText(event: EasEventItem): [string, string] {
     const place: string = event.place.length > 0 ? event.place : '地点待定';
     const title: string = event.name.length > 0 && event.name !== 'NULL' ? event.name : '课程提醒';
-    const soon: boolean = event.from - Date.now() <= LEAD_MS;
-    const content: string = (soon ? '即将上课 · ' : '15分钟后上课 · ') +
+    const minutes: number = Math.max(1, Math.ceil((event.from - Date.now()) / 60000));
+    const content: string = minutes.toString() + '分钟后上课 · ' +
       EasTimeTools.printTime(event.from) + ' · ' + place;
     return [title, content];
   }
@@ -230,8 +233,8 @@ export class ClassReminderScheduler {
     }
   }
 
-  private static nextFireText(event: EasEventItem): string {
-    const remindAt: number = event.from - LEAD_MS;
+  private static nextFireText(event: EasEventItem, leadMinutes: number): string {
+    const remindAt: number = event.from - leadMinutes * 60 * 1000;
     const when: Date = new Date(remindAt > Date.now() ? remindAt : Date.now());
     const hour: number = when.getHours();
     const minute: number = when.getMinutes();

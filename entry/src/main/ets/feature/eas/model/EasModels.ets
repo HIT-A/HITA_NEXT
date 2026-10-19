@@ -87,6 +87,8 @@ export class EasCourseItem {
   weekNumbers: number[] = [];
   startTime: string = '';
   endTime: string = '';
+  /** 电子实验中心提供的实际上课日期，不依赖推算学期周次。 */
+  scheduledDate: string = '';
   /** 周次列表（如 [1,2,3,5-8]，按导入源形态）。 */
   weeks: string = '';
   teacher: string = '';

@@ -176,7 +176,10 @@ struct Home {
   private courseSheetDismissTimer: number = -1;
   private summaryRequestGeneration: number = 0;
   @State classReminderEnabled: boolean = false;
-  private reminderBusy: boolean = false;
+  @State reminderBusy: boolean = false;
+  @State reminderExpanded: boolean = false;
+  @State reminderMaterialHeight: number = 152;
+  @State reminderLeadMinutes: number = 15;
   @State timetableEvents: EasEventItem[] = [];
   @State timetableWeek: number = 1;
   // Week paging follows the Android timetable: drag the page with the finger,
@@ -251,6 +254,7 @@ struct Home {
     await TimetableSelectionStore.getInstance().init(ctx);
     await ClassReminderStore.getInstance().init(ctx);
     this.classReminderEnabled = await ClassReminderStore.getInstance().loadEnabled();
+    this.reminderLeadMinutes = await ClassReminderStore.getInstance().loadLeadMinutes();
     const bgPath: string = TimetableBackgroundStore.loadPath(ctx);
     this.timetableBgUri = bgPath.length > 0 ? TimetableBackgroundStore.toDisplayUri(bgPath) : '';
     this.timetableTextColor = await TimetableSelectionStore.getInstance()
@@ -528,9 +532,45 @@ struct Home {
 
   private classReminderSubtitle(): string {
     if (!this.classReminderEnabled) {
-      return '关闭后不再提醒上课';
+      return '已关闭';
     }
-    return '应用在前台或后台时，上课前15分钟通知';
+    return '上课前 ' + this.reminderLeadMinutes.toString() + ' 分钟提醒';
+  }
+
+  private showReminderTimePicker(): void {
+    if (this.reminderBusy) return;
+    const options: string[] = [];
+    for (let minutes: number = 1; minutes <= 120; minutes++) {
+      options.push('上课前 ' + minutes.toString() + ' 分钟');
+    }
+    this.getUIContext().showTextPickerDialog({
+      range: options,
+      selected: this.reminderLeadMinutes - 1,
+      canLoop: false,
+      onAccept: (result: TextPickerResult) => {
+        const index: number = Number(result.index);
+        void this.saveReminderTime(index + 1);
+      }
+    });
+  }
+
+  private async saveReminderTime(minutes: number): Promise<void> {
+    if (this.reminderBusy || !ClassReminderStore.validLeadMinutes(minutes)) return;
+    this.reminderBusy = true;
+    try {
+      await ClassReminderStore.getInstance().saveLeadMinutes(minutes);
+      this.reminderLeadMinutes = minutes;
+      if (this.classReminderEnabled) {
+        const ctx: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+        // Preserve notification history when changing the lead time: don't alert twice for one class.
+        await ClassReminderScheduler.sync(ctx, this.timetableEvents);
+      }
+      this.getUIContext().getPromptAction().showToast({ message: '已设置为上课前 ' + minutes.toString() + ' 分钟提醒' });
+    } catch (_) {
+      this.getUIContext().getPromptAction().showToast({ message: '提醒时间保存失败，请重试' });
+    } finally {
+      this.reminderBusy = false;
+    }
   }
 
   private async setClassReminderEnabled(on: boolean): Promise<void> {
@@ -2697,7 +2737,7 @@ struct Home {
 
           this.moreSectionTitle('设置');
           Column() {
-            this.moreToggleRow($r('sys.symbol.bell'), '课程提醒', this.classReminderSubtitle());
+            this.classReminderSettings();
             this.appearanceSettings();
             this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '公告',
               '版本更新 · 服务与故障通知', () => {
@@ -3331,46 +3371,131 @@ struct Home {
   }
 
   @Builder
-  moreToggleRow(symbol: Resource, title: string, subtitle: string) {
-    Row() {
-      Stack() {
-        SymbolGlyph(symbol)
-          .fontSize(22)
-          .fontColor([COLOR_PRIMARY]);
-      }
-      .width(40)
-      .height(40)
-      .borderRadius(20)
-      .alignContent(Alignment.Center)
-      .backgroundColor(COLOR_NAV_ACTIVE);
-      Column() {
-        Text(title)
-          .fontSize(14)
-          .fontColor(COLOR_TEXT_PRIMARY)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis });
-        if (subtitle.length > 0) {
-          Text(subtitle)
-            .fontSize(12)
-            .fontColor(COLOR_TEXT_SECONDARY)
-            .margin({ top: 2 })
+  classReminderSettings() {
+    Column() {
+      Row() {
+        Stack() {
+          SymbolGlyph($r('sys.symbol.bell'))
+            .fontSize(22)
+            .fontColor([COLOR_PRIMARY]);
+        }
+        .width(40)
+        .height(40)
+        .borderRadius(20)
+        .alignContent(Alignment.Center)
+        .backgroundColor(COLOR_NAV_ACTIVE);
+        Column() {
+          Text('课程提醒')
+            .fontSize(14)
+            .fontColor(COLOR_TEXT_PRIMARY)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis });
+          if (this.classReminderSubtitle().length > 0) {
+            Text(this.classReminderSubtitle())
+              .fontSize(12)
+              .fontColor(COLOR_TEXT_SECONDARY)
+              .margin({ top: 2 })
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis });
+          }
         }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: 12 });
+        SymbolGlyph($r('sys.symbol.chevron_right'))
+          .fontSize(14)
+          .fontColor([COLOR_TEXT_SECONDARY])
+          .width(20)
+          .height(20)
+          .rotate({ angle: this.reminderExpanded ? 90 : 0 });
       }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-      .margin({ left: 12 });
-      Toggle({ type: ToggleType.Switch, isOn: this.classReminderEnabled })
-        .selectedColor(COLOR_PRIMARY)
-        .onChange((isOn: boolean) => {
-          void this.setClassReminderEnabled(isOn);
+      .width('100%')
+      .height(56)
+      .padding({ left: 16, right: 16 })
+      .alignItems(VerticalAlign.Center)
+      .accessibilityDescription(this.reminderExpanded ? '已展开' : '已收起')
+      .onClick(() => {
+        this.getUIContext().animateTo({ duration: 300, curve: Curve.EaseInOut }, () => {
+          this.reminderExpanded = !this.reminderExpanded;
         });
+      });
+      if (this.reminderExpanded) {
+        ImmersiveHeader({ barHeight: this.reminderMaterialHeight, materialEnabled: CompatibleSheetMaterial.isEnabled() }) {
+        Column() {
+          Column() {
+            Row({ space: 12 }) {
+              Text('开启课程提醒')
+                .fontSize(14)
+                .fontColor(CompatibleSheetMaterial.isEnabled() ? CompatibleMaterialModifier.foreground(COLOR_TEXT_PRIMARY) :
+                  COLOR_TEXT_PRIMARY)
+                .layoutWeight(1);
+              Toggle({ type: ToggleType.Switch, isOn: this.classReminderEnabled })
+                .selectedColor(COLOR_PRIMARY)
+                .margin(0)
+                .enabled(!this.reminderBusy)
+                .accessibilityText('开启课程提醒')
+                .onChange((isOn: boolean) => {
+                  void this.setClassReminderEnabled(isOn);
+                });
+            }
+            .width('100%')
+            .height(40)
+            .alignItems(VerticalAlign.Center);
+            Text('应用在前台或后台运行时会通知。')
+              .fontSize(12)
+              .lineHeight(18)
+              .fontColor(COLOR_TEXT_SECONDARY)
+              .width('100%')
+              .margin({ top: 2, bottom: 14 });
+            Divider()
+              .strokeWidth(0.5)
+              .color(COLOR_TEXT_SECONDARY)
+              .opacity(0.15);
+            Row({ space: 8 }) {
+              Text('提醒时间')
+                .fontSize(14)
+                .fontColor(CompatibleSheetMaterial.isEnabled() ? CompatibleMaterialModifier.foreground(COLOR_TEXT_PRIMARY) :
+                  COLOR_TEXT_PRIMARY)
+                .layoutWeight(1);
+              Text('上课前 ' + this.reminderLeadMinutes.toString() + ' 分钟')
+                .fontSize(13)
+                .fontColor(COLOR_TEXT_SECONDARY)
+                .maxLines(1);
+              SymbolGlyph($r('sys.symbol.chevron_right'))
+                .fontSize(12)
+                .fontColor([COLOR_TEXT_SECONDARY])
+                .width(16)
+                .height(20);
+            }
+            .width('100%')
+            .height(48)
+            .alignItems(VerticalAlign.Center)
+            .enabled(!this.reminderBusy)
+            .accessibilityText('提醒时间，上课前 ' + this.reminderLeadMinutes.toString() + ' 分钟，点击修改')
+            .onClick(() => { this.showReminderTimePicker(); });
+          }
+          .width('100%')
+          .padding({ left: 14, right: 14, top: 8, bottom: 2 })
+          .backgroundColor($r('app.color.hita_control'))
+          .borderRadius(12)
+          .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_control'), false,
+            CompatibleSheetMaterial.isEnabled()))
+          .alignItems(HorizontalAlign.Start);
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 6, bottom: 12 })
+        .onAreaChange((_old: Area, area: Area) => {
+          const height: number = Number(area.height);
+          if (height > 0 && Math.abs(height - this.reminderMaterialHeight) > 1) {
+            this.reminderMaterialHeight = height;
+          }
+        })
+        .transition(TransitionEffect.OPACITY);
+        }
+    }
     }
     .width('100%')
-    .height(56)
-    .padding({ left: 16, right: 16 })
-    .alignItems(VerticalAlign.Center);
+    .alignItems(HorizontalAlign.Start);
   }
 
   @Builder

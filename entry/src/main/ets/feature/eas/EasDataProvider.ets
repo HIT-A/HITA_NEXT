@@ -12,6 +12,7 @@ import { EasCourseItem, EasCourseScoreItem, EasExamItem, EasTermItem } from './m
 import { EasTimePeriodInDay } from '../../common/model/timetable/TimetableModels';
 import { easWebLoginConfigFor, EasCampusConfig, EasCampusUrls } from './webLogin/EasWebLoginConfig';
 import { EasLegacyTimetableParser } from './data/EasLegacyTimetableParser';
+import { BenbuExperimentService } from './BenbuExperimentService';
 import { EasAcademicCalendar } from './data/EasAcademicCalendar';
 import { EasLegacyCourseCatalogParser, LegacyCourseAttributes } from './data/EasLegacyCourseCatalogParser';
 import { ParsedShenzhenWebScores, parseShenzhenWebScores } from './data/ShenzhenWebScores';
@@ -267,6 +268,10 @@ export class EasDataProvider {
     }
 
     const courses: EasCourseItem[] = EasLegacyTimetableParser.parseScheduleHtml(resp.body);
+    if (session.campus === EasCampus.BENBU) {
+      courses.push(...await BenbuExperimentService.getExperiments(session));
+      courses.push(...await BenbuExperimentService.getElectronicExperiments(session));
+    }
     hilog.info(DOMAIN, TAG, 'timetable parsed term=%{public}s courses=%{public}d',
       term.getCode(), courses.length);
     if (courses.length === 0) {

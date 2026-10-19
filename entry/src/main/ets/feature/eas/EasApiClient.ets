@@ -21,6 +21,7 @@ export enum EasHttpMethod {
 export class EasApiResponse implements EasSessionResponse {
   statusCode: number = 0;
   body: string = '';
+  cookies: string = '';
 }
 
 export class EasApiClientOptions {
@@ -150,6 +151,7 @@ export class EasApiClient {
       const out: EasApiResponse = new EasApiResponse();
       out.statusCode = resp.responseCode;
       out.body = resp.result === undefined ? '' : String(resp.result);
+      out.cookies = resp.cookies || '';
       return out;
     } catch (e) {
       const out: EasApiResponse = new EasApiResponse();

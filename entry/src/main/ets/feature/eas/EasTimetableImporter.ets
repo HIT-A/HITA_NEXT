@@ -14,6 +14,7 @@ import {
 import { EasCampus, EasSession } from './EasSession';
 import { EasSessionStore } from './EasSessionStore';
 import { EasDataProvider, LegacyCatalogFetch } from './EasDataProvider';
+import { BenbuExperimentParser } from './data/BenbuExperimentParser';
 import { EasCourseItem, EasTermItem } from './model/EasModels';
 import { EasApiClient } from './EasApiClient';
 import { EasUserMessages } from './EasUserMessages';
@@ -177,10 +178,16 @@ export class EasTimetableImporter {
     const eventByKey: Map<string, EasEventItem> = new Map<string, EasEventItem>();
     for (let i: number = 0; i < courses.length; i++) {
       const course: EasCourseItem = courses[i];
+      const startMinutes: number = BenbuExperimentParser.timeMinutes(course.startTime);
+      const endMinutes: number = BenbuExperimentParser.timeMinutes(course.endTime);
+      const freeTime: boolean = startMinutes >= 0 && endMinutes > startMinutes;
+      const dated: boolean = course.scheduledDate.length > 0;
+      const scheduledMs: number = BenbuExperimentParser.dateMs(course.scheduledDate);
       if (!Number.isInteger(course.dayOfWeek) || course.dayOfWeek < 1 || course.dayOfWeek > 7 ||
-        !Number.isInteger(course.beginSection) || course.beginSection < 1 ||
+        (dated && (!freeTime || !Number.isFinite(scheduledMs))) ||
+        (!freeTime && (!Number.isInteger(course.beginSection) || course.beginSection < 1 ||
         !Number.isInteger(course.sectionCount) || course.sectionCount < 1 ||
-        course.beginSection + course.sectionCount - 1 > timetable.scheduleStructure.length) {
+        course.beginSection + course.sectionCount - 1 > timetable.scheduleStructure.length))) {
         hilog.warn(DOMAIN, TAG, 'skip invalid course name=%{public}s day=%{public}d section=%{public}d count=%{public}d',
           course.name, course.dayOfWeek, course.beginSection, course.sectionCount);
         continue;
@@ -212,12 +219,22 @@ export class EasTimetableImporter {
           subject.credit = nextCredit;
         }
       }
-      const weeks: number[] = course.weekNumbers;
+      const weeks: number[] = dated ? [1] : course.weekNumbers;
       for (let w: number = 0; w < weeks.length; w++) {
         const week: number = weeks[w];
         if (!Number.isInteger(week) || week < 1 || week > maxWeek) continue;
-        const timestamps: number[] = timetable.getTimestamps(week, course.dayOfWeek,
-          course.beginSection, course.beginSection + course.sectionCount - 1);
+        let timestamps: number[];
+        if (freeTime) {
+          const date: Date = new Date(dated ? scheduledMs : timetable.startTime);
+          if (!dated) date.setDate(date.getDate() + (week - 1) * 7 + course.dayOfWeek - 1);
+          date.setHours(0, startMinutes, 0, 0);
+          const from: number = date.getTime();
+          date.setHours(0, endMinutes, 0, 0);
+          timestamps = [from, date.getTime()];
+        } else {
+          timestamps = timetable.getTimestamps(week, course.dayOfWeek,
+            course.beginSection, course.beginSection + course.sectionCount - 1);
+        }
         const key: string = course.name + '|' + timestamps[0].toString() + '|' + timestamps[1].toString();
         const duplicate: EasEventItem | undefined = eventByKey.get(key);
         if (duplicate !== undefined) {
@@ -235,8 +252,8 @@ export class EasTimetableImporter {
         event.timetableId = timetable.id;
         event.from = timestamps[0];
         event.to = timestamps[1];
-        event.fromNumber = course.beginSection;
-        event.lastNumber = course.beginSection + course.sectionCount - 1;
+        event.fromNumber = freeTime ? -1 : course.beginSection;
+        event.lastNumber = freeTime ? -1 : course.beginSection + course.sectionCount - 1;
         eventByKey.set(key, event);
         savedEventCount++;
       }
