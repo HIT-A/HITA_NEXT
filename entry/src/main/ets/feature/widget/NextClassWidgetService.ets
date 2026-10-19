@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { fileIo } from '@kit.CoreFileKit';
 import { formBindingData, formProvider } from '@kit.FormKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { RdbHelper } from '../../common/db/RdbHelper';
@@ -7,9 +8,21 @@ import { ScheduleChangeSignal } from '../../common/util/ScheduleChangeSignal';
 import { TimetableSelectionStore } from '../timetable/data/TimetableSelectionStore';
 import { TimetableResolver } from '../timetable/data/TimetableResolver';
 import { NextClassModel, NextClassSnapshot } from './NextClassModel';
+import { WidgetBackgroundFiles, WidgetBackgroundStore } from './WidgetBackgroundStore';
+
+/** Card storage: schedule fields plus the baked background for each card size. */
+class NextClassPayload extends NextClassSnapshot {
+  // Always sent so removing the background clears previously merged card storage.
+  bgCompact: string = '';
+  bgWide: string = '';
+  formImages?: Record<string, number>;
+}
 
 export class NextClassWidgetService {
   private static context: common.Context | undefined = undefined;
+  /** Replaceable in tests; reads only local files. */
+  static backgroundFiles: (context: common.Context) => WidgetBackgroundFiles | undefined =
+    (context: common.Context): WidgetBackgroundFiles | undefined => WidgetBackgroundStore.filesForPublish(context);
   private static timer: number = -1;
   private static revision: number = 0;
   private static publishing: boolean = false;
@@ -58,7 +71,7 @@ export class NextClassWidgetService {
       revision = NextClassWidgetService.revision;
       snapshot = await NextClassWidgetService.load(context);
     } while (revision !== NextClassWidgetService.revision);
-    await NextClassWidgetService.publish(formId, snapshot);
+    await NextClassWidgetService.publish(context, formId, snapshot);
   }
 
   static async refreshAll(): Promise<void> {
@@ -82,7 +95,7 @@ export class NextClassWidgetService {
             NextClassWidgetService.pending = true;
             break;
           }
-          await NextClassWidgetService.publish(form.formId, snapshot);
+          await NextClassWidgetService.publish(NextClassWidgetService.context, form.formId, snapshot);
         }
       }
     } catch (error) {
@@ -92,12 +105,52 @@ export class NextClassWidgetService {
     }
   }
 
-  private static async publish(formId: string, snapshot: NextClassSnapshot): Promise<void> {
+  private static async publish(context: common.Context, formId: string, snapshot: NextClassSnapshot): Promise<void> {
+    const payload = new NextClassPayload();
+    payload.scheduleJson = snapshot.scheduleJson;
+    payload.hasTimetable = snapshot.hasTimetable;
+    payload.dataState = snapshot.dataState;
+    const opened: fileIo.File[] = [];
     try {
-      await formProvider.updateForm(formId, formBindingData.createFormBindingData(snapshot));
+      const files = NextClassWidgetService.backgroundFiles(context);
+      if (files !== undefined) {
+        // Each card gets its own descriptors; the image data is copied while binding.
+        const compact = fileIo.openSync(files.compactPath, fileIo.OpenMode.READ_ONLY);
+        opened.push(compact);
+        const wide = fileIo.openSync(files.widePath, fileIo.OpenMode.READ_ONLY);
+        opened.push(wide);
+        const images: Record<string, number> = {};
+        images[files.compactName] = compact.fd;
+        images[files.wideName] = wide.fd;
+        payload.bgCompact = files.compactName;
+        payload.bgWide = files.wideName;
+        payload.formImages = images;
+      }
+    } catch (error) {
+      // The background was replaced or removed meanwhile; publish the schedule without it.
+      hilog.warn(0x0000, 'NextClassWidget', 'background unavailable: %{public}s', String(error));
+      NextClassWidgetService.close(opened);
+      opened.length = 0;
+      payload.bgCompact = '';
+      payload.bgWide = '';
+      payload.formImages = undefined;
+    }
+    try {
+      await formProvider.updateForm(formId, formBindingData.createFormBindingData(payload));
     } catch (error) {
       // A card may have been removed while the local database was loading.
       hilog.warn(0x0000, 'NextClassWidget', 'publish failed: %{public}s', String(error));
+    } finally {
+      NextClassWidgetService.close(opened);
+    }
+  }
+
+  private static close(files: fileIo.File[]): void {
+    for (const file of files) {
+      try {
+        fileIo.closeSync(file);
+      } catch (_) {
+      }
     }
   }
 }
