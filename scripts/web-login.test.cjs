@@ -178,7 +178,8 @@ test('verification has no native overlay, code field or scripted send/submit bri
 for (const api of [23, 26]) {
   for (const campus of ['BENBU', 'WEIHAI', 'SHENZHEN']) {
     test(`${campus} API ${api}: verification stays in the webpage and its successful redirect completes login`, async () => {
-      const { ctrl, state, urls, page, tick } = setup(api);
+      const h = setup(api);
+      const { ctrl, state, urls, page, tick } = h;
       const authBase = campus === 'BENBU' ? 'https://ids.hit.edu.cn' :
         campus === 'WEIHAI' ? 'https://webvpn.hitwh.edu.cn' : 'https://authserver.hitsz.edu.cn';
       const easBase = campus === 'BENBU' ? urls.JWTS_BASE :
@@ -209,6 +210,7 @@ for (const api of [23, 26]) {
       const destination = campus === 'BENBU' ? urls.BENBU_JWTS :
         campus === 'WEIHAI' ? urls.WEIHAI_JWTS : urls.SHENZHEN_DIRECT_BASE + '/student_index';
       await page(destination);
+      if (campus === 'BENBU') await completeSjjxPage(h);
       await tick(10001);
       assert.equal(state.finished.length, 1);
       assert.equal(state.finished[0].isLogin(), true);
@@ -507,6 +509,8 @@ test('Benbu loginCAS can finish after the timetable endpoint verifies the curren
     h.ctrl.start('BENBU', '1');
     await h.page(h.urls.BENBU_JWTS);
     assert.equal(h.state.benbuRequests, 1);
+    assert.equal(h.state.navigations.at(-1), h.urls.JWTS_BASE + '/loginsysj/loginSygl');
+    await completeSjjxPage(h);
     assert.ok(h.state.navigations.some(url => url.startsWith(h.urls.EELABINFO_URL)));
     await h.tick(10001);
     assert.equal(h.state.finished.length, 1);
@@ -522,6 +526,7 @@ test('Benbu delayed cookies on a non-login EAS page are retried even without aut
   h.state.cookie = 'JSESSIONID=late; HIT=gateway';
   await h.tick(600);
   assert.equal(h.state.benbuRequests, 1);
+  await completeSjjxPage(h);
   await h.tick(10001);
   assert.equal(h.state.finished.length, 1);
 });
@@ -533,6 +538,7 @@ test('Benbu verification can use a path-scoped JSESSIONID without a readable HIT
   await h.page(h.urls.JWTS_BASE + '/index');
   assert.equal(h.state.benbuRequests, 1);
   assert.match(h.state.benbuRequest.options.header.Cookie, /JSESSIONID=path-session/);
+  await completeSjjxPage(h);
   await h.tick(10001);
   assert.equal(h.state.finished.length, 1);
 });
@@ -568,6 +574,7 @@ test('Benbu duplicate page completion does not run concurrent verification', asy
   assert.equal(h.state.benbuRequests, 1);
   release({ responseCode: 200, result: '<select name="pageXnxq"><option value="2026-20271">秋季</option></select>' });
   await flush();
+  await completeSjjxPage(h);
   await h.tick(10001);
   assert.equal(h.state.finished.length, 1);
 });
@@ -644,6 +651,7 @@ test('Benbu login resumes after a failed probe when a new authenticated page arr
     responseCode: 200, result: '<select name="xnxq"><option value="2026-20271">秋季</option></select>'
   });
   await h.page(h.urls.JWTS_BASE + '/index');
+  await completeSjjxPage(h);
   await h.tick(10001);
   assert.equal(h.state.finished.length, 1);
   assert.equal(h.state.finished[0].webCookies.get('JSESSIONID'), 'new');
@@ -684,4 +692,108 @@ test('Benbu successful EAS login survives optional laboratory navigation errors'
   await h.page(h.urls.BENBU_JWTS);
   assert.equal(h.state.finished.length, 1);
   assert.equal(h.state.finished[0].electronicExpToken, '');
+});
+
+async function completeSjjxPage(h) {
+  await h.page(h.urls.SJJX_BASE + '/to-welcome');
+  await h.tick(1000);
+}
+
+async function enterSjjx(h, cookie = 'JSESSIONID=lab; HIT=gateway') {
+  h.state.cookie = 'JSESSIONID=teaching; HIT=gateway';
+  h.ctrl.start('BENBU', '1');
+  await h.page(h.urls.BENBU_JWTS);
+  assert.equal(h.state.navigations.at(-1), h.urls.JWTS_BASE + '/loginsysj/loginSygl');
+  h.state.cookie = cookie;
+  await h.page(h.urls.SJJX_BASE + '/to-welcome');
+}
+
+test('Benbu WebView bridge saves a separate experiment session and supports repeated login', async () => {
+  for (const api of [23, 26]) {
+    const h = setup(api);
+    for (const value of ['first-lab', 'second-lab']) {
+      await enterSjjx(h, 'JSESSIONID=' + value + '; HIT=gateway');
+      await h.tick(1000);
+      assert.equal(h.state.navigations.at(-1), h.urls.EELABINFO_URL + '/api/cas/loginSuccess');
+      await h.tick(10001);
+      const s = h.state.finished.at(-1);
+      assert.equal(s.webCookies.get('JSESSIONID'), 'teaching');
+      assert.equal(s.sjjxCookies.get('JSESSIONID'), value);
+      const { EasSession } = h.load('feature/eas/EasSession.ets');
+      assert.equal(EasSession.decode(s.encode()).sjjxCookies.get('JSESSIONID'), value);
+    }
+    assert.equal(h.state.finished.length, 2);
+  }
+});
+
+test('stopping the experiment bridge cancels its navigation and cookie timers', async () => {
+  const h = setup();
+  await enterSjjx(h);
+  h.ctrl.stop();
+  assert.equal(h.timers.size, 0);
+  await h.tick(30000);
+  assert.equal(h.state.finished.length, 0);
+  assert.equal(h.state.navigations.some(url => url.startsWith(h.urls.EELABINFO_URL)), false);
+});
+
+test('a late experiment cookie read cannot alter a restarted login', async () => {
+  const h = setup();
+  await enterSjjx(h);
+  let release;
+  h.state.fetchCookie = () => new Promise(resolve => { release = resolve; });
+  await h.tick(1000);
+  assert.equal(typeof release, 'function');
+  h.ctrl.start('WEIHAI', '1');
+  const navigationCount = h.state.navigations.length;
+  release('JSESSIONID=old-lab; HIT=old-gateway');
+  await flush();
+  assert.equal(h.state.navigations.length, navigationCount);
+  assert.equal(h.ctrl.pendingSjjxCookies.size, 0);
+  assert.equal(h.state.finished.length, 0);
+  h.ctrl.stop();
+});
+
+test('experiment cookies are not reused when another campus logs in', async () => {
+  const h = setup();
+  await enterSjjx(h);
+  await h.tick(11001);
+  assert.equal(h.state.finished.length, 1);
+  h.state.cookie = 'wengine_vpn_ticket_test=ticket; JSESSIONID=weihai';
+  h.ctrl.start('WEIHAI', '1');
+  await h.page(h.urls.WEIHAI_JWTS);
+  await h.tick(10001);
+  assert.equal(h.state.finished.length, 2);
+  assert.equal(h.state.finished[1].sjjxCookies.size, 0);
+});
+
+test('a stalled experiment bridge remains optional and completes the verified teaching login', async () => {
+  const h = setup();
+  h.state.cookie = 'JSESSIONID=teaching; HIT=gateway';
+  h.ctrl.start('BENBU', '1');
+  await h.page(h.urls.BENBU_JWTS);
+  await h.tick(15000);
+  assert.equal(h.state.navigations.at(-1), h.urls.EELABINFO_URL + '/api/cas/loginSuccess');
+  await h.tick(10001);
+  assert.equal(h.state.finished.length, 1);
+  assert.equal(h.state.finished[0].webCookies.get('JSESSIONID'), 'teaching');
+  assert.equal(h.state.finished[0].sjjxCookies.size, 0);
+});
+
+test('an experiment cookie read arriving after the bridge timeout cannot change its result', async () => {
+  const h = setup();
+  h.state.cookie = 'JSESSIONID=teaching; HIT=gateway';
+  h.ctrl.start('BENBU', '1');
+  await h.page(h.urls.BENBU_JWTS);
+  await h.tick(13900);
+  let release;
+  h.state.fetchCookie = () => new Promise(resolve => { release = resolve; });
+  await h.page(h.urls.SJJX_BASE + '/to-welcome');
+  await h.tick(1000);
+  await h.tick(100);
+  assert.equal(h.state.navigations.at(-1), h.urls.EELABINFO_URL + '/api/cas/loginSuccess');
+  release('JSESSIONID=too-late');
+  await flush();
+  await h.tick(10001);
+  assert.equal(h.state.finished.length, 1);
+  assert.equal(h.state.finished[0].sjjxCookies.size, 0);
 });

@@ -135,6 +135,7 @@ export class EasWebLoginController {
     this.shenzhenAutoAdvanceScheduledGeneration = -1;
     this.autoOpeningJwts = false;
     this.portalOpenAttempts = 0;
+    this.pendingSjjxCookies = new Map<string, string>();
     this.navigatingToEelab = false;
     this.eelabTokenFetching = false;
     this.eelabFetchTimer = -1;
@@ -188,6 +189,7 @@ export class EasWebLoginController {
     this.completing = false;
     this.cookiePollingGeneration++;
     this.cookiePollingActive = false;
+    this.stopSjjxBridge();
     if (this.eelabFetchTimer >= 0) {
       clearTimeout(this.eelabFetchTimer);
       this.eelabFetchTimer = -1;
@@ -933,6 +935,19 @@ export class EasWebLoginController {
   // 本部本科 sjjx（实验教学）桥接：jwts /loginsysj/loginSygl → sjjx 会话
   // ------------------------------------------------------------------
 
+  private stopSjjxBridge(): void {
+    this.navigatingToSjjx = false;
+    this.sjjxFetching = false;
+    if (this.sjjxFetchTimer >= 0) {
+      clearTimeout(this.sjjxFetchTimer);
+      this.sjjxFetchTimer = -1;
+    }
+    if (this.sjjxTimeoutTimer >= 0) {
+      clearTimeout(this.sjjxTimeoutTimer);
+      this.sjjxTimeoutTimer = -1;
+    }
+  }
+
   private enterSjjxBridgeFlow(cookies: Map<string, string>): void {
     const wc: webview.WebviewController | undefined = this.webController;
     if (wc === undefined || this.navigatingToSjjx) {
@@ -944,7 +959,7 @@ export class EasWebLoginController {
     this.sjjxTimeoutTimer = setTimeout(() => {
       this.sjjxTimeoutTimer = -1;
       if (this.navigatingToSjjx && !this.finished) {
-        this.navigatingToSjjx = false;
+        this.stopSjjxBridge();
         hilog.warn(DOMAIN, TAG, 'sjjx bridge timeout; continuing without experiment session');
         this.enterEelabTokenFlow(this.collectedEasCookies);
       }
@@ -953,11 +968,7 @@ export class EasWebLoginController {
       wc.loadUrl(EasCampusUrls.JWTS_BASE + '/loginsysj/loginSygl');
       hilog.info(DOMAIN, TAG, 'sjjx bridge navigation started');
     } catch (e) {
-      this.navigatingToSjjx = false;
-      if (this.sjjxTimeoutTimer >= 0) {
-        clearTimeout(this.sjjxTimeoutTimer);
-        this.sjjxTimeoutTimer = -1;
-      }
+      this.stopSjjxBridge();
       this.enterEelabTokenFlow(cookies);
     }
   }
@@ -979,12 +990,16 @@ export class EasWebLoginController {
   }
 
   private async fetchSjjxCookies(): Promise<void> {
-    if (this.finished || this.sjjxFetching) {
+    if (this.finished || !this.navigatingToSjjx || this.sjjxFetching) {
       return;
     }
+    const generation: number = this.loginGeneration;
     this.sjjxFetching = true;
     try {
       const raw: string = await EasWebLoginController.tryFetchCookie(EasCampusUrls.SJJX_BASE);
+      if (this.finished || !this.navigatingToSjjx || generation !== this.loginGeneration) {
+        return;
+      }
       const cookies: Map<string, string> = parseCookiesHeader(raw);
       hilog.info(DOMAIN, TAG, 'sjjx cookie probe keys=%{public}s', EasWebLoginController.cookieKeys(cookies));
       if (EasSession.isNotBlank(EasSession.cookieValue(cookies, 'JSESSIONID'))) {
@@ -996,14 +1011,10 @@ export class EasWebLoginController {
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'sjjx cookie probe failed');
     }
-    if (this.finished) {
+    if (this.finished || !this.navigatingToSjjx || generation !== this.loginGeneration) {
       return;
     }
-    this.navigatingToSjjx = false;
-    if (this.sjjxTimeoutTimer >= 0) {
-      clearTimeout(this.sjjxTimeoutTimer);
-      this.sjjxTimeoutTimer = -1;
-    }
+    this.stopSjjxBridge();
     this.enterEelabTokenFlow(this.collectedEasCookies);
   }
 
@@ -1181,6 +1192,7 @@ export class EasWebLoginController {
         'hit.edu.cn',
         'i-hit-edu-cn.ivpn.hit.edu.cn',
         'jwts-hit-edu-cn.ivpn.hit.edu.cn',
+        'sjjx-hit-edu-cn.ivpn.hit.edu.cn',
         'yjsgl-hit-edu-cn.ivpn.hit.edu.cn',
         'eelabinfo-hit-edu-cn.ivpn.hit.edu.cn',
         'webvpn.hitwh.edu.cn'

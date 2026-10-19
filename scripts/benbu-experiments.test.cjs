@@ -105,6 +105,44 @@ test('requests exchange isolated experiment cookies and preserve Android electro
   } finally { api.doHttp = original; }
 });
 
+test('captured WebView experiment cookies query the authorized target directly', async () => {
+  const original = api.doHttp; const calls = []; const s = session();
+  s.sjjxCookies = new Map([['JSESSIONID', 'web-lab'], ['HIT', 'vpn']]);
+  api.doHttp = async (url, method, headers, body, timeout, useCache) => {
+    calls.push({ url, method, cookie: headers.get('Cookie'), useCache });
+    return { statusCode: 200, body: fixture };
+  };
+  try {
+    assert.equal((await service.getExperiments(s)).length, 1);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].url, /sjjx.*\/xskb\/queryXszkb$/);
+    assert.match(calls[0].cookie, /JSESSIONID=web-lab/);
+    assert.equal(calls[0].useCache, false);
+    assert.equal(s.webCookies.get('JSESSIONID'), 'eas');
+  } finally { api.doHttp = original; }
+});
+
+test('an expired captured experiment session falls back without expiring the teaching session', async () => {
+  const original = api.doHttp; const calls = []; const s = session();
+  s.sjjxCookies = new Map([['JSESSIONID', 'expired-lab']]);
+  api.doHttp = async url => {
+    calls.push(url);
+    return { statusCode: 200, body: calls.length === 1 ? '页面过期，请重新登录' : fixture };
+  };
+  try {
+    assert.equal((await service.getExperiments(s)).length, 1);
+    assert.equal(calls.length, 3);
+    assert.match(calls[1], /jwts.*\/loginsysj\/loginSygl$/);
+    assert.equal(s.loginExpired, false);
+  } finally { api.doHttp = original; }
+});
+
+test('older saved sessions decode without an experiment cookie field', () => {
+  const s = EasSession.decode(JSON.stringify({ campus: 'BENBU', webCookies: [{ k: 'JSESSIONID', v: 'eas' }] }));
+  assert.equal(s.webCookies.get('JSESSIONID'), 'eas');
+  assert.equal(s.sjjxCookies.size, 0);
+});
+
 test('Benbu can import experiment-only schedules; other campuses never query experiments', async () => {
   const original = api.doHttp; let count = 0;
   api.doHttp = async url => { count++; return { statusCode: 200, body: url.includes('queryXszkb') ? fixture : electronic([row]) }; };
