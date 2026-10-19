@@ -3402,11 +3402,9 @@ struct Home {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
         .margin({ left: 12 });
-        SymbolGlyph($r('sys.symbol.chevron_right'))
-          .fontSize(14)
-          .fontColor([COLOR_TEXT_SECONDARY])
-          .width(20)
-          .height(20)
+        Text('›')
+          .fontSize(23)
+          .fontColor(COLOR_TEXT_SECONDARY)
           .rotate({ angle: this.reminderExpanded ? 90 : 0 });
       }
       .width('100%')
