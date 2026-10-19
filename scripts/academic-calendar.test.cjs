@@ -249,6 +249,7 @@ function importSetup({ remote = date(2026, 8, 24), savedDate, selectedTerms = [t
   };
   const session = Object.assign(new EasSession(), { campus: EasCampus.WEIHAI });
   class Provider {
+    importWarnings = [];
     async getAllTerms() { return selectedTerms; }
     async getStartDate() { calls.calendar++; return remote; }
     async getTimetableOfTerm() {

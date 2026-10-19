@@ -141,6 +141,9 @@ export class EasTimetableImporter {
       if (start.fromSaved) {
         result.message += '，开学日期沿用本地设置，请核对';
       }
+      if (provider.importWarnings.length > 0) {
+        result.message += '；' + provider.importWarnings.join('；');
+      }
       return result;
     } catch (e) {
       const text: string = e instanceof Error ? e.message : String(e);

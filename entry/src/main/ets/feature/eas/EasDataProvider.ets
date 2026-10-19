@@ -88,6 +88,7 @@ export class EasExamQueryResult {
 
 export class EasDataProvider {
   private api: EasApiClient;
+  readonly importWarnings: string[] = [];
 
   constructor(api: EasApiClient) {
     this.api = api;
@@ -227,6 +228,7 @@ export class EasDataProvider {
   }
 
   async getTimetableOfTerm(session: EasSession, term: EasTermItem): Promise<EasCourseItem[]> {
+    this.importWarnings.length = 0;
     if (session.campus === EasCampus.SHENZHEN) {
       return await this.getShenzhenTimetable(session, term);
     }
@@ -269,8 +271,8 @@ export class EasDataProvider {
 
     const courses: EasCourseItem[] = EasLegacyTimetableParser.parseScheduleHtml(resp.body);
     if (session.campus === EasCampus.BENBU) {
-      courses.push(...await BenbuExperimentService.getExperiments(session));
-      courses.push(...await BenbuExperimentService.getElectronicExperiments(session));
+      courses.push(...await BenbuExperimentService.getExperiments(session, this.importWarnings));
+      courses.push(...await BenbuExperimentService.getElectronicExperiments(session, this.importWarnings));
     }
     hilog.info(DOMAIN, TAG, 'timetable parsed term=%{public}s courses=%{public}d',
       term.getCode(), courses.length);

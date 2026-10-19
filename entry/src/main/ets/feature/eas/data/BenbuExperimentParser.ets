@@ -39,11 +39,22 @@ export class BenbuExperimentParser {
       (minutes % 60).toString().padStart(2, '0');
   }
 
+  static isElectronicResponse(json: string): boolean {
+    try {
+      const response: ElectronicExperimentResponse = JSON.parse(json) as ElectronicExperimentResponse;
+      return response !== null && response.code !== undefined && response.code !== null &&
+        Number(response.code) === 0 && Array.isArray(response.data);
+    } catch (_) {
+      return false;
+    }
+  }
+
   static parseElectronic(json: string): EasCourseItem[] {
     const courses: EasCourseItem[] = [];
     try {
       const response: ElectronicExperimentResponse = JSON.parse(json) as ElectronicExperimentResponse;
-      if (response.code !== 0 || !Array.isArray(response.data)) return courses;
+      if (response.code === undefined || response.code === null || Number(response.code) !== 0 ||
+        !Array.isArray(response.data)) return courses;
       for (const row of response.data) {
         try {
           const course: EasCourseItem = new EasCourseItem();
@@ -72,42 +83,95 @@ export class BenbuExperimentParser {
 
   static parseHtml(html: string): EasCourseItem[] {
     const courses: EasCourseItem[] = [];
-    const tables: RegExp = /<table\b([^>]*)>([\s\S]*?)<\/table>/gi;
-    let table: RegExpExecArray | null = tables.exec(html);
+    const source: string = html.replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
+    const tables: RegExp = /<table\b([^>]*)>/gi;
+    let table: RegExpExecArray | null = tables.exec(source);
     while (table !== null) {
       if (/\bclass\s*=\s*["'][^"']*\bdataTable\b/i.test(table[1]) ||
         /\bclass\s*=\s*dataTable\b/i.test(table[1])) break;
-      table = tables.exec(html);
+      table = tables.exec(source);
     }
     if (table === null) return courses;
-    const rows: RegExp = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
-    let row: RegExpExecArray | null = rows.exec(table[2]);
+    // A layout table may wrap dataTable; match its own closing tag instead of the outer table's.
+    const contentStart: number = tables.lastIndex;
+    const tags: RegExp = /<\/?table\b[^>]*>/gi;
+    tags.lastIndex = contentStart;
+    let depth: number = 1;
+    let tag: RegExpExecArray | null = tags.exec(source);
+    while (tag !== null) {
+      depth += /^<\//.test(tag[0]) ? -1 : 1;
+      if (depth === 0) break;
+      tag = tags.exec(source);
+    }
+    if (tag === null) return courses;
+    const content: string = source.substring(contentStart, tag.index);
+    const rows: RegExp = /<tr\b[^>]*>((?:(?!<tr\b)[\s\S])*?)<\/tr>/gi;
+    let row: RegExpExecArray | null = rows.exec(content);
+    const spans: number[] = [];
+    let previousCells: string[] = [];
     while (row !== null) {
       const cells: string[] = [];
-      const pattern: RegExp = /<td\b[^>]*>([\s\S]*?)<\/td>/gi;
+      const ownCells: boolean[] = [];
+      const pattern: RegExp = /<(?:td|th)\b([^>]*)>([\s\S]*?)<\/(?:td|th)>/gi;
       let cell: RegExpExecArray | null = pattern.exec(row[1]);
-      while (cell !== null) { cells.push(cell[1]); cell = pattern.exec(row[1]); }
-      if (cells.length >= 9) {
-        for (let i: number = 2; i < 9; i++) courses.push(...BenbuExperimentParser.parseCell(cells[i], i - 1));
+      let column: number = 0;
+      while (cell !== null && column < 9) {
+        while ((spans[column] || 0) > 0 && column < 9) {
+          cells[column] = previousCells[column];
+          spans[column]--;
+          column++;
+        }
+        const width: number = BenbuExperimentParser.span(cell[1], 'colspan', 9);
+        const height: number = BenbuExperimentParser.span(cell[1], 'rowspan', 64);
+        for (let i: number = 0; i < width && column < 9; i++) {
+          cells[column] = cell[2];
+          ownCells[column] = i === 0;
+          spans[column] = height - 1;
+          column++;
+        }
+        cell = pattern.exec(row[1]);
       }
-      row = rows.exec(table[2]);
+      while (column < 9 && (spans[column] || 0) > 0) {
+        cells[column] = previousCells[column];
+        spans[column]--;
+        column++;
+      }
+      if (cells.length >= 9) {
+        for (let i: number = 2; i < 9; i++) {
+          if (ownCells[i]) courses.push(...BenbuExperimentParser.parseCell(cells[i], i - 1));
+        }
+      }
+      previousCells = cells;
+      row = rows.exec(content);
     }
     return courses;
   }
 
+  private static span(attrs: string, name: string, maximum: number): number {
+    const match: RegExpExecArray | null = new RegExp('\\b' + name + '\\s*=\\s*["\']?(\\d+)', 'i').exec(attrs);
+    return match === null ? 1 : Math.max(1, Math.min(maximum, Number(match[1])));
+  }
+
   private static parseCell(html: string, day: number): EasCourseItem[] {
     const courses: EasCourseItem[] = [];
-    const lines: string[] = html.split(/<\s*\/?\s*br\s*\/?\s*>/i);
+    const lines: string[] = html.split(/<\s*\/?\s*br\s*\/?\s*>/i).map((raw: string): string =>
+      normalizeHtmlSpaces(raw.replace(/<[^>]*>/g, '')
+        .replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>'))).filter((line: string): boolean =>
+          line.length > 0);
     let name: string = '';
-    for (const raw of lines) {
-      const line: string = normalizeHtmlSpaces(raw.replace(/<[^>]*>/g, '')
-        .replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>'));
-      if (!line) continue;
+    let separateName: boolean = false;
+    for (let index: number = 0; index < lines.length; index++) {
+      const line: string = lines[index];
       const week: RegExpExecArray | null = /\[(\d+)周第([\d，,\s]+)节\]/.exec(line);
-      if (week === null) { name = line; continue; }
+      if (week === null) { name = line; separateName = true; continue; }
       let teacher: string = line.substring(0, week.index).trim();
       const split: number = teacher.lastIndexOf(' ');
-      if (split > 0) { name = teacher.substring(0, split).trim(); teacher = teacher.substring(split + 1); }
+      if (!separateName && split > 0) {
+        name = teacher.substring(0, split).trim(); teacher = teacher.substring(split + 1);
+      } else if (name && teacher.startsWith(name + ' ')) {
+        teacher = teacher.substring(name.length).trim();
+      }
       if (!name || !teacher || Number(week[1]) < 1) continue;
       const course: EasCourseItem = new EasCourseItem();
       course.name = name;
@@ -115,7 +179,11 @@ export class BenbuExperimentParser {
       course.dayOfWeek = day;
       course.weekNumbers = [Number(week[1])];
       course.weeks = week[1];
-      const tail: string = line.substring(week.index + week[0].length);
+      let tail: string = line.substring(week.index + week[0].length);
+      // Some pages put the red free-time range on the next line of the same detail.
+      while (index + 1 < lines.length && /^\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}$/.test(lines[index + 1])) {
+        tail += '，' + lines[++index];
+      }
       const time: RegExpExecArray | null = /(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/.exec(tail);
       if (time !== null) {
         const start: number = BenbuExperimentParser.timeMinutes(time[1]);

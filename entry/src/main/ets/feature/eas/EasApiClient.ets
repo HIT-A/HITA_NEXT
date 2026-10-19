@@ -22,6 +22,7 @@ export class EasApiResponse implements EasSessionResponse {
   statusCode: number = 0;
   body: string = '';
   cookies: string = '';
+  location: string = '';
 }
 
 export class EasApiClientOptions {
@@ -133,7 +134,7 @@ export class EasApiClient {
   }
 
   static async doHttp(url: string, method: EasHttpMethod, header: Map<string, string>, body: string,
-    timeoutMs: number, useCache: boolean = true): Promise<EasApiResponse> {
+    timeoutMs: number, useCache: boolean = true, followRedirects: boolean = true): Promise<EasApiResponse> {
     const httpRequest: http.HttpRequest = http.createHttp();
     const opts: http.HttpRequestOptions = {
       method: method === EasHttpMethod.POST ? http.RequestMethod.POST : http.RequestMethod.GET,
@@ -146,12 +147,14 @@ export class EasApiClient {
     if (body.length > 0) {
       opts.extraData = body;
     }
+    if (!followRedirects) opts.maxRedirects = 0;
     try {
       const resp: http.HttpResponse = await httpRequest.request(url, opts);
       const out: EasApiResponse = new EasApiResponse();
       out.statusCode = resp.responseCode;
       out.body = resp.result === undefined ? '' : String(resp.result);
-      out.cookies = resp.cookies || '';
+      out.cookies = resp.cookies || EasApiClient.responseHeader(resp.header, 'set-cookie');
+      out.location = EasApiClient.responseHeader(resp.header, 'location');
       return out;
     } catch (e) {
       const out: EasApiResponse = new EasApiResponse();
@@ -161,6 +164,17 @@ export class EasApiClient {
     } finally {
       httpRequest.destroy();
     }
+  }
+
+  private static responseHeader(header: Object, name: string): string {
+    if (header === undefined || header === null) return '';
+    const fields: Record<string, string | string[]> = header as Record<string, string | string[]>;
+    for (const key of Object.keys(fields)) {
+      if (key.toLowerCase() !== name) continue;
+      const value: string | string[] = fields[key];
+      return Array.isArray(value) ? (value as string[]).join('\n') : String(value);
+    }
+    return '';
   }
 
   private static headerToObject(header: Map<string, string>): Object {
