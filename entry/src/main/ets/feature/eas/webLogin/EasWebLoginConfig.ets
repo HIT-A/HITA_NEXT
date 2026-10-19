@@ -19,6 +19,8 @@ export class EasCampusUrls {
   static readonly JWTS_BASE: string = 'http://jwts-hit-edu-cn.ivpn.hit.edu.cn:1080';
   static readonly GRADUATE_BASE: string = 'http://yjsgl-hit-edu-cn.ivpn.hit.edu.cn:1080';
   static readonly EELABINFO_URL: string = 'http://eelabinfo-hit-edu-cn.ivpn.hit.edu.cn:1080';
+  /** 实验教学管理系统（sjjx）：经 jwts 的 /loginsysj/loginSygl 桥接后使用 */
+  static readonly SJJX_BASE: string = 'http://sjjx-hit-edu-cn.ivpn.hit.edu.cn:1080';
   static readonly BENBU_LOGIN: string = 'http://i-hit-edu-cn.ivpn.hit.edu.cn:1080/portal/home/';
   static readonly BENBU_JWTS: string = 'http://jwts-hit-edu-cn.ivpn.hit.edu.cn:1080/loginCAS';
   static readonly BENBU_GRADUATE_JWTS: string = 'http://yjsgl-hit-edu-cn.ivpn.hit.edu.cn:1080/common/casLogin';

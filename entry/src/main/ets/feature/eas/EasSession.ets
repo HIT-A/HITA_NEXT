@@ -28,6 +28,8 @@ export class EasSession {
   webBaseUrl: string = '';
   /** 本部电子实验(EELAB)额外 token */
   electronicExpToken: string = '';
+  /** 本部实验教学系统(sjjx)会话 Cookie（经 jwts 的 /loginsysj/loginSygl 桥接取得） */
+  sjjxCookies: Map<string, string> = new Map<string, string>();
   /** 会话代数：用于失效/刷新判定，每次重登 +1 */
   sessionGeneration: number = 0;
   /** 仅在实际教务请求确认认证失效后置为 true；重新登录成功时清除。 */
@@ -128,6 +130,7 @@ export class EasSession {
       'cookies': EasSession.encodeMap(this.cookies),
       'webBaseUrl': this.webBaseUrl,
       'electronicExpToken': this.electronicExpToken,
+      'sjjxCookies': EasSession.encodeMap(this.sjjxCookies),
       'sessionGeneration': this.sessionGeneration,
       'loginExpired': this.loginExpired,
       'accessToken': this.accessToken,
@@ -169,6 +172,7 @@ export class EasSession {
       s.cookies = EasSession.decodeMap(o['cookies']);
       s.webBaseUrl = str('webBaseUrl');
       s.electronicExpToken = str('electronicExpToken');
+      s.sjjxCookies = EasSession.decodeMap(o['sjjxCookies']);
       s.sessionGeneration = Number(o['sessionGeneration'] ?? 0);
       s.loginExpired = o['loginExpired'] === true;
       s.accessToken = str('accessToken');

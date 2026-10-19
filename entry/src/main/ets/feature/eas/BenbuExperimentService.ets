@@ -61,6 +61,27 @@ export class BenbuExperimentService {
   }
 
   static async getExperiments(session: EasSession, warnings: string[] = []): Promise<EasCourseItem[]> {
+    // 优先使用登录阶段经 jwts 桥接捕获的 sjjx 会话：iVPN 网关已对该目标完成授权。
+    if (EasSession.isNotBlank(EasSession.cookieValue(session.sjjxCookies, 'JSESSIONID'))) {
+      try {
+        const sjjxResponse: EasApiResponse = await EasApiClient.doHttp(
+          BenbuExperimentService.EXPERIMENT_BASE + '/xskb/queryXszkb',
+          EasHttpMethod.GET, BenbuExperimentService.headers(session.sjjxCookies), '', 20000, false);
+        const bodyOk: boolean = sjjxResponse.statusCode === 200 &&
+          /\bdataTable\b/i.test(sjjxResponse.body) && !/页面过期|请重新登录/.test(sjjxResponse.body);
+        hilog.info(0x0000, 'HitaEasImport', 'experiment session query status=%{public}d len=%{public}d',
+          sjjxResponse.statusCode, sjjxResponse.body.length);
+        if (bodyOk) {
+          const parsed: EasCourseItem[] = BenbuExperimentParser.parseHtml(sjjxResponse.body);
+          if (parsed.length > 0) {
+            hilog.info(0x0000, 'HitaEasImport', 'experiment session courses=%{public}d', parsed.length);
+            return parsed;
+          }
+        }
+      } catch (_) {
+        hilog.warn(0x0000, 'HitaEasImport', 'experiment session request failed');
+      }
+    }
     const jars: Map<string, Map<string, string>> = new Map<string, Map<string, string>>();
     try {
       await BenbuExperimentService.getWithCookies(EasCampusUrls.JWTS_BASE + '/loginsysj/loginSygl',

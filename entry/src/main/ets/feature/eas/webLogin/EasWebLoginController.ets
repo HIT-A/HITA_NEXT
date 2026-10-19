@@ -57,6 +57,7 @@ export enum EasLoginPhase {
 const COOKIE_RETRY_COUNT_MAX: number = 30;
 const COOKIE_RETRY_DELAY_MS: number = 500;
 const EELAB_NAV_TIMEOUT_MS: number = 10000;
+const SJJX_NAV_TIMEOUT_MS: number = 15000;
 const EELAB_USER_AGENT: string =
   'Mozilla/5.0 (Linux; Android 16; sdk_gphone64_arm64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.6998.135 Mobile Safari/537.36';
 
@@ -97,6 +98,13 @@ export class EasWebLoginController {
   private cookieRetryCount: number = 0;
   private cookiePollingGeneration: number = 0;
   private cookiePollingActive: boolean = false;
+
+  // —— BENBU 本科 sjjx（实验教学）桥接流程 ——
+  private navigatingToSjjx: boolean = false;
+  private sjjxFetching: boolean = false;
+  private sjjxFetchTimer: number = -1;
+  private sjjxTimeoutTimer: number = -1;
+  private pendingSjjxCookies: Map<string, string> = new Map<string, string>();
 
   // —— BENBU 本科 EELAB token 流程 ——
   private navigatingToEelab: boolean = false;
@@ -233,7 +241,13 @@ export class EasWebLoginController {
       return;
     }
 
-    // 1. 本部本科 EELAB 流程中转处理
+    // 1. 本部本科 sjjx 桥接中转处理
+    if (this.navigatingToSjjx) {
+      this.advanceSjjxIfReady();
+      return;
+    }
+
+    // 2. 本部本科 EELAB 流程中转处理
     if (this.navigatingToEelab) {
       this.advanceEelabIfReady();
       return;
@@ -660,9 +674,9 @@ export class EasWebLoginController {
     this.stopCookiePolling();
 
     if (this.cfg.campus === EasCampus.BENBU && this.cfg.studentType !== '2') {
-      // 本部本科：进 EELAB token 流程
-      this.setPhase(EasLoginPhase.SUCCESS_PROBE, '登录成功，正在获取电子实验会话…');
-      this.enterEelabTokenFlow(cookies);
+      // 本部本科：先经 jwts 桥接取得 sjjx 实验教学会话，再走 EELAB token
+      this.setPhase(EasLoginPhase.SUCCESS_PROBE, '登录成功，正在获取实验教学会话…');
+      this.enterSjjxBridgeFlow(cookies);
       return;
     }
 
@@ -907,9 +921,90 @@ export class EasWebLoginController {
     if (eelabToken.length > 0) {
       s.electronicExpToken = eelabToken;
     }
+    if (this.pendingSjjxCookies.size > 0) {
+      s.sjjxCookies = this.pendingSjjxCookies;
+    }
     this.setPhase(EasLoginPhase.DONE, '登录成功');
     this.setProgress(100);
     this.onFinished(s);
+  }
+
+  // ------------------------------------------------------------------
+  // 本部本科 sjjx（实验教学）桥接：jwts /loginsysj/loginSygl → sjjx 会话
+  // ------------------------------------------------------------------
+
+  private enterSjjxBridgeFlow(cookies: Map<string, string>): void {
+    const wc: webview.WebviewController | undefined = this.webController;
+    if (wc === undefined || this.navigatingToSjjx) {
+      this.enterEelabTokenFlow(cookies);
+      return;
+    }
+    this.navigatingToSjjx = true;
+    this.collectedEasCookies = cookies;
+    this.sjjxTimeoutTimer = setTimeout(() => {
+      this.sjjxTimeoutTimer = -1;
+      if (this.navigatingToSjjx && !this.finished) {
+        this.navigatingToSjjx = false;
+        hilog.warn(DOMAIN, TAG, 'sjjx bridge timeout; continuing without experiment session');
+        this.enterEelabTokenFlow(this.collectedEasCookies);
+      }
+    }, SJJX_NAV_TIMEOUT_MS);
+    try {
+      wc.loadUrl(EasCampusUrls.JWTS_BASE + '/loginsysj/loginSygl');
+      hilog.info(DOMAIN, TAG, 'sjjx bridge navigation started');
+    } catch (e) {
+      this.navigatingToSjjx = false;
+      if (this.sjjxTimeoutTimer >= 0) {
+        clearTimeout(this.sjjxTimeoutTimer);
+        this.sjjxTimeoutTimer = -1;
+      }
+      this.enterEelabTokenFlow(cookies);
+    }
+  }
+
+  private async advanceSjjxIfReady(): Promise<void> {
+    const sjjxHost: string = hostOf(EasCampusUrls.SJJX_BASE);
+    if (hostOf(this.lastUrl) !== sjjxHost) {
+      return;
+    }
+    if (this.sjjxFetching || this.sjjxFetchTimer >= 0) {
+      return;
+    }
+    this.sjjxFetchTimer = setTimeout(() => {
+      this.sjjxFetchTimer = -1;
+      if (!this.finished && this.navigatingToSjjx) {
+        this.fetchSjjxCookies();
+      }
+    }, 1000);
+  }
+
+  private async fetchSjjxCookies(): Promise<void> {
+    if (this.finished || this.sjjxFetching) {
+      return;
+    }
+    this.sjjxFetching = true;
+    try {
+      const raw: string = await EasWebLoginController.tryFetchCookie(EasCampusUrls.SJJX_BASE);
+      const cookies: Map<string, string> = parseCookiesHeader(raw);
+      hilog.info(DOMAIN, TAG, 'sjjx cookie probe keys=%{public}s', EasWebLoginController.cookieKeys(cookies));
+      if (EasSession.isNotBlank(EasSession.cookieValue(cookies, 'JSESSIONID'))) {
+        this.pendingSjjxCookies = cookies;
+        hilog.info(DOMAIN, TAG, 'sjjx session captured');
+      } else {
+        hilog.warn(DOMAIN, TAG, 'sjjx session missing JSESSIONID');
+      }
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'sjjx cookie probe failed');
+    }
+    if (this.finished) {
+      return;
+    }
+    this.navigatingToSjjx = false;
+    if (this.sjjxTimeoutTimer >= 0) {
+      clearTimeout(this.sjjxTimeoutTimer);
+      this.sjjxTimeoutTimer = -1;
+    }
+    this.enterEelabTokenFlow(this.collectedEasCookies);
   }
 
   // ------------------------------------------------------------------
