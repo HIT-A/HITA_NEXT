@@ -31,21 +31,43 @@ function view(events, at = now, exists = true) {
   const data = NextClassModel.snapshot(events, exists, now);
   return NextClassModel.view(data.scheduleJson, data.hasTimetable, data.dataState, at);
 }
-test('selects the earliest future class and excludes exams, started and invalid events', () => {
+test('prefers an ongoing class over the next class and excludes exams and invalid events', () => {
   const result = view([course('late', 90), course('exam', 1, { type: 'EXAM' }),
-    course('started', 0), course('negative', 2, { to: now }), course('bad', NaN),
+    course('started', -10, { name: '当前课程', teacher: '李老师', place: '博学楼 101' }),
+    course('negative', 2, { to: now }), course('bad', NaN),
     course('next', 15, { name: '大学物理', teacher: '陈老师', place: '格物楼 202' })]);
-  assert.equal(result.title, '大学物理');
-  assert.equal(result.countdown, '15');
-  assert.equal(result.place, '格物楼 202');
-  assert.equal(result.teacher, '陈老师');
+  assert.equal(result.title, '当前课程');
+  assert.equal(result.isOngoing, true);
+  assert.equal(result.countdown, '35');
+  assert.equal(result.countdownUnit, '分钟后下课');
+  assert.equal(result.progressPercent, 22);
+  assert.equal(result.place, '博学楼 101');
+  assert.equal(result.teacher, '李老师');
 });
-test('cached payload counts down and advances without application or provider execution', () => {
-  const events = [course('one', 1), course('two', 10, { name: '英语' })];
-  assert.equal(view(events).countdown, '1');
-  assert.equal(view(events, now + minute).title, '英语');
-  assert.equal(view(events, now + minute).countdown, '9');
-  assert.equal(view(events, now + 10 * minute).hasCourse, false);
+test('cached payload shows ongoing course progress and advances when the class ends', () => {
+  const events = [course('one', -30, { place: '正心楼 101', teacher: '王老师' }),
+    course('two', 30, { name: '英语', place: '格物楼 202', teacher: '陈老师' })];
+  const current = view(events);
+  assert.equal(current.title, '高等数学');
+  assert.equal(current.isOngoing, true);
+  assert.equal(current.countdown, '15');
+  assert.equal(current.countdownUnit, '分钟后下课');
+  assert.equal(current.progressPercent, 66);
+  assert.equal(current.place, '正心楼 101');
+  assert.equal(current.teacher, '王老师');
+  const next = view(events, now + 15 * minute);
+  assert.equal(next.title, '英语');
+  assert.equal(next.isOngoing, false);
+  assert.equal(next.countdown, '15');
+  assert.equal(next.countdownUnit, '分钟后上课');
+  assert.equal(next.place, '格物楼 202');
+  assert.equal(next.teacher, '陈老师');
+  const started = view(events, now + 30 * minute);
+  assert.equal(started.title, '英语');
+  assert.equal(started.isOngoing, true);
+  assert.equal(started.countdown, '45');
+  assert.equal(started.countdownUnit, '分钟后下课');
+  assert.equal(started.progressPercent, 0);
 });
 test('rounds up partial minutes and displays hours, days and cross-day start times', () => {
   assert.equal(view([course('one', 0.1)]).countdown, '1');
@@ -150,6 +172,19 @@ test('registers both sizes, dynamic clock and periodic provider refresh', () => 
   assert.ok(ui.includes('TextClock()'));
   assert.match(ui, /onDateChange/);
   assert.ok(ui.includes('@Entry(storage)'));
+  assert.match(ui, /@State place: string/);
+  assert.match(ui, /@State teacher: string/);
+  assert.match(ui, /@State progressPercent: number/);
+  assert.match(ui, /this\.place = nextView\.place/);
+  assert.match(ui, /this\.teacher = nextView\.teacher/);
+  assert.match(ui, /this\.progressPercent = nextView\.progressPercent/);
+  assert.match(ui, /Text\(this\.progressPercent\.toString\(\) \+ '%'\)/);
+  assert.match(ui, /Progress\(\{ value: this\.progressPercent, total: 100, type: ProgressType\.Ring \}\)/);
+  assert.match(ui, /\.width\(compact \? 44 : 52\)/);
+  assert.match(ui, /\.height\(compact \? 44 : 52\)/);
+  assert.match(ui, /\.color\('#2365B2'\)/);
+  assert.match(ui, /Stack\(\{ alignContent: Alignment\.Center \}\)/);
+  assert.doesNotMatch(ui, /this\.view\.(place|teacher)/);
   assert.doesNotMatch(ui, /setInterval|setTimeout/);
 });
 

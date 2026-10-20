@@ -10,14 +10,36 @@ struct NextClassCard {
   @LocalStorageProp('hasTimetable') @Watch('refreshDisplay') hasTimetable: boolean = false;
   @LocalStorageProp('dataState') @Watch('refreshDisplay') dataState: string = 'loading';
   @LocalStorageProp('formDimension') dimension: number = 2;
+  // Images the app baked at each card's aspect ratio; empty keeps the plain white surface.
+  @LocalStorageProp('bgCompact') bgCompact: string = '';
+  @LocalStorageProp('bgWide') bgWide: string = '';
   @State view: NextClassView = new NextClassView();
+  @State place: string = '地点待定';
+  @State teacher: string = '教师待定';
+  @State countdown: string = '—';
+  @State countdownUnit: string = '打开应用添加课表';
+  @State isOngoing: boolean = false;
+  @State progressPercent: number = 0;
 
   aboutToAppear(): void {
     this.refreshDisplay();
   }
 
   private refreshDisplay(): void {
-    this.view = NextClassModel.view(this.scheduleJson, this.hasTimetable, this.dataState, Date.now());
+    const nextView: NextClassView = NextClassModel.view(
+      this.scheduleJson, this.hasTimetable, this.dataState, Date.now());
+    this.place = nextView.place;
+    this.teacher = nextView.teacher;
+    this.countdown = nextView.countdown;
+    this.countdownUnit = nextView.countdownUnit;
+    this.isOngoing = nextView.isOngoing;
+    this.progressPercent = nextView.progressPercent;
+    this.view = nextView;
+  }
+
+  private backgroundSource(): string {
+    const name: string = this.dimension === 3 ? this.bgWide : this.bgCompact;
+    return name.length > 0 ? 'memory://' + name : '';
   }
 
   private openApp(): void {
@@ -50,29 +72,56 @@ struct NextClassCard {
 
   @Builder
   countdownHero(compact: boolean) {
-    // One transparent text run can shrink as a whole; units cannot spill into the details.
-    Column({ space: 2 }) {
-      Text(this.view.countdown)
-        .fontSize(compact ? 24 : 32)
-        .minFontSize(compact ? 16 : 18)
-        .maxFontSize(compact ? 24 : 32)
+    Row({ space: compact ? 8 : 12 }) {
+      // Keep the countdown on the left and reserve the right side for the fixed-size ring.
+      Column({ space: 2 }) {
+        Text(this.countdown)
+          .fontSize(compact ? 24 : 32)
+          .minFontSize(compact ? 16 : 18)
+          .maxFontSize(compact ? 24 : 32)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#182230')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+          .height(compact ? 28 : 38)
+        Text(this.countdownUnit)
+          .fontSize(10)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#515A67')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+          .height(14)
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      if (this.isOngoing) {
+        this.progressRing(compact)
+      }
+    }
+    .alignItems(VerticalAlign.Center)
+    .width('100%')
+  }
+
+  @Builder
+  progressRing(compact: boolean) {
+    Stack({ alignContent: Alignment.Center }) {
+      Progress({ value: this.progressPercent, total: 100, type: ProgressType.Ring })
+        .width(compact ? 44 : 52)
+        .height(compact ? 44 : 52)
+        .color('#2365B2')
+      Text(this.progressPercent.toString() + '%')
+        .fontSize(compact ? 10 : 12)
         .fontWeight(FontWeight.Bold)
         .fontColor('#182230')
         .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .width('100%')
-        .height(compact ? 28 : 38)
-      Text(this.view.countdownUnit)
-        .fontSize(10)
-        .fontWeight(FontWeight.Medium)
-        .fontColor('#515A67')
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .width('100%')
-        .height(14)
+        .textAlign(TextAlign.Center)
+        .width(compact ? 44 : 52)
     }
-    .alignItems(HorizontalAlign.Start)
-    .width('100%')
+    .width(compact ? 44 : 52)
+    .height(compact ? 44 : 52)
+    .flexShrink(0)
   }
 
   @Builder
@@ -120,19 +169,19 @@ struct NextClassCard {
         if (compact) {
           Row({ space: 6 }) {
             Column() {
-              this.metadataRow($r('sys.symbol.pin'), this.view.place, true)
+              this.metadataRow($r('sys.symbol.pin'), this.place, true)
             }
             .layoutWeight(1)
             Column() {
-              this.metadataRow($r('sys.symbol.person_crop_circle_fill'), this.view.teacher, true)
+              this.metadataRow($r('sys.symbol.person_crop_circle_fill'), this.teacher, true)
             }
             .layoutWeight(1)
           }
           .width('100%')
           .alignItems(VerticalAlign.Center)
         } else {
-          this.metadataRow($r('sys.symbol.pin'), this.view.place, false)
-          this.metadataRow($r('sys.symbol.person_crop_circle_fill'), this.view.teacher, false)
+          this.metadataRow($r('sys.symbol.pin'), this.place, false)
+          this.metadataRow($r('sys.symbol.person_crop_circle_fill'), this.teacher, false)
         }
         Row({ space: compact ? 4 : 6 }) {
           SymbolGlyph($r('sys.symbol.clock'))
@@ -201,6 +250,10 @@ struct NextClassCard {
     .width('100%')
     .height('100%')
     .backgroundColor('#FFFFFFFF')
+    // The framing is already baked to this card's ratio: Cover only absorbs launcher rounding.
+    .backgroundImage(this.backgroundSource())
+    .backgroundImageSize(ImageSize.Cover)
+    .backgroundImagePosition(Alignment.Center)
     // A single opaque surface and clip share the same outline. No inset backplate.
     .borderRadius(NEXT_CLASS_CARD_RADIUS)
     .clip(true)

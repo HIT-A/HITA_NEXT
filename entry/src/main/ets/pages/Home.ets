@@ -50,6 +50,7 @@ import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSele
 import { hasEveningCourse, eveningHintVisible } from '../feature/timetable/data/EveningCourseHint';
 import { TimetableVideoBackground } from '../feature/timetable/views/TimetableVideoBackground';
 import { TimetableBackgroundStore } from '../feature/timetable/data/TimetableBackgroundStore';
+import { WidgetBackgroundStore } from '../feature/widget/WidgetBackgroundStore';
 import { TimetableWallpaperSampler } from '../feature/timetable/data/TimetableWallpaperSampler';
 import { TimetableDisplayOptions } from '../feature/timetable/data/TimetableDisplayOptions';
 import { TimetableDisplayStore } from '../feature/timetable/data/TimetableDisplayStore';
@@ -139,6 +140,8 @@ struct Home {
   @StorageProp('hita_appearance_dark') @Watch('onAppearanceChanged') darkMode: boolean = false;
   @State appearanceBusy: boolean = false;
   @State appearanceExpanded: boolean = false;
+  @State widgetMenuExpanded: boolean = false;
+  @State widgetBackgroundSet: boolean = false;
   @State todayItems: EasEventItem[] = [];
   @State timelineText: string = '暂无今日日程';
   @State @Watch('updateTimetableSystemBars') currentTab: number = 0;
@@ -292,6 +295,8 @@ struct Home {
     this.courseDeleteEffects.resume();
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
     this.startClock();
+    this.widgetBackgroundSet = WidgetBackgroundStore.hasBackground(
+      this.getUIContext().getHostContext() as common.Context);
     const preserveWeek: boolean = this.returningFromCourseEditor;
     this.returningFromCourseEditor = false;
     await this.refreshSummaries(preserveWeek);
@@ -2677,22 +2682,7 @@ struct Home {
 
           this.moreSectionTitle('课表工具');
           Column() {
-            this.moreNavigationRow($r('sys.symbol.clock'), '桌面服务卡片',
-              '下一节课倒计时 · 地点 · 教师', () => {
-                try {
-                  formProvider.openFormManager({
-                    bundleName: 'cn.berry.hitanext',
-                    abilityName: 'NextClassFormAbility',
-                    parameters: {
-                      'ohos.extra.param.key.form_dimension': 2,
-                      'ohos.extra.param.key.form_name': 'NextClassCard',
-                      'ohos.extra.param.key.module_name': 'entry'
-                    }
-                  });
-                } catch (_) {
-                  this.getUIContext().getPromptAction().showToast({ message: '请长按桌面 HITA 图标，选择服务卡片' });
-                }
-              });
+            this.desktopWidgetSettings();
             this.moreNavigationRow($r('sys.symbol.repeat_1'), '导入课表',
               this.importing ? '正在从教务系统同步' : '从教务系统同步当前学期', () => {
                 this.getUIContext().getRouter().pushUrl({ url: 'pages/ImportTimetablePage' });
@@ -2810,6 +2800,121 @@ struct Home {
     }
     .width('100%')
     .height('100%');
+  }
+
+  private openDesktopWidgetManager(): void {
+    try {
+      formProvider.openFormManager({
+        bundleName: 'cn.berry.hitanext',
+        abilityName: 'NextClassFormAbility',
+        parameters: {
+          'ohos.extra.param.key.form_dimension': 2,
+          'ohos.extra.param.key.form_name': 'NextClassCard',
+          'ohos.extra.param.key.module_name': 'entry'
+        }
+      });
+    } catch (_) {
+      this.getUIContext().getPromptAction().showToast({ message: '请长按桌面 HITA 图标，选择服务卡片' });
+    }
+  }
+
+  /** 与课表详情中点击课程展开的二级菜单相同：分隔线下逐行列出单一选项。 */
+  @Builder
+  desktopWidgetSettings() {
+    Column() {
+      Row() {
+        Stack() {
+          SymbolGlyph($r('sys.symbol.clock'))
+            .fontSize(22)
+            .fontColor([COLOR_PRIMARY]);
+        }
+        .width(40)
+        .height(40)
+        .borderRadius(20)
+        .alignContent(Alignment.Center)
+        .backgroundColor(COLOR_NAV_ACTIVE);
+        Column() {
+          Text('桌面服务卡片')
+            .fontSize(14)
+            .fontColor(COLOR_TEXT_PRIMARY)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis });
+          Text('下一节课倒计时 · 地点 · 教师')
+            .fontSize(12)
+            .fontColor(COLOR_TEXT_SECONDARY)
+            .margin({ top: 2 })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis });
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: 12 });
+        Text('›')
+          .fontSize(23)
+          .fontColor(COLOR_TEXT_SECONDARY)
+          .rotate({ angle: this.widgetMenuExpanded ? 90 : 0 });
+      }
+      .width('100%')
+      .height(56)
+      .padding({ left: 16, right: 16 })
+      .alignItems(VerticalAlign.Center)
+      .accessibilityDescription(this.widgetMenuExpanded ? '已展开' : '已收起')
+      .onClick(() => {
+        this.getUIContext().animateTo({ duration: 300, curve: Curve.EaseInOut }, () => {
+          this.widgetMenuExpanded = !this.widgetMenuExpanded;
+        });
+      });
+      if (this.widgetMenuExpanded) {
+        Column() {
+          Divider()
+            .color($r('app.color.hita_divider_eef1f6'))
+            .margin({ left: 16, right: 16 });
+          Row() {
+            Text('设置桌面服务卡片')
+              .fontSize(13)
+              .fontColor(COLOR_TEXT_SECONDARY)
+              .layoutWeight(1)
+              .maxLines(1);
+            Text('›')
+              .fontSize(20)
+              .fontColor($r('app.color.hita_text_hint_b2b8c4'))
+              .margin({ left: 6 });
+          }
+          .width('100%')
+          .height(44)
+          .padding({ left: 16, right: 16 })
+          .onClick(() => {
+            this.openDesktopWidgetManager();
+          });
+          Row() {
+            Text('自定义背景')
+              .fontSize(13)
+              .fontColor(COLOR_TEXT_SECONDARY)
+              .layoutWeight(1)
+              .maxLines(1);
+            Text(this.widgetBackgroundSet ? '已设置' : '默认')
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(COLOR_PRIMARY);
+            Text('›')
+              .fontSize(20)
+              .fontColor($r('app.color.hita_text_hint_b2b8c4'))
+              .margin({ left: 6 });
+          }
+          .width('100%')
+          .height(44)
+          .padding({ left: 16, right: 16 })
+          .onClick(() => {
+            this.getUIContext().getRouter().pushUrl({ url: 'pages/WidgetBackgroundPage' });
+          });
+        }
+        .width('100%')
+        .transition(TransitionEffect.OPACITY);
+      }
+    }
+    .width('100%')
+    .clip(true)
+    .alignItems(HorizontalAlign.Start);
   }
 
   @Builder

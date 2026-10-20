@@ -18,12 +18,14 @@ export class NextClassSnapshot {
 
 export class NextClassView {
   hasCourse: boolean = false;
+  isOngoing: boolean = false;
   title: string = '还没有课表';
   countdown: string = '—';
   countdownUnit: string = '打开应用添加课表';
   startLabel: string = '下一节课';
   place: string = '地点待定';
   teacher: string = '教师待定';
+  progressPercent: number = 0;
 }
 
 export class NextClassModel {
@@ -34,7 +36,7 @@ export class NextClassModel {
     const courses: WidgetCourse[] = [];
     const ordered = events.filter((event: EasEventItem): boolean => hasTimetable &&
       event.type === EasEventType.CLASS && Number.isFinite(event.from) &&
-      Number.isFinite(event.to) && event.from > now && event.to > event.from)
+      Number.isFinite(event.to) && event.to > now && event.to > event.from)
       .sort((a: EasEventItem, b: EasEventItem): number => a.from - b.from || a.id.localeCompare(b.id));
     // Bounded payload. The extension refills it every 30 minutes, independently of the app.
     for (const event of ordered.slice(0, 64)) {
@@ -75,6 +77,10 @@ export class NextClassModel {
       return view;
     }
     const today = new Date(now);
+    const current = courses.filter((course: WidgetCourse): boolean =>
+      course !== null && Number.isFinite(course.from) && Number.isFinite(course.to) &&
+      course.from <= now && course.to > now && course.to > course.from)
+      .sort((a: WidgetCourse, b: WidgetCourse): number => b.from - a.from)[0];
     const next = courses.filter((course: WidgetCourse): boolean => {
       if (course === null || !Number.isFinite(course.from) || !Number.isFinite(course.to) ||
         course.from <= now || course.to <= course.from) return false;
@@ -83,15 +89,26 @@ export class NextClassModel {
         start.getMonth() === today.getMonth() && start.getDate() === today.getDate();
     })
       .sort((a: WidgetCourse, b: WidgetCourse): number => a.from - b.from)[0];
-    if (next === undefined) {
+    const active = current ?? next;
+    if (active === undefined) {
       view.title = '暂无待上课程';
       view.countdownUnit = '打开应用查看课表';
       return view;
     }
     view.hasCourse = true;
-    view.title = NextClassModel.label(next.name, '未命名课程');
-    view.place = NextClassModel.label(next.place, '地点待定');
-    view.teacher = NextClassModel.label(next.teacher, '教师待定');
+    view.isOngoing = current !== undefined;
+    view.title = NextClassModel.label(active.name, '未命名课程');
+    view.place = NextClassModel.label(active.place, '地点待定');
+    view.teacher = NextClassModel.label(active.teacher, '教师待定');
+    view.startLabel = NextClassModel.startLabel(active.from, now);
+    if (current !== undefined) {
+      const duration = current.to - current.from;
+      view.countdown = Math.max(1, Math.ceil((current.to - now) / 60000)).toString();
+      view.countdownUnit = '分钟后下课';
+      view.progressPercent = Math.max(0, Math.min(100,
+        Math.floor((now - current.from) / duration * 100)));
+      return view;
+    }
     const minutes = Math.ceil((next.from - now) / 60000);
     if (minutes < 60) {
       view.countdown = minutes.toString();
@@ -105,7 +122,6 @@ export class NextClassModel {
         (Math.floor(minutes % 1440 / 60) > 0 ? Math.floor(minutes % 1440 / 60).toString() + '小时' : '');
       view.countdownUnit = '后上课';
     }
-    view.startLabel = NextClassModel.startLabel(next.from, now);
     return view;
   }
 
