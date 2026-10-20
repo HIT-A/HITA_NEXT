@@ -83,11 +83,13 @@ export struct EventEditorForm {
   private timetableId: string = '';
   private subjectId: string = '';
   private editorActive: boolean = false;
+  private leavingEditor: boolean = false;
   private timePicker: CustomDialogController | undefined = undefined;
   private coursePicker: CustomDialogController | undefined = undefined;
 
   async aboutToAppear(): Promise<void> {
     this.editorActive = true;
+    this.leavingEditor = false;
     try {
       await this.loadEvent();
     } catch (_) {
@@ -104,6 +106,18 @@ export struct EventEditorForm {
     this.timePicker = undefined;
     this.coursePicker?.close();
     this.coursePicker = undefined;
+  }
+
+  private leaveEditor(): void {
+    // Ignore repeated close requests while the page or sheet is leaving.
+    if (!this.editorActive || this.leavingEditor) return;
+    this.leavingEditor = true;
+    this.choosingWeeks = false;
+    if (this.sheetMode) {
+      this.onCancel();
+    } else {
+      this.getUIContext().getRouter().back();
+    }
   }
 
   private async loadEvent(): Promise<void> {
@@ -643,16 +657,8 @@ export struct EventEditorForm {
     return this.typeIdx === 2 ? '考试将添加到当前课表' : '将课程添加到当前课表';
   }
 
-  private teachingWeekHint(): string {
-    const timetable = this.courseTimetable;
-    if (timetable === undefined) return '教学周从课表开学日期计算，可增加后续周数';
-    const start = new Date(timetable.startTime);
-    return '教学周从 ' + start.getFullYear().toString() + '-' + EventEditorForm.pad2(start.getMonth() + 1) +
-      '-' + EventEditorForm.pad2(start.getDate()) + ' 起算，当前课表共 ' +
-      CourseDateSelection.weekCount(timetable).toString() + ' 周；需要时可增加周数';
-  }
-
   private courseSaveSummary(): string {
+    if (this.name.trim().length === 0) return '';
     const invalid: string = this.validationHint();
     if (invalid.length > 0) return invalid;
     if (this.editId.length > 0) return '仅修改当前课次';
@@ -669,7 +675,7 @@ export struct EventEditorForm {
         ImmersiveHeader({ barHeight: 58 }) {
           Row() {
             HeaderBackButton({
-              onBack: () => this.onCancel()
+              onBack: () => this.leaveEditor()
             })
               .margin({ right: 12 })
             Column() {
@@ -826,7 +832,8 @@ export struct EventEditorForm {
       .enabled(!this.loading && !this.loadFailed && !this.saving && !this.saved)
 
       Column() {
-        if (this.typeIdx === 1 && !this.loading && this.hint.length === 0) {
+        if (this.typeIdx === 1 && !this.loading && this.hint.length === 0 &&
+          this.courseSaveSummary().length > 0) {
           Text(this.courseSaveSummary())
             .fontSize(12)
             .fontColor($r('app.color.hita_text_secondary_72809a'))
@@ -883,9 +890,6 @@ export struct EventEditorForm {
         Text('课程信息')
           .fontSize(15).fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.hita_text_202b45'))
-        Blank()
-        Text('名称必填')
-          .fontSize(12).fontColor($r('app.color.hita_text_secondary_72809a'))
       }.width('100%')
       if (this.courseTimetable !== undefined) {
         Text('添加至 ' + this.courseTimetable.name)
@@ -916,15 +920,18 @@ export struct EventEditorForm {
           }.width('100%')
         }
       }
-      TextInput({ placeholder: '课程名称，如高等数学', text: this.name })
-        .enabled(this.selectedSubjectId.length === 0)
-        .fontSize(17).fontWeight(FontWeight.Medium).height(48)
-        .padding({ left: 12, right: 12 }).borderRadius(12)
-        .backgroundColor($r('app.color.hita_surface_soft'))
-        .onChange((value: string) => { this.name = value; this.hint = ''; })
+      Row({ space: 12 }) {
+        Text('名称').fontSize(14).fontColor($r('app.color.hita_text_secondary_72809a'))
+        TextInput({ text: this.name })
+          .enabled(this.selectedSubjectId.length === 0)
+          .fontSize(15).height(44).layoutWeight(1)
+          .padding({ left: 12, right: 12 }).borderRadius(12)
+          .backgroundColor($r('app.color.hita_surface_soft'))
+          .onChange((value: string) => { this.name = value; this.hint = ''; })
+      }.width('100%')
       Row({ space: 12 }) {
         Text('教室').fontSize(14).fontColor($r('app.color.hita_text_secondary_72809a'))
-        TextInput({ placeholder: '选填，如 T3101', text: this.place })
+        TextInput({ text: this.place })
           .fontSize(15).height(44).layoutWeight(1)
           .padding({ left: 12, right: 12 }).borderRadius(12)
           .backgroundColor($r('app.color.hita_surface_soft'))
@@ -932,7 +939,7 @@ export struct EventEditorForm {
       }.width('100%')
       Row({ space: 12 }) {
         Text('教师').fontSize(14).fontColor($r('app.color.hita_text_secondary_72809a'))
-        TextInput({ placeholder: '选填，授课教师', text: this.teacher })
+        TextInput({ text: this.teacher })
           .fontSize(15).height(44).layoutWeight(1)
           .padding({ left: 12, right: 12 }).borderRadius(12)
           .backgroundColor($r('app.color.hita_surface_soft'))
@@ -988,22 +995,12 @@ export struct EventEditorForm {
         Text('请先设置课表的起止日期')
           .fontColor($r('app.color.hita_text_secondary_72809a'))
       } else {
-        Text('星期（可多选）').fontSize(14).fontWeight(FontWeight.Medium)
+        Text('星期').fontSize(14).fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.hita_text_202b45'))
-        Row({ space: 4 }) {
-          ForEach(['一', '二', '三', '四', '五', '六', '日'], (label: string, index: number) => {
-            CourseControlHost({
-              barHeight: 38, materialEnabled: this.courseMaterialsEnabled(), itemWeight: 1,
-              onPressingChanged: (pressing: boolean) => { this.activeCourseControl = pressing; }
-            }) {
-              this.weekdayButton(label, index);
-            }
-          }, (label: string) => label)
-        }.width('100%').clip(false)
-        Text('教学周（可多选）').fontSize(14).fontWeight(FontWeight.Medium)
+        CourseWeekPicker({ weeks: [1, 2, 3, 4, 5, 6, 7], chosen: $selectedWeekdays, weekdayMode: true,
+          onChoosingChanged: (choosing: boolean) => { this.choosingWeeks = choosing; } })
+        Text('教学周').fontSize(14).fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.hita_text_202b45'))
-        Text(this.teachingWeekHint()).fontSize(12)
-          .fontColor($r('app.color.hita_text_secondary_72809a'))
         Row({ space: 6 }) {
           ForEach(['全部', '单周', '双周', '清空'], (label: string, index: number) => {
             CourseControlHost({
@@ -1037,30 +1034,6 @@ export struct EventEditorForm {
     .backgroundColor(this.courseCardColor())
     .borderRadius(16)
     .clip(false)
-  }
-
-  @Builder
-  weekdayButton(label: string, index: number) {
-    Button(label)
-      .width('100%')
-      .height(38)
-      .padding(0)
-      .borderRadius(10)
-      .fontSize(14)
-      .backgroundColor(this.selectedWeekdays.includes(index + 1) ? $r('app.color.hita_primary_fill') :
-        $r('app.color.hita_surface_soft'))
-      .fontColor(this.selectedWeekdays.includes(index + 1) ?
-        (this.courseMaterialsEnabled() ? $r('app.color.hita_primary_3390ec') : '#FFFFFF') :
-        $r('app.color.hita_text_202b45'))
-      .attributeModifier(new CompatibleMaterialModifier($r('app.color.hita_surface_soft'),
-        this.selectedWeekdays.includes(index + 1), this.courseMaterialsEnabled(),
-        $r('app.color.hita_immersive_segment_selected'), false))
-      .accessibilityText('星期' + label)
-      .accessibilitySelected(this.selectedWeekdays.includes(index + 1))
-      .onClick(() => {
-        this.selectedWeekdays = CourseDateSelection.toggle(this.selectedWeekdays, index + 1,
-          !this.selectedWeekdays.includes(index + 1));
-      })
   }
 
   @Builder
@@ -1175,8 +1148,8 @@ export struct EventEditorForm {
       }
       .width('100%')
       .margin({ top: 8 })
-      if (this.usesPeriods()) {
-        Text(this.selectedTime()[0] < 0 ? '按当前课表作息选择上课节次' : this.startLabel() + '–' + this.endLabel())
+      if (this.usesPeriods() && this.selectedTime()[0] >= 0) {
+        Text(this.startLabel() + '–' + this.endLabel())
           .fontSize(12).fontColor($r('app.color.hita_text_secondary_72809a')).margin({ top: 8 })
       }
     }

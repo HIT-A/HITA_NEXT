@@ -11,7 +11,7 @@ test('timetable photo picker copies a gallery image and covers the page without 
   assert.match(store, /picker\.PhotoViewPicker/);
   assert.match(store, /PhotoViewMIMETypes\.IMAGE_TYPE/);
   assert.match(store, /maxSelectNumber = 1/);
-  assert.match(store, /copyFileSync/);
+  assert.match(store, /await fileIo\.copyFile/);
   assert.match(store, /unlinkSync/);
   assert.match(store, /timetable-background\.jpg/);
 
@@ -22,7 +22,7 @@ test('timetable photo picker copies a gallery image and covers the page without 
   assert.doesNotMatch(tab, /sys\.symbol\.camera|Text\('A'\)/);
   assert.match(tab, /this\.canOpenSheet\(\)[\s\S]*this\.timetableDisplayOpen = true;[\s\S]*this\.activeSheetVisible = true;/);
   assert.match(tab, /this\.onTimetableBackgroundTap\(\)/);
-  assert.match(home, /text: '更换壁纸'/);
+  assert.match(home, /text: '选择图片作为壁纸'/);
   assert.match(home, /text: '移除壁纸'/);
   assert.match(home, /showActionMenu/);
   assert.match(home, /this\.removeTimetableBackground\(\)/);

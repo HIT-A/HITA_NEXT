@@ -1,20 +1,71 @@
-import { deviceInfo } from '@kit.BasicServicesKit';
 import { CourseDateSelection } from '../CourseDateSelection';
 import { COURSE_CONTROL_OVERFLOW, CourseControlHost } from './CourseControlHost';
 import { CompatibleMaterialModifier } from '../../../common/theme/CompatibleMaterialModifier';
 import { CompatibleSheetMaterial } from '../../../common/theme/CompatibleSheetMaterial';
 
-/** API 26 uses ArkUI's native swipe multi-selection; older devices retain tap selection. */
+/** Horizontal strokes paint selection; vertical gestures belong to the page Scroll. */
 @Component
 export struct CourseWeekPicker {
+  @Prop weekdayMode: boolean = false;
   @Prop weeks: number[] = [];
   @Link chosen: number[];
-  @State editMode: boolean = true;
   @State activeWeek: number = -1;
   onAddWeeks: () => void = () => {};
   onChoosingChanged: (choosing: boolean) => void = (_choosing: boolean) => {};
+  private gridWidth: number = 0;
+  private painting: boolean = false;
+  private paintSelected: boolean = false;
+  private lastIndex: number = -1;
 
   aboutToDisappear(): void {
+    this.finishStroke();
+  }
+
+  private indexAt(x: number, y: number): number {
+    const padding = CompatibleSheetMaterial.isEnabled() ? COURSE_CONTROL_OVERFLOW : 0;
+    const columns = this.weekdayMode ? 7 : 5;
+    const gap = this.weekdayMode ? 4 : 8;
+    const height = this.weekdayMode ? 38 : 44;
+    const width = this.gridWidth - padding * 2;
+    x -= padding;
+    y -= padding;
+    if (width <= 0 || x < 0 || x >= width || y < 0) return -1;
+    const stride = (width + gap) / columns;
+    const column = Math.floor(x / stride);
+    const row = Math.floor(y / (height + 8));
+    if (column >= columns || x - column * stride >= stride - gap || y % (height + 8) >= height) return -1;
+    const index = row * columns + column;
+    return index < this.weeks.length ? index : -1;
+  }
+
+  private beginStroke(x: number, y: number): void {
+    const index = this.indexAt(x, y);
+    if (index < 0) return;
+    this.painting = true;
+    this.paintSelected = !this.chosen.includes(this.weeks[index]);
+    this.lastIndex = index;
+    this.onChoosingChanged(true);
+    this.select(this.weeks[index], this.paintSelected);
+  }
+
+  private continueStroke(x: number, y: number): void {
+    if (!this.painting) return;
+    const index = this.indexAt(x, y);
+    if (index < 0) return;
+    const columns = this.weekdayMode ? 7 : 5;
+    // Fill skipped cells on a fast horizontal stroke, without filling unrelated rows.
+    const start = Math.floor(index / columns) === Math.floor(this.lastIndex / columns) ? this.lastIndex : index;
+    for (let i = Math.min(start, index); i <= Math.max(start, index); i++) {
+      this.select(this.weeks[i], this.paintSelected);
+    }
+    this.lastIndex = index;
+    this.activeWeek = this.weeks[index];
+  }
+
+  private finishStroke(): void {
+    this.painting = false;
+    this.lastIndex = -1;
+    this.activeWeek = -1;
     this.onChoosingChanged(false);
   }
 
@@ -25,18 +76,17 @@ export struct CourseWeekPicker {
   @Builder
   cell(week: number) {
     CourseControlHost({
-      barHeight: 44,
+      barHeight: this.weekdayMode ? 38 : 44,
       onPressingChanged: (pressing: boolean) => {
         if (pressing) this.activeWeek = week;
         else if (this.activeWeek === week) this.activeWeek = -1;
-        this.onChoosingChanged(pressing);
       }
     }) {
-      Text(week.toString())
-        .fontSize(16)
+      Text(this.weekdayMode ? ['一', '二', '三', '四', '五', '六', '日'][week - 1] : week.toString())
+        .fontSize(this.weekdayMode ? 14 : 16)
         .fontWeight(FontWeight.Medium)
         .width('100%')
-        .height(44)
+        .height(this.weekdayMode ? 38 : 44)
         .textAlign(TextAlign.Center)
         .borderRadius(12)
         .backgroundColor(this.chosen.includes(week) ? $r('app.color.hita_primary_fill') :
@@ -48,7 +98,8 @@ export struct CourseWeekPicker {
           $r('app.color.hita_primary_fill') : $r('app.color.hita_surface_soft'),
           this.chosen.includes(week), CompatibleSheetMaterial.isEnabled(),
           $r('app.color.hita_immersive_segment_selected'), false))
-        .accessibilityText('第' + week.toString() + '周')
+        .accessibilityText(this.weekdayMode ? '星期' + ['一', '二', '三', '四', '五', '六', '日'][week - 1] :
+          '第' + week.toString() + '周')
         .accessibilitySelected(this.chosen.includes(week))
     }
   }
@@ -60,7 +111,6 @@ export struct CourseWeekPicker {
       onPressingChanged: (pressing: boolean) => {
         if (pressing) this.activeWeek = 0;
         else if (this.activeWeek === 0) this.activeWeek = -1;
-        this.onChoosingChanged(pressing);
       }
     }) {
       Button('+', { type: ButtonType.Normal })
@@ -80,82 +130,49 @@ export struct CourseWeekPicker {
   }
 
   build() {
-    Column({ space: 8 }) {
-      if (deviceInfo.apiAvailable('26.0.0')) {
-        Row() {
-          Text(this.editMode ? '滑过周数可连续选择或取消' : '点击周数选择，或开启滑动选择')
-            .fontSize(12)
-            .fontColor($r('app.color.hita_text_secondary_72809a'))
-            .layoutWeight(1)
-          if (!this.editMode) {
-            Button('滑动选择')
-              .fontSize(12)
-              .height(32)
-              .onClick(() => { this.editMode = true; })
-          }
-        }
-        .width('100%')
-        Grid() {
-          ForEach(this.weeks, (week: number) => {
-            GridItem() { this.cell(week) }
-              .height(44)
-              .clip(false)
-              .zIndex(this.activeWeek === week ? 3 : 1)
-              .selectable(true)
-              .selected(this.chosen.includes(week))
-              .onSelect((selected: boolean) => this.select(week, selected))
-              .onClick(() => {
-                this.select(week, !this.chosen.includes(week));
-              })
-          }, (week: number) => week.toString())
-          GridItem() { this.addWeekCell() }
-            .height(44)
-            .clip(false)
-            .zIndex(this.activeWeek === 0 ? 3 : 1)
-            .selectable(false)
-        }
-        .columnsTemplate('1fr 1fr 1fr 1fr 1fr')
-        .rowsGap(8)
-        .columnsGap(8)
-        .width(CompatibleSheetMaterial.isEnabled() ?
-          'calc(100% + ' + (COURSE_CONTROL_OVERFLOW * 2).toString() + 'vp)' : '100%')
-        .padding(CompatibleSheetMaterial.isEnabled() ? COURSE_CONTROL_OVERFLOW : 0)
-        .margin(CompatibleSheetMaterial.isEnabled() ? -COURSE_CONTROL_OVERFLOW : 0)
-        .height(Math.min(304, Math.ceil((this.weeks.length + 1) / 5) * 52 - 8) +
-          (CompatibleSheetMaterial.isEnabled() ? COURSE_CONTROL_OVERFLOW * 2 : 0))
-        .clipContent(ContentClipMode.BOUNDARY)
-        .zIndex(1)
-        .editModeOptions({ useDefaultMultiSelectStyle: false, enableTwoFingerMultiSelect: true })
-        .enableEditMode(this.editMode)
-        .onEditModeChange((enabled: boolean) => { this.editMode = enabled; })
-        .onTouch((event: TouchEvent) => {
-          if (event.type === TouchType.Down) this.onChoosingChanged(this.editMode);
-          if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.onChoosingChanged(false);
-        })
-      } else {
-        Text('点击周数可多选，也可使用全部、单周、双周')
-          .fontSize(12)
-          .fontColor($r('app.color.hita_text_secondary_72809a'))
-        Grid() {
-          ForEach(this.weeks, (week: number) => {
-            GridItem() { this.cell(week) }
-              .height(44)
-              .onClick(() => this.select(week, !this.chosen.includes(week)))
-          }, (week: number) => week.toString())
-          GridItem() { this.addWeekCell() }
-            .height(44)
-            .clip(false)
-            .zIndex(this.activeWeek === 0 ? 3 : 1)
-            .selectable(false)
-        }
-        .columnsTemplate('1fr 1fr 1fr 1fr 1fr')
-        .rowsGap(8)
-        .columnsGap(8)
-        .height(Math.min(304, Math.ceil((this.weeks.length + 1) / 5) * 52 - 8))
+    Grid() {
+      ForEach(this.weeks, (week: number) => {
+        GridItem() { this.cell(week) }
+          .height(this.weekdayMode ? 38 : 44)
+          .clip(false)
+          .zIndex(this.activeWeek === week ? 3 : 1)
+          .onClick(() => this.select(week, !this.chosen.includes(week)))
+      }, (week: number) => week.toString())
+      if (!this.weekdayMode) {
+        GridItem() { this.addWeekCell() }
+          .height(44)
+          .clip(false)
+          .zIndex(this.activeWeek === 0 ? 3 : 1)
       }
     }
-    .width('100%')
-    .alignItems(HorizontalAlign.Start)
-    .clip(false)
+    .columnsTemplate(this.weekdayMode ? '1fr 1fr 1fr 1fr 1fr 1fr 1fr' : '1fr 1fr 1fr 1fr 1fr')
+    .rowsGap(8)
+    .columnsGap(this.weekdayMode ? 4 : 8)
+    .width(CompatibleSheetMaterial.isEnabled() ?
+      'calc(100% + ' + (COURSE_CONTROL_OVERFLOW * 2).toString() + 'vp)' : '100%')
+    .padding(CompatibleSheetMaterial.isEnabled() ? COURSE_CONTROL_OVERFLOW : 0)
+    .margin(CompatibleSheetMaterial.isEnabled() ? -COURSE_CONTROL_OVERFLOW : 0)
+    // One vertical scroller owns the whole form, including every teaching week.
+    .height((this.weekdayMode ? 38 : Math.ceil((this.weeks.length + 1) / 5) * 52 - 8) +
+      (CompatibleSheetMaterial.isEnabled() ? COURSE_CONTROL_OVERFLOW * 2 : 0))
+    .scrollBar(BarState.Off)
+    .enableScrollInteraction(false)
+    .clipContent(ContentClipMode.BOUNDARY)
+    .onAreaChange((_old: Area, area: Area) => { this.gridWidth = Number(area.width); })
+    .gesture(
+      PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 8 })
+        .onActionStart((event: GestureEvent) => {
+          if (event.fingerList.length === 0) return;
+          const finger = event.fingerList[0];
+          this.beginStroke(finger.localX - event.offsetX, finger.localY - event.offsetY);
+          this.continueStroke(finger.localX, finger.localY);
+        })
+        .onActionUpdate((event: GestureEvent) => {
+          if (event.fingerList.length === 0) return;
+          this.continueStroke(event.fingerList[0].localX, event.fingerList[0].localY);
+        })
+        .onActionEnd(() => this.finishStroke())
+        .onActionCancel(() => this.finishStroke())
+    )
   }
 }

@@ -223,7 +223,8 @@ test('floating course hosts keep their elevation during a drag and clear it on r
   assert.deepEqual(changes, [true, false, true, false, true, false]);
 });
 
-test('week elevation follows the touched cell without clearing another active cell or changing selected weeks', () => {
+for (const weekdayMode of [false, true]) {
+test(`${weekdayMode ? 'weekday' : 'week'} elevation follows the touched cell without clearing another active cell or changing selection`, () => {
   const file = read('feature/timetable/views/CourseWeekPicker.ets');
   const source = (file.slice(0, file.indexOf('\n  build()')) + '\n}\n')
     .replace('@Component', '').replace('export struct', 'export class')
@@ -233,12 +234,18 @@ test('week elevation follows the touched cell without clearing another active ce
   const mod = { exports: {} };
   new Function('require', 'module', 'exports', 'Text', '$r', 'FontWeight', 'TextAlign', compile(source))(
     name => {
-      if (name.endsWith('/CourseControlHost')) return { CourseControlHost: options => calls.push(options) };
+      if (name.endsWith('/CourseControlHost')) return { COURSE_CONTROL_OVERFLOW: 16, CourseControlHost: options => calls.push(options) };
+      if (name.endsWith('/CourseDateSelection')) {
+        const dates = { exports: {} };
+        new Function('require', 'module', 'exports', compile(read('feature/timetable/CourseDateSelection.ets')))(() => ({}), dates, dates.exports);
+        return dates.exports;
+      }
       if (name.endsWith('/CompatibleSheetMaterial')) return { CompatibleSheetMaterial: { isEnabled: () => true } };
       if (name.endsWith('/CompatibleMaterialModifier')) return { CompatibleMaterialModifier: class {} };
       return {};
     }, mod, mod.exports, () => node, name => name, { Medium: 'medium' }, { Center: 'center' });
   const picker = new mod.exports.CourseWeekPicker();
+  picker.weekdayMode = weekdayMode;
   picker.chosen = [1, 2, 3];
   picker.cell(1);
   picker.cell(2);
@@ -251,4 +258,35 @@ test('week elevation follows the touched cell without clearing another active ce
   calls[1].onPressingChanged(false);
   assert.equal(picker.activeWeek, -1);
   assert.deepEqual(picker.chosen, [1, 2, 3]);
+  assert.doesNotMatch(file, /Button\('滑动选择'\)/);
+  assert.doesNotMatch(file, /enableEditMode|onEditModeChange/);
+  assert.match(file, /direction: PanDirection.Horizontal/);
+  assert.match(file, /enableScrollInteraction\(false\)/);
+  const choosing = [];
+  picker.onChoosingChanged = value => choosing.push(value);
+  picker.gridWidth = 382;
+  picker.weeks = Array.from({length: weekdayMode ? 7 : 17}, (_, i) => i + 1);
+  picker.chosen = [];
+  const columns = weekdayMode ? 7 : 5;
+  const gap = weekdayMode ? 4 : 8;
+  const stride = (350 + gap) / columns;
+  const x = index => 16 + index * stride + 10;
+  picker.beginStroke(x(0), 30);
+  picker.continueStroke(x(3), 30);
+  picker.continueStroke(x(1), 30);
+  assert.deepEqual(picker.chosen, [1, 2, 3, 4], 'fast strokes fill gaps and retracing does not toggle');
+  picker.finishStroke();
+  picker.beginStroke(x(0), 30);
+  picker.continueStroke(x(3), 30);
+  picker.finishStroke();
+  assert.deepEqual(picker.chosen, [], 'starting on a selected cell erases the stroke');
+  picker.beginStroke(1, 1);
+  assert.equal(picker.painting, false, 'material overflow is not selectable');
+  picker.beginStroke(x(0), 30);
+  picker.aboutToDisappear();
+  assert.equal(picker.painting, false);
+  assert.equal(choosing.at(-1), false, 'removal releases page scrolling');
+
+
 });
+}

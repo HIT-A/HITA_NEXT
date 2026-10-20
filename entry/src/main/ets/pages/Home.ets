@@ -48,6 +48,7 @@ import { EasLoginPage } from '../feature/eas/webLogin/EasLoginPage';
 import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
 import { TimetableSelectionStore } from '../feature/timetable/data/TimetableSelectionStore';
 import { hasEveningCourse, eveningHintVisible } from '../feature/timetable/data/EveningCourseHint';
+import { TimetableVideoBackground } from '../feature/timetable/views/TimetableVideoBackground';
 import { TimetableBackgroundStore } from '../feature/timetable/data/TimetableBackgroundStore';
 import { TimetableWallpaperSampler } from '../feature/timetable/data/TimetableWallpaperSampler';
 import { TimetableDisplayOptions } from '../feature/timetable/data/TimetableDisplayOptions';
@@ -210,6 +211,10 @@ struct Home {
   @State moreHeaderMaskOpacity: number = 0;
   @State selectedNav: number = TAB_TODAY;
   @State timetableBgUri: string = '';
+  @State timetableVideoUri: string = '';
+  @State timetableVideoFailed: boolean = false;
+  @StorageProp('hita_app_foreground') appForeground: boolean = false;
+  private timetableBackgroundBusy: boolean = false;
   @State timetableTextColor: string = TimetableTheme.AUTO_TEXT;
   @State @Watch('updateTimetableSystemBars') private timetableBackdrop: TimetableBackdropColors = new TimetableBackdropColors(false);
   private timetableWallpaperPixels: TimetableBackdropPixels | undefined = undefined;
@@ -255,7 +260,9 @@ struct Home {
     await ClassReminderStore.getInstance().init(ctx);
     this.classReminderEnabled = await ClassReminderStore.getInstance().loadEnabled();
     this.reminderLeadMinutes = await ClassReminderStore.getInstance().loadLeadMinutes();
-    const bgPath: string = TimetableBackgroundStore.loadPath(ctx);
+    const background = TimetableBackgroundStore.load(ctx);
+    const bgPath: string = background.imagePath;
+    this.timetableVideoUri = background.videoPath ? 'file://' + background.videoPath : '';
     this.timetableBgUri = bgPath.length > 0 ? TimetableBackgroundStore.toDisplayUri(bgPath) : '';
     this.timetableTextColor = await TimetableSelectionStore.getInstance()
       .loadTextColor(TimetableTheme.AUTO_TEXT);
@@ -1118,44 +1125,50 @@ struct Home {
   }
 
   private onTimetableBackgroundTap(): void {
-    if (!this.hasTimetableBackground()) {
-      this.pickTimetableBackground();
-      return;
-    }
+    if (this.timetableBackgroundBusy) return;
     this.getUIContext().getPromptAction().showActionMenu({
       title: '时间表壁纸',
       buttons: [
-        { text: '更换壁纸', color: COLOR_PRIMARY },
+        { text: '选择图片作为壁纸', color: COLOR_PRIMARY },
+        { text: '选择视频作为动态壁纸', color: COLOR_PRIMARY },
         { text: '移除壁纸', color: $r('app.color.hita_error_e53935') }
       ]
     }).then((ret) => {
-      if (ret.index === 0) {
-        this.pickTimetableBackground();
-      } else if (ret.index === 1) {
+      if (ret.index === 0 || ret.index === 1) {
+        void this.pickTimetableBackground(ret.index === 1);
+      } else if (ret.index === 2) {
         this.removeTimetableBackground();
       }
-    }).catch(() => {
-    });
+    }).catch(() => {});
   }
 
-  private async pickTimetableBackground(): Promise<void> {
+  private async pickTimetableBackground(video: boolean = false): Promise<void> {
+    if (this.timetableBackgroundBusy) return;
+    this.timetableBackgroundBusy = true;
     const ctx: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
     try {
-      const path: string = await TimetableBackgroundStore.pickAndSave(ctx);
-      if (path.length === 0) {
-        return;
-      }
-      this.timetableBgUri = TimetableBackgroundStore.toDisplayUri(path);
+      const background = await TimetableBackgroundStore.pickAndSave(ctx, video);
+      if (background === undefined) return;
+      this.timetableVideoUri = '';
+      this.timetableVideoFailed = false;
+      this.timetableBgUri = TimetableBackgroundStore.toDisplayUri(background.imagePath);
       this.timetableFadeOpacity = 0;
-      await this.loadTimetableWallpaperColors(path);
-    } catch (e) {
-      this.getUIContext().getPromptAction().showToast({ message: '选择图片失败' });
+      await this.loadTimetableWallpaperColors(background.imagePath);
+      this.timetableVideoUri = background.videoPath ? 'file://' + background.videoPath : '';
+    } catch (_) {
+      this.getUIContext().getPromptAction().showToast({
+        message: video ? '视频导入失败，请检查可用空间或尝试设备支持的视频格式' : '选择图片失败'
+      });
+    } finally {
+      this.timetableBackgroundBusy = false;
     }
   }
 
   private removeTimetableBackground(): void {
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     TimetableBackgroundStore.remove(ctx);
+    this.timetableVideoUri = '';
+    this.timetableVideoFailed = false;
     this.timetableBgUri = '';
     this.timetableWallpaperGeneration++;
     this.timetableWallpaperPixels = undefined;
@@ -2350,6 +2363,16 @@ struct Home {
           .objectFit(ImageFit.Cover)
           .hitTestBehavior(HitTestMode.None)
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+        if (this.timetableVideoUri.length > 0 && !this.timetableVideoFailed &&
+          this.pageVisible && this.appForeground && this.currentTab === TAB_TIMETABLE) {
+          TimetableVideoBackground({
+            source: this.timetableVideoUri,
+            onPlaybackError: () => {
+              this.timetableVideoFailed = true;
+              this.getUIContext().getPromptAction().showToast({ message: '当前视频无法播放，已显示静态封面' });
+            }
+          })
+        }
         Row()
           .width('100%')
           .height('100%')

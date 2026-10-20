@@ -448,3 +448,22 @@ test('the API 26 wheel retains callbacks and closes its previous dialog and dism
     else global.Color = originalColor;
   }
 });
+for (const sheetMode of [false, true]) {
+  test(`repeated close requests close ${sheetMode ? 'sheet' : 'page'} once while the editor is leaving`, () => {
+    const { form } = formSetup();
+    let closed = 0;
+    let routed = 0;
+    form.sheetMode = sheetMode;
+    form.choosingWeeks = true;
+    form.onCancel = () => closed++;
+    form.getUIContext = () => ({ getRouter: () => ({ back: () => routed++ }) });
+    form.leaveEditor();
+    form.leaveEditor();
+    assert.equal(closed, sheetMode ? 1 : 0);
+    assert.equal(routed, sheetMode ? 0 : 1);
+    assert.equal(form.choosingWeeks, false);
+    form.aboutToDisappear();
+    form.leaveEditor();
+    assert.equal(closed + routed, 1);
+  });
+}

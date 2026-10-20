@@ -115,6 +115,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    AppStorage.setOrCreate('hita_app_foreground', true);
     hilog.info(DOMAIN, TAG, 'Ability onForeground');
     NextClassWidgetService.scheduleRefresh();
     void this.restoreClassReminders();
@@ -126,6 +127,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    AppStorage.setOrCreate('hita_app_foreground', false);
     hilog.info(DOMAIN, TAG, 'Ability onBackground');
     void NextClassWidgetService.refreshAll();
   }
