@@ -106,7 +106,8 @@ test('manager selection cancel and course editor cancel keep their behavior', ()
   const manager = read('pages/TimetableManagerPage.ets');
   assert.match(manager, /HeaderBackButton\(\{[\s\S]*?if \(this\.selectionMode\) \{[\s\S]*?this\.selectedIds = \[\];[\s\S]*?this\.selectionMode = false;[\s\S]*?getRouter\(\)\.back\(\)/);
   const editor = read('pages/AddEventPage.ets');
-  assert.match(editor, /HeaderBackButton\(\{\s*onBack: \(\) => this\.onCancel\(\)/);
+  assert.match(editor, /HeaderBackButton\(\{\s*onBack: \(\) => this\.leaveEditor\(\)/);
+  assert.match(editor, /if \(this\.sheetMode\) \{[\s\S]*?this\.onCancel\(\);/);
   assert.match(editor, /HeaderBackButton\(\{\s*onBack: \(\) => this\.getUIContext\(\)\.getRouter\(\)\.back\(\)/);
   const detail = read('pages/TimetableDetailPage.ets');
   const sheet = detail.slice(detail.indexOf('  private courseDetailSheet('),

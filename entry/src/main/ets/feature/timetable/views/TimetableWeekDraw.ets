@@ -431,7 +431,7 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   cardLayer: TimetableCardLayer | undefined = undefined,
   display: TimetableDisplayOptions = new TimetableDisplayOptions(),
   backdrop: TimetableBackdropColors | undefined = undefined,
-  hasWallpaper: boolean = false): TimetablePlaceLabel[] {
+  hasWallpaper: boolean = false, drawTodayMask: boolean = true): TimetablePlaceLabel[] {
   const surface: TimetableSurfaceColors = new TimetableSurfaceColors(darkMode);
   const scrollingPlaces: TimetablePlaceLabel[] = [];
   if (cardLayer !== undefined) {
@@ -469,7 +469,9 @@ export function drawTimetableWeek(ctx: CanvasRenderingContext2D, w: number, h: n
   // The body canvas starts below the fixed date header.  Paint from its own
   // top edge so the highlight continues through the intentional top padding
   // before the first 08:00 grid line instead of being cut by a white band.
-  if (isCurrentWeek) {
+  // Callers with a fixed date header paint this column outside the scroll so it
+  // never stacks with the header's today cell (drawTodayMask = false).
+  if (isCurrentWeek && drawTodayMask) {
     ctx.fillStyle = backdrop !== undefined ? backdrop.todayMask : surface.todayMask;
     const todayMaskTop: number = drawHeader ? gridTop : 0;
     ctx.fillRect(gridLeft + (todayDow - 1) * colW, todayMaskTop, colW,

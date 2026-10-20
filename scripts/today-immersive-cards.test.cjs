@@ -13,7 +13,7 @@ test('only Today event cards use the API 26-capable material branch; heading and
   assert.match(today, /this\.todaySectionHeader\(\);\s*if \(this\.todayItems\.length === 0\) \{\s*this\.emptyToday\(\)/);
   assert.match(today, /ForEach\(this\.todayItems, \(event: EasEventItem\) => \{\s*ListItem\(\) \{\s*if \(CompatibleSheetMaterial\.isEnabled\(\)\) \{\s*ImmersiveEventCard/);
   assert.match(today, /ImmersiveEventCard\(\{ content: \(\) => \{ this\.eventRow\(event, true\); \} \}\)\s*\} else \{\s*this\.eventRow\(event\)/);
-  assert.match(today, /\}, \(event: EasEventItem\) => event\.id\)/);
+  assert.match(today, /\}, \(event: EasEventItem\) => Home\.todayItemKey\(event\)\)/);
   assert.doesNotMatch(home.slice(home.indexOf('  todaySectionHeader()'), home.indexOf('  emptyToday()')),
     /ImmersiveEventCard|CompatibleMaterialModifier|systemMaterial/);
 });
@@ -70,4 +70,23 @@ test('card text, status colors, time rail and progress remain in the original co
   assert.match(row, /\.hitTestBehavior\(immersive \? HitTestMode\.Transparent : HitTestMode\.Default\)/);
   assert.match(row, /\.margin\(\{ bottom: immersive \? 0 : 2 \}\)/);
   assert.match(row, /event\.containsTimestamp\(this\.nowTick\) \? \$r\('app\.color\.hita_focus'\)/);
+});
+
+test('edited course fields re-key today rows so the list redraws without restarting the app', () => {
+  const home = read('pages/Home.ets');
+  const today = home.slice(home.indexOf('  tabToday()'), home.indexOf('  todayHeader()'));
+  assert.match(today, /\}, \(event: EasEventItem\) => Home\.todayItemKey\(event\)\);/);
+  const key = home.match(/private static todayItemKey\(event: EasEventItem\): string \{([\s\S]*?)\n  \}/)[1];
+  for (const field of ['id', 'type', 'name', 'place', 'teacher', 'from', 'to', 'fromNumber', 'lastNumber', 'color']) {
+    assert.match(key, new RegExp('event\\.' + field + '\\b'), field + ' must be part of the row key');
+  }
+});
+
+test('today list runs to the screen bottom and keeps the dock inset as scroll end offset', () => {
+  const home = require('node:fs').readFileSync(require('node:path').join(__dirname, '../entry/src/main/ets/pages/Home.ets'), 'utf8').replace(/\r\n/g, '\n');
+  const today = home.slice(home.indexOf('  tabToday()'), home.indexOf('  todayHeader()'));
+  assert.match(home, /this\.tabToday\(\);\s*\}\s*\/\/[^\n]*\n\s*\.tabPage\(0, COLOR_SURFACE\)/);
+  assert.match(today, /\.contentEndOffset\(this\.dockPageInset\(\) \+ 16\)/);
+  assert.match(today, /\.expandSafeArea\(\[SafeAreaType\.SYSTEM\], \[SafeAreaEdge\.BOTTOM\]\)/);
+  assert.doesNotMatch(today, /bottom: 16 \}/);
 });

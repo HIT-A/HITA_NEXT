@@ -160,6 +160,24 @@ test('the drawing layer is white, density-correct, clipped, reusable across rere
   assert.equal(h.timers.size, 0);
 });
 
+test('the immersive glow follows the active finger while dragging across a control', () => {
+  const h = feedbackHarness();
+  const instance = h.node();
+  h.Feedback.apply(instance, 22);
+  instance.touch(h.event(h.TouchType.Down, [{ id: 7, x: 18, y: 12 }]));
+  h.advance(80);
+  h.render(instance);
+  assert.deepEqual(h.gradients.at(-1)[0], { x: 54, y: 36 });
+
+  instance.touch(h.event(h.TouchType.Move, [{ id: 7, x: 76, y: 31 }]));
+  h.render(instance);
+  assert.deepEqual(h.gradients.at(-1)[0], { x: 228, y: 93 });
+
+  instance.touch(h.event(h.TouchType.Up));
+  h.advance(500);
+  assert.equal(h.timers.size, 0);
+});
+
 test('panel bubbling cannot double the control glow; cancellation, hiding and removal stop held feedback', () => {
   const h = feedbackHarness();
   const button = h.node(), panel = h.node();

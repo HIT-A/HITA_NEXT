@@ -35,6 +35,7 @@ import { TimetableCardMaterials } from '../feature/timetable/views/TimetableCard
 import { TimetableCardPainter } from '../feature/timetable/views/TimetableCardPainter';
 import { RdbHelper } from '../common/db/RdbHelper';
 import { EasEventItem, EasEventType, EasTermSubject, EasTimetable } from '../common/model/timetable/TimetableModels';
+import { CurrentClassSelection } from '../common/model/timetable/CurrentClassSelection';
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore, EAS_SESSION_REVISION_KEY } from '../feature/eas/EasSessionStore';
@@ -51,6 +52,7 @@ import { hasEveningCourse, eveningHintVisible } from '../feature/timetable/data/
 import { TimetableVideoBackground } from '../feature/timetable/views/TimetableVideoBackground';
 import { TimetableBackgroundStore } from '../feature/timetable/data/TimetableBackgroundStore';
 import { WidgetBackgroundStore } from '../feature/widget/WidgetBackgroundStore';
+import { NextClassWidgetService } from '../feature/widget/NextClassWidgetService';
 import { TimetableWallpaperSampler } from '../feature/timetable/data/TimetableWallpaperSampler';
 import { TimetableDisplayOptions } from '../feature/timetable/data/TimetableDisplayOptions';
 import { TimetableDisplayStore } from '../feature/timetable/data/TimetableDisplayStore';
@@ -193,6 +195,7 @@ struct Home {
   @State timetableAnimating: boolean = false;
   private importRequested: boolean = false;
   private clockTimer: number = -1;
+  private lastReminderDispatchAt: number = 0;
   @State @Watch('updateTimetableSystemBars') private pageVisible: boolean = false;
   @State private tabTransitionRunning: boolean = false;
   private timetablePlaceLabels: TimetablePlaceLabel[] = [];
@@ -206,11 +209,13 @@ struct Home {
     new CanvasRenderingContext2D(new RenderingContextSettings(true));
   private timetableCardPainter: TimetableCardPainter = new TimetableCardPainter();
   @State private timetableCardSurfaces: TimetableCardSurface[] = [];
-  private timetableAreaW: number = 0;
-  private timetableAreaH: number = 0;
+  // @State: the fixed today column and header fade are laid out from these.
+  @State private timetableAreaW: number = 0;
+  @State private timetableAreaH: number = 0;
   @State private timetableCanvasHeight: number = 0;
   @State private showEveningCourseHint: boolean = false;
   @State timetableFadeOpacity: number = 0;
+  @State private timetableScrollY: number = 0;
   @State moreHeaderMaskOpacity: number = 0;
   @State selectedNav: number = TAB_TODAY;
   @State timetableBgUri: string = '';
@@ -304,6 +309,7 @@ struct Home {
 
   onPageHide(): void {
     this.pageVisible = false;
+    this.stopClock();
     this.resetDockInteraction();
     this.closeActiveSheet();
     this.courseDeleteEffects.pause();
@@ -392,10 +398,7 @@ struct Home {
     this.courseDeleteEffects.pause();
     this.finishCourseSheetDismissal();
     this.stopTimetableMarquee();
-    if (this.clockTimer >= 0) {
-      clearInterval(this.clockTimer);
-      this.clockTimer = -1;
-    }
+    this.stopClock();
     if (this.timetableAnimationTimer >= 0) {
       clearTimeout(this.timetableAnimationTimer);
       this.timetableAnimationTimer = -1;
@@ -405,18 +408,27 @@ struct Home {
   private startClock(): void {
     if (this.clockTimer < 0) {
       this.clockTimer = setInterval(() => {
-        this.nowTick = Date.now();
+        const now: number = Date.now();
+        this.nowTick = now;
         this.updateTodayHighlights();
         const nextDayKey: string = EasTimeTools.printDate(this.nowTick);
         if (nextDayKey !== this.dayKey) {
           this.dayKey = nextDayKey;
           this.refreshSummaries();
         }
-        if (this.classReminderEnabled) {
+        if (this.classReminderEnabled && now - this.lastReminderDispatchAt >= 15000) {
+          this.lastReminderDispatchAt = now;
           const host: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
           void ClassReminderScheduler.dispatchDue(host, this.timetableEvents);
         }
-      }, 15000);
+      }, 1000);
+    }
+  }
+
+  private stopClock(): void {
+    if (this.clockTimer >= 0) {
+      clearInterval(this.clockTimer);
+      this.clockTimer = -1;
     }
   }
 
@@ -536,6 +548,7 @@ struct Home {
     this.timelineText = today.length === 0 ? (display === undefined ? '暂无课表' : '今日暂无安排') :
       '今日 ' + today.length.toString() + ' 项安排';
     this.drawTimetableNow();
+    NextClassWidgetService.scheduleRefresh();
     if (this.classReminderEnabled) {
       const host: common.UIAbilityContext = ctx as common.UIAbilityContext;
       await ClassReminderScheduler.sync(host, allEvents);
@@ -627,21 +640,11 @@ struct Home {
 
   private updateTodayHighlights(): void {
     const now: number = this.nowTick;
-    this.activeClass = undefined;
-    this.nextClass = undefined;
-    for (let i = 0; i < this.todayItems.length; i++) {
-      const event: EasEventItem = this.todayItems[i];
-      if (event.type !== EasEventType.CLASS) {
-        continue;
-      }
-      if (event.from <= now && event.to > now) {
-        this.activeClass = event;
-        continue;
-      }
-      if (event.from > now && this.nextClass === undefined) {
-        this.nextClass = event;
-      }
-    }
+    const courses: EasEventItem[] = this.timetableEvents.filter((event: EasEventItem): boolean =>
+      event.type === EasEventType.CLASS);
+    const selection = CurrentClassSelection.find(courses, now);
+    this.activeClass = selection.current;
+    this.nextClass = selection.next;
   }
 
   private drawTimetableNow(): void {
@@ -672,7 +675,7 @@ struct Home {
       this.timetableAreaW, canvasHeight,
       this.currentTimetable, weekEvents, this.timetableWeek, current === this.timetableWeek,
       hourHeight, 0, false, false, this.timetableInk('time'), this.darkMode, cardLayer, this.timetableDisplay,
-      this.timetableBackdrop, this.hasTimetableBackground());
+      this.timetableBackdrop, this.hasTimetableBackground(), false);
     const cards: TimetableCardSurface[] = cardLayer.surfaces;
     if (cards.length !== this.timetableCardSurfaces.length ||
       cards.some((card: TimetableCardSurface, index: number): boolean =>
@@ -838,6 +841,7 @@ struct Home {
       this.skippingCourse = false;
       if (deleted) {
         this.drawTimetableNow();
+        NextClassWidgetService.scheduleRefresh();
         if (this.classReminderEnabled) {
           try {
             const host: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -1094,6 +1098,33 @@ struct Home {
       EasTimetable.dowOfMs(Date.now()) === dayIndex + 1;
   }
 
+  /** Zero-based today column for the shown week, or -1 when the week is not current. */
+  private timetableTodayColumn(): number {
+    if (this.currentTimetable === undefined || this.timetableAreaW <= TIMETABLE_GUTTER_WIDTH) {
+      return -1;
+    }
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+      if (this.timetableHeaderIsToday(dayIndex)) {
+        return dayIndex;
+      }
+    }
+    return -1;
+  }
+
+  private timetableTodayColumnWidth(): number {
+    return Math.max(0, (this.timetableAreaW - TIMETABLE_GUTTER_WIDTH) / 7);
+  }
+
+  /**
+   * The column stays pinned to the date header's bottom edge and ends at the
+   * last hour line; overscroll stretches it instead of opening a gap.
+   */
+  private timetableTodayMaskVisibleHeight(): number {
+    const gridBottom: number = Math.min(this.timetableCanvasHeight - 4,
+      TIMETABLE_GRID_TOP_PADDING + (AXIS_END_HOUR - AXIS_START_HOUR) * this.timetableHourHeight());
+    return Math.max(0, gridBottom - this.timetableScrollY);
+  }
+
   private timetableCampusTerm(): string {
     const campus: string = this.sessionInfo === undefined ? '' : Home.campusName(this.sessionInfo.campus);
     if (this.currentTimetable === undefined) {
@@ -1325,6 +1356,13 @@ struct Home {
     }
   }
 
+  /** Edited courses keep their id; the key must change with every displayed field or the row is reused stale. */
+  private static todayItemKey(event: EasEventItem): string {
+    return [event.id, event.type, event.name, event.place, event.teacher, event.from.toString(),
+      event.to.toString(), event.fromNumber.toString(), event.lastNumber.toString(), event.color.toString()]
+      .join('\u0001');
+  }
+
   private static typeTag(type: EasEventType): string {
     if (type === EasEventType.EXAM) {
       return '考';
@@ -1414,15 +1452,24 @@ struct Home {
     return count;
   }
 
+  private static durationText(milliseconds: number): string {
+    const totalMinutes: number = Math.max(0, Math.ceil(milliseconds / 60000));
+    const hours: number = Math.floor(totalMinutes / 60);
+    const minutes: number = totalMinutes % 60;
+    return hours > 0 ? hours.toString() + '小时' + minutes.toString() + '分钟' :
+      totalMinutes.toString() + '分钟';
+  }
+
   private static countdownText(event: EasEventItem, now: number): string {
-    const minutes: number = Math.max(1, Math.ceil((event.from - now) / 60000));
-    if (minutes >= 60) {
-      const hours: number = Math.floor(minutes / 60);
-      const remainder: number = minutes % 60;
-      return remainder === 0 ? hours.toString() + '小时后开始' :
-        hours.toString() + '小时' + remainder.toString() + '分钟后开始';
+    return Home.durationText(event.from - now) + ' 后开始';
+  }
+
+  private static eventStatusText(event: EasEventItem, now: number): string {
+    const status: string = Home.eventStatus(event, now);
+    if (event.type === EasEventType.CLASS && status === '进行中') {
+      return status + ' · ' + Home.durationText(event.to - now) + ' 后下课';
     }
-    return minutes.toString() + '分钟后开始';
+    return status;
   }
 
   private static campusName(campus: EasCampus): string {
@@ -1679,7 +1726,8 @@ struct Home {
         Column() {
           this.tabToday();
         }
-        .tabPage(this.dockPageInset(), COLOR_SURFACE)
+        // The list reserves the dock inset itself so cards scroll under the dock.
+        .tabPage(0, COLOR_SURFACE)
       }
       .clip(false)
       .tabBar(this.dockTab($r('sys.symbol.calendar'), '今日'))
@@ -1939,12 +1987,15 @@ struct Home {
                 this.eventRow(event);
               }
             }
-          }, (event: EasEventItem) => event.id);
+          }, (event: EasEventItem) => Home.todayItemKey(event));
         }
         .width('100%')
         .layoutWeight(1)
-        .padding({ left: 16, right: 16, top: 8, bottom: 16 })
+        .padding({ left: 16, right: 16, top: 8 })
+        // Reach the screen bottom; the last card still clears the dock when scrolled to the end.
+        .contentEndOffset(this.dockPageInset() + 16)
         .scrollBar(BarState.Off)
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       }
     }
     .width('100%')
@@ -1977,7 +2028,7 @@ struct Home {
       Row() {
         Column() {
           if (this.activeClass !== undefined) {
-            Text('正在进行')
+            Text('正在进行 · ' + Home.durationText(this.activeClass.to - this.nowTick) + ' 后下课')
               .fontSize(12)
               .fontColor('#DCEEFF')
               .fontWeight(FontWeight.Medium);
@@ -2130,6 +2181,7 @@ struct Home {
     }
     .width('100%')
     .layoutWeight(1)
+    .padding({ bottom: this.dockPageInset() })
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
   }
@@ -2231,7 +2283,7 @@ struct Home {
               .margin({ left: 5 });
             Blank();
             if (Home.eventStatus(event, this.nowTick).length > 0) {
-              Text(Home.eventStatus(event, this.nowTick))
+              Text(Home.eventStatusText(event, this.nowTick))
                 .fontSize(11)
                 .fontColor(Home.statusColor(Home.eventStatus(event, this.nowTick)))
                 .backgroundColor(Home.statusBgColor(Home.eventStatus(event, this.nowTick)))
@@ -2411,6 +2463,19 @@ struct Home {
         .height('100%');
       } else {
         Stack({ alignContent: Alignment.Top }) {
+          // Today column lives outside the scroll and starts below the date header,
+          // so scrolled content never adds a second tint under the header's today cell.
+          if (this.timetableTodayColumn() >= 0) {
+            Column()
+              .width(this.timetableTodayColumnWidth())
+              .height(this.timetableTodayMaskVisibleHeight())
+              .position({
+                x: TIMETABLE_GUTTER_WIDTH + this.timetableTodayColumn() * this.timetableTodayColumnWidth(),
+                y: this.timetableChromeH
+              })
+              .backgroundColor(this.timetableBackdrop.todayHeader)
+              .hitTestBehavior(HitTestMode.None)
+          }
           Scroll(this.timetableScroller) {
             Column() {
               Blank().height(this.timetableChromeH);
@@ -2450,6 +2515,7 @@ struct Home {
           .scrollBar(BarState.Off)
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
           .onDidScroll(() => {
+            this.timetableScrollY = this.timetableScroller.currentOffset().yOffset;
             this.updateEveningCourseHint();
             if (this.hasTimetableBackground()) {
               this.timetableFadeOpacity = 0;
@@ -2462,7 +2528,14 @@ struct Home {
             HeaderFadeMask({
               maskOpacity: this.timetableFadeOpacity,
               rgb: COLOR_SURFACE_RGB,
-              headerHeight: this.timetableChromeH
+              headerHeight: this.timetableChromeH,
+              // Under the header the fade uses page + today tint, so the fixed today
+              // column below stays one even tint instead of a washed-out second band.
+              highlight: this.timetableTodayColumn() >= 0 ? this.timetableBackdrop.todayHeader : 0,
+              highlightLeft: TIMETABLE_GUTTER_WIDTH + this.timetableTodayColumn() * this.timetableTodayColumnWidth(),
+              highlightWidth: this.timetableTodayColumnWidth(),
+              highlightTop: this.timetableChromeH,
+              maskWidth: this.timetableAreaW
             });
           }
         }

@@ -40,6 +40,22 @@ export class TimetableSelectionStore {
     }
   }
 
+  /**
+   * Reads the selection from disk for the service card process. Preferences are cached per process, so a
+   * cached instance there never sees later selections saved by the app. Do not call this in the app
+   * process: it would detach the instance other stores share.
+   */
+  static async loadLatest(context: common.Context): Promise<string> {
+    try {
+      preferences.removePreferencesFromCacheSync(context, { name: STORE_NAME });
+      const store: preferences.Preferences = await preferences.getPreferences(context, { name: STORE_NAME });
+      const raw: preferences.ValueType = await store.get(ACTIVE_TIMETABLE_KEY, '');
+      return raw === undefined || raw === null ? '' : String(raw);
+    } catch (e) {
+      return '';
+    }
+  }
+
   async save(id: string): Promise<void> {
     if (this.store === undefined || id.length === 0) {
       return;

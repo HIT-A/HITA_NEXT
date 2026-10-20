@@ -14,7 +14,7 @@ function load(file) {
   cache.set(absolute, mod);
   const source = fs.readFileSync(absolute, 'utf8')
     .replace(/^@Component\r?\n/gm, '')
-    .replace(/@(Prop|StorageProp)(\([^)]*\))?\s+/g, '')
+    .replace(/@(Prop|StorageProp|Builder)(\([^)]*\))?\s+/g, '')
     .replace('export struct HeaderFadeMask', 'export class HeaderFadeMask');
   const output = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
@@ -227,4 +227,41 @@ test('score results scroll beneath the header and clear its fade when refreshing
   assert.ok(build.indexOf('HeaderFadeMask(') < build.indexOf('ImmersiveHeader({ barHeight: HEADER_HEIGHT })'));
   assert.match(source, /private resetResult\(\): void \{[^}]*this\.fadeOpacity = 0;/);
   assert.match(build, /\.padding\(\{ top: this\.statusBarInset \}\)/);
+});
+
+test('timetable today column is a single tint that stops at the date header', () => {
+  const home = read('pages/Home.ets');
+  const tab = home.slice(home.indexOf('  tabTimetable()'), home.indexOf('  statusBanner('));
+  assert.match(home, /this\.timetableBackdrop, this\.hasTimetableBackground\(\), false\);/);
+  assert.match(tab, /x: TIMETABLE_GUTTER_WIDTH \+ this\.timetableTodayColumn\(\) \* this\.timetableTodayColumnWidth\(\),\s*y: this\.timetableChromeH\s*\}/);
+  assert.match(tab, /\.backgroundColor\(this\.timetableBackdrop\.todayHeader\)[\s\S]*?Scroll\(this\.timetableScroller\)/);
+  assert.match(home, /Math\.max\(0, gridBottom - this\.timetableScrollY\)/);
+  assert.match(tab, /highlight: this\.timetableTodayColumn\(\) >= 0 \? this\.timetableBackdrop\.todayHeader : 0/);
+  assert.match(tab, /highlightTop: this\.timetableChromeH/);
+  const draw = read('feature/timetable/views/TimetableWeekDraw.ets');
+  assert.match(draw, /if \(isCurrentWeek && drawTodayMask\)/);
+});
+
+test('the fade over the today column is page colour composited with the today tint', () => {
+  // 0x17 alpha of #2E86E8 over the light page.
+  const argb = ((23 << 24) | 0x2E86E8) >>> 0;
+  const a = 23 / 255;
+  const expected = [0x2E, 0x86, 0xE8].map((c, i) => Math.round(c * a + [244, 247, 252][i] * (1 - a))).join(',');
+  assert.equal(HeaderFade.blendRgb('244,247,252', argb), expected);
+  assert.equal(HeaderFade.blendRgb('244,247,252', 0), '244,247,252');
+  const mask = new HeaderFadeMask();
+  mask.headerHeight = 150;
+  mask.highlight = argb;
+  mask.highlightWidth = 40;
+  mask.maskWidth = 400;
+  mask.highlightTop = 150;
+  assert.equal(mask.hasHighlight(), true);
+  mask.highlight = 0;
+  assert.equal(mask.hasHighlight(), false);
+});
+
+test('the fixed today column re-renders once the timetable area is measured', () => {
+  const home = read('pages/Home.ets');
+  assert.match(home, /@State private timetableAreaW: number = 0;/);
+  assert.match(home, /@State private timetableAreaH: number = 0;/);
 });

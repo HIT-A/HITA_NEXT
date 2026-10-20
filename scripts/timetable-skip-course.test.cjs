@@ -70,10 +70,10 @@ function harness() {
   const reminders = { sync: async (_ctx, events) => state.syncs.push(events.map(event => event.id)) };
   const page = new Function('course', 'nextWeek', 'exam', 'context', 'state', 'RdbHelper',
     'EasEventType', 'ClassReminderScheduler', '$r', 'TAB_TIMETABLE', 'TIMETABLE_GRID_TOP_PADDING',
-    'TIMETABLE_SLIDE_MS',
+    'TIMETABLE_SLIDE_MS', 'NextClassWidgetService',
     compile(code) + '; return new Home();')(
     course, nextWeek, exam, context, state, rdb, { CLASS: 'CLASS', EXAM: 'EXAM' },
-    reminders, value => value, 1, 24, 220);
+    reminders, value => value, 1, 24, 220, { scheduleRefresh() {} });
   page.courseDeleteEffects = { play: async ids => {
     assert.equal(page.courseSheetOpen, false, 'particles must wait for actual sheet dismissal');
     assert.equal(state.writes.length, 1, 'persist before animating');
@@ -329,10 +329,11 @@ function refreshHarness() {
     ${slice(home, '  async refreshSummaries(', '  private classReminderSubtitle()')}
   }`;
   const page = new Function('table', 'state', 'RdbHelper', 'EasSessionStore', 'TimetableResolver',
-    'TimetableSelectionStore', 'EasEventType', 'DAY_MS', compile(code) + '; return new Home();')(
+    'TimetableSelectionStore', 'EasEventType', 'DAY_MS', 'NextClassWidgetService',
+    compile(code) + '; return new Home();')(
     table, state, { getInstance: () => rdb }, { getInstance: () => ({ loadPreferred: async () => undefined }) },
     { getRecent: async () => table, getReal: async () => table },
-    { getInstance: () => ({ load: async () => 'table' }) }, { EXAM: 'EXAM' }, 86400000);
+    { getInstance: () => ({ load: async () => 'table' }) }, { EXAM: 'EXAM' }, 86400000, { scheduleRefresh() {} });
   return { page, state };
 }
 

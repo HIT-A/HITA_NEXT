@@ -105,7 +105,8 @@ function summaryHarness() {
     ${homeMethod('  async refreshSummaries(', '  private classReminderSubtitle()')}
   }`;
   const page = new Function('RdbHelper', 'EasSessionStore', 'TimetableSelectionStore', 'TimetableResolver',
-    'EasEventType', 'DAY_MS', 'KeyboardAvoidMode', 'WidgetBackgroundStore', ts.transpileModule(code, {
+    'EasEventType', 'DAY_MS', 'KeyboardAvoidMode', 'WidgetBackgroundStore', 'NextClassWidgetService',
+    ts.transpileModule(code, {
       compilerOptions: { target: ts.ScriptTarget.ES2020 }
     }).outputText + '; return new Home();')(
     { getInstance: () => rdb },
@@ -114,7 +115,7 @@ function summaryHarness() {
       load: async () => state.selectedId,
       clearIf: async id => { if (state.selectedId === id) state.selectedId = ''; }
     }) }, module.exports.TimetableResolver, { EXAM: 'EXAM' }, 86400000, { NONE: 0 },
-    { hasBackground: () => false });
+    { hasBackground: () => false }, { scheduleRefresh() {} });
   return { page, state, table };
 }
 

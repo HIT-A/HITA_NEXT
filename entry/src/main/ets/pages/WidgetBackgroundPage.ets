@@ -5,16 +5,23 @@
  * 保存时按各自比例烘焙，卡片端不再拉伸或二次裁切。未保存的选图只存在缓存草稿中。
  */
 import { common } from '@kit.AbilityKit';
+import { deviceInfo } from '@kit.BasicServicesKit';
 import { HeaderBackButton } from '../common/components/HeaderBackButton';
+import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { ImmersiveHeader } from '../common/components/ImmersiveHeader';
 import { CompatibleMaterialModifier } from '../common/theme/CompatibleMaterialModifier';
+import { HeaderFade } from '../common/theme/HeaderFade';
 import { HitaColors } from '../common/theme/HitaColors';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
+import { CourseControlHost } from '../feature/timetable/views/CourseControlHost';
+import { CourseModeSegment } from '../feature/timetable/views/CourseModeSegment';
+import { ImmersiveFollowButton } from '../feature/widget/ImmersiveWidgetBackgroundControls';
 import {
   WIDGET_BG_COMPACT_ASPECT,
   WIDGET_BG_DEFAULT_VEIL,
   WIDGET_BG_MAX_SCALE,
   WIDGET_BG_MAX_VEIL,
+  WIDGET_CARD_CORNER_RADIUS,
   WIDGET_BG_WIDE_ASPECT,
   WidgetBackgroundFrame,
   WidgetBackgroundModel,
@@ -33,9 +40,8 @@ const SIZE_COMPACT: number = 2;
 const SIZE_WIDE: number = 3;
 const COMPACT_PREVIEW_MAX: number = 260;
 const WIDE_PREVIEW_MAX: number = 560;
-// 实测卡片高度约 146 vp、圆角 24 vp；预览的圆角和示例文字按此比例缩放。
+// 实测卡片高度约 146 vp；预览的圆角和示例文字按此比例缩放。
 const CARD_NOMINAL_HEIGHT: number = 146;
-const CARD_RADIUS: number = 24;
 
 @Entry
 @Component
@@ -51,10 +57,15 @@ struct WidgetBackgroundPage {
   @State veil: number = WIDGET_BG_DEFAULT_VEIL;
   @State activeSize: number = SIZE_COMPACT;
   @State contentWidth: number = 328;
+  @State cardCornerRadius: number = WIDGET_CARD_CORNER_RADIUS;
+  @State adjustmentsFadeOpacity: number = 0;
   @State hasSaved: boolean = false;
   @State dirty: boolean = false;
   @State busy: boolean = false;
+  // A pressed immersive control lifts its row so the enlarged material is not painted over.
+  @State sizeControlPressing: boolean = false;
   private leaving: boolean = false;
+  private adjustmentsScroller: Scroller = new Scroller();
   private panStart: WidgetBackgroundFrame = new WidgetBackgroundFrame();
   private pinchStart: WidgetBackgroundFrame = new WidgetBackgroundFrame();
   private pinchStartX: number = 0;
@@ -67,6 +78,14 @@ struct WidgetBackgroundPage {
 
   aboutToAppear(): void {
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
+    try {
+      const systemRadius: number = ctx.resourceManager.getNumberByName('ohos_id_corner_radius_card');
+      if (Number.isFinite(systemRadius) && systemRadius > 0) {
+        this.cardCornerRadius = systemRadius;
+      }
+    } catch (_) {
+      this.cardCornerRadius = WIDGET_CARD_CORNER_RADIUS;
+    }
     const state: WidgetBackgroundState | undefined = WidgetBackgroundStore.load(ctx);
     if (state === undefined) {
       return;
@@ -124,6 +143,18 @@ struct WidgetBackgroundPage {
       return Math.min(this.contentWidth, WIDE_PREVIEW_MAX);
     }
     return Math.min(this.contentWidth * 0.72, COMPACT_PREVIEW_MAX);
+  }
+
+  private activeSizeIndex(): number {
+    return this.activeSize === SIZE_WIDE ? 1 : 0;
+  }
+
+  private selectSize(index: number): void {
+    this.activeSize = index === 1 ? SIZE_WIDE : SIZE_COMPACT;
+  }
+
+  private usesApi26ImmersiveControls(): boolean {
+    return deviceInfo.apiAvailable('26.0.0') && !deviceInfo.apiAvailable('27.0.0');
   }
 
   private frameHeight(): number {
@@ -352,15 +383,32 @@ struct WidgetBackgroundPage {
         .lineHeight(19)
         .fontColor(TEXT_SECONDARY)
         .textAlign(TextAlign.Center)
-      Button(this.busy ? '正在读取…' : '从图库选择')
-        .height(40)
-        .padding({ left: 24, right: 24 })
-        .fontSize(14)
-        .fontColor(Color.White)
-        .backgroundColor(HitaColors.primary)
-        .enabled(!this.busy)
+      if (this.usesApi26ImmersiveControls()) {
+        // API 26 renders the button material only inside the native title host the course editor uses.
+        Column() {
+          CourseControlHost({ barHeight: 40 }) {
+            ImmersiveFollowButton({
+              label: this.busy ? '正在读取…' : '从图库选择',
+              isEnabled: !this.busy,
+              primary: true,
+              fill: false,
+              onPress: () => { void this.pickImage(); }
+            })
+          }
+        }
         .margin({ top: 8 })
-        .onClick(() => { void this.pickImage(); })
+        .clip(false)
+      } else {
+        Button(this.busy ? '正在读取…' : '从图库选择')
+          .height(40)
+          .padding({ left: 24, right: 24 })
+          .fontSize(14)
+          .fontColor(Color.White)
+          .backgroundColor(HitaColors.primary)
+          .enabled(!this.busy)
+          .margin({ top: 8 })
+          .onClick(() => { void this.pickImage(); })
+      }
     }
     .width('100%')
     .padding({ left: 20, right: 20, top: 32, bottom: 32 })
@@ -372,12 +420,7 @@ struct WidgetBackgroundPage {
 
   @Builder
   editor() {
-    Row({ space: 8 }) {
-      this.sizeOption(SIZE_COMPACT, '2×2 卡片')
-      this.sizeOption(SIZE_WIDE, '2×4 卡片')
-    }
-    .width('100%')
-    .margin({ top: 8 })
+    this.sizeSelector()
 
     Column() {
       this.previewFrame()
@@ -388,40 +431,45 @@ struct WidgetBackgroundPage {
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
 
-    Text('拖动调整位置，双指缩放；缩小后空白处保留卡片底色。')
-      .fontSize(12)
-      .fontColor(TEXT_SECONDARY)
-      .width('100%')
-      .textAlign(TextAlign.Center)
-      .maxLines(2)
-
-    Scroll() {
-      Column() {
-        this.adjustments()
-        Blank().height(this.navBarInset + 20)
+    Stack({ alignContent: Alignment.Top }) {
+      Scroll(this.adjustmentsScroller) {
+        Column() {
+          this.adjustments()
+          Blank().height(this.navBarInset + 20)
+        }
+        .width('100%')
       }
       .width('100%')
+      .height('100%')
+      .scrollBar(BarState.Off)
+      .edgeEffect(EdgeEffect.Spring)
+      .onDidScroll(() => {
+        this.adjustmentsFadeOpacity = HeaderFade.opacity(this.adjustmentsScroller.currentOffset().yOffset);
+      })
+
+      HeaderFadeMask({ maskOpacity: this.adjustmentsFadeOpacity, rgb: '246,247,250' })
+        .align(Alignment.Top)
     }
     .width('100%')
     .layoutWeight(1)
     .margin({ top: 12 })
-    .scrollBar(BarState.Off)
-    .edgeEffect(EdgeEffect.Spring)
   }
 
   @Builder
-  sizeOption(size: number, label: string) {
-    Text(label)
-      .fontSize(13)
-      .fontWeight(this.activeSize === size ? FontWeight.Medium : FontWeight.Regular)
-      .fontColor(this.activeSize === size ? HitaColors.primary : TEXT_PRIMARY)
-      .textAlign(TextAlign.Center)
-      .height(36)
-      .layoutWeight(1)
-      .borderRadius(10)
-      .backgroundColor(this.activeSize === size ? $r('app.color.hita_selected') : CARD_BG)
-      .accessibilityText(label + (this.activeSize === size ? '，正在调整' : ''))
-      .onClick(() => { this.activeSize = size; })
+  sizeSelector() {
+    // Same control as the course editor's 具体时间/按节次 segment, including its API 26 material host.
+    Column() {
+      CourseModeSegment({
+        labels: ['2×2 卡片', '2×4 卡片'],
+        selectedIndex: this.activeSizeIndex(),
+        onSelect: (index: number) => this.selectSize(index),
+        onControlPressingChanged: (pressing: boolean) => { this.sizeControlPressing = pressing; }
+      })
+    }
+    .width('100%')
+    .margin({ top: 8 })
+    .clip(false)
+    .zIndex(this.sizeControlPressing ? 3 : 1)
   }
 
   @Builder
@@ -446,7 +494,9 @@ struct WidgetBackgroundPage {
     .width(this.frameWidth())
     .height(this.frameHeight())
     .backgroundColor(Color.White)
-    .borderRadius(CARD_RADIUS * this.mockScale())
+    // Match the live service card's system radius directly; unlike mock content sizing,
+    // the system card corner radius is not proportional to the preview's content scale.
+    .borderRadius(this.cardCornerRadius)
     .clip(true)
     .shadow({ radius: 12, color: '#1F000000', offsetY: 2 })
     .gesture(
@@ -567,7 +617,8 @@ struct WidgetBackgroundPage {
           this.setFrame(WidgetBackgroundModel.withScale(this.currentFrame(), value / 100,
             this.sourceWidth, this.sourceHeight, this.frameWidth(), this.frameHeight()));
         })
-      Row({ space: 8 }) {
+      // The Button spec spaces side-by-side buttons 12 vp apart.
+      Row({ space: this.usesApi26ImmersiveControls() ? 12 : 8 }) {
         this.presetChip('铺满卡片', () => {
           this.setFrame(WidgetBackgroundModel.coverFrame());
         })
@@ -578,12 +629,6 @@ struct WidgetBackgroundPage {
       }
       .width('100%')
       .margin({ top: 4 })
-      Text('100% 为刚好铺满卡片；数值越小，图片显示得越完整。')
-        .fontSize(12)
-        .lineHeight(18)
-        .fontColor(TEXT_SECONDARY)
-        .width('100%')
-        .margin({ top: 8 })
     }
     .width('100%')
     .padding(16)
@@ -611,11 +656,6 @@ struct WidgetBackgroundPage {
           this.veil = Math.round(value);
           this.dirty = true;
         })
-      Text('卡片文字为深色，图片较暗或较杂时适当加深蒙版。两种尺寸共用此设置。')
-        .fontSize(12)
-        .lineHeight(18)
-        .fontColor(TEXT_SECONDARY)
-        .width('100%')
     }
     .width('100%')
     .padding(16)
@@ -640,16 +680,22 @@ struct WidgetBackgroundPage {
 
   @Builder
   presetChip(label: string, action: () => void) {
-    Text(label)
-      .fontSize(13)
-      .fontColor(HitaColors.primary)
-      .textAlign(TextAlign.Center)
-      .height(34)
-      .layoutWeight(1)
-      .borderRadius(10)
-      .backgroundColor($r('app.color.hita_control'))
-      .enabled(!this.busy)
-      .onClick(action)
+    if (this.usesApi26ImmersiveControls()) {
+      CourseControlHost({ barHeight: 40, itemWeight: 1 }) {
+        ImmersiveFollowButton({ label: label, isEnabled: !this.busy, onPress: action })
+      }
+    } else {
+      Text(label)
+        .fontSize(13)
+        .fontColor(HitaColors.primary)
+        .textAlign(TextAlign.Center)
+        .height(34)
+        .layoutWeight(1)
+        .borderRadius(10)
+        .backgroundColor($r('app.color.hita_control'))
+        .enabled(!this.busy)
+        .onClick(action)
+    }
   }
 
   @Builder

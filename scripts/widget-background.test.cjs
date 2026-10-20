@@ -70,6 +70,8 @@ test('card uses the documented background attributes; More expands into two sing
   const card = read('widget/pages/NextClassCard.ets');
   assert.match(card, /\.backgroundImage\(this\.backgroundSource\(\)\)/);
   assert.match(card, /\.backgroundImageSize\(ImageSize\.Cover\)/);
+  assert.match(card, /\.borderRadius\(\$r\('sys\.float\.ohos_id_corner_radius_card'\)\)/);
+  assert.match(card, /\.clip\(true\)/);
   assert.match(card, /'memory:\/\/' \+ name/);
   // backgroundImageResizable is not available in ArkTS widgets and would stretch the image.
   assert.doesNotMatch(card, /backgroundImageResizable|onAreaChange/);
@@ -83,4 +85,42 @@ test('card uses the documented background attributes; More expands into two sing
   assert.match(menu, /pushUrl\(\{ url: 'pages\/WidgetBackgroundPage' \}\)/);
   assert.match(menu, /this\.openDesktopWidgetManager\(\)/);
   assert.doesNotMatch(read('pages/WidgetBackgroundPage.ets'), /bindSheet/);
+});
+
+test('background editor uses a size segment and gates immersive materials and light to API 26', () => {
+  const page = read('pages/WidgetBackgroundPage.ets');
+  // The size segment is the course editor's 具体时间/按节次 control, so both behave identically on every API.
+  assert.match(page, /CourseModeSegment\(\{\s*labels: \['2×2 卡片', '2×4 卡片'\]/);
+  assert.match(page, /onControlPressingChanged: \(pressing: boolean\) => \{ this\.sizeControlPressing = pressing; \}/);
+  assert.match(page, /\.zIndex\(this\.sizeControlPressing \? 3 : 1\)/);
+  assert.doesNotMatch(page, /TabSegmentButtonV2|ImmersiveWidgetBackgroundSizeSegment/);
+  // API 26 renders button materials only inside the course editor's native title host.
+  assert.match(page, /CourseControlHost\(\{ barHeight: 40, itemWeight: 1 \}\) \{\s*ImmersiveFollowButton\(\{ label: label, isEnabled: !this\.busy, onPress: action \}\)/);
+  assert.match(page, /CourseControlHost\(\{ barHeight: 40 \}\) \{\s*ImmersiveFollowButton\(\{\s*label: this\.busy \? '正在读取…' : '从图库选择'/);
+  assert.equal((page.match(/if \(this\.usesApi26ImmersiveControls\(\)\) \{\s*(\/\/.*\s*)?(Column\(\) \{\s*)?CourseControlHost/g) || []).length, 2);
+  assert.match(page, /apiAvailable\('26\.0\.0'\) && !deviceInfo\.apiAvailable\('27\.0\.0'\)/);
+  assert.match(page, /getNumberByName\('ohos_id_corner_radius_card'\)/);
+  assert.match(page, /borderRadius\(this\.cardCornerRadius\)/);
+  assert.doesNotMatch(page, /borderRadius\(this\.cardCornerRadius \* this\.mockScale\(\)\)/);
+  assert.doesNotMatch(page, /拖动调整位置，双指缩放；缩小后空白处保留卡片底色。|100% 为刚好铺满卡片；数值越小，图片显示得越完整。|卡片文字为深色，图片较暗或较杂时适当加深蒙版。两种尺寸共用此设置。/);
+  assert.match(page, /private adjustmentsScroller: Scroller = new Scroller\(\)/);
+  assert.match(page, /HeaderFade\.opacity\(this\.adjustmentsScroller\.currentOffset\(\)\.yOffset\)/);
+  assert.match(page, /HeaderFadeMask\(\{ maskOpacity: this\.adjustmentsFadeOpacity, rgb: '246,247,250' \}\)/);
+  assert.match(read('common/components/HeaderFadeMask.ets'), /\.hitTestBehavior\(HitTestMode\.None\)/);
+  assert.doesNotMatch(page, /sizeOption\(/);
+  const controls = read('feature/widget/ImmersiveWidgetBackgroundControls.ets');
+  // Buttons follow the Button spec through sub-styles rather than hand-set sizes.
+  assert.match(controls, /Button\(this\.label, \{ type: ButtonType\.Capsule \}\)/);
+  assert.match(controls, /buttonStyle\(this\.primary \? ButtonStyleMode\.EMPHASIZED : ButtonStyleMode\.NORMAL\)/);
+  assert.match(controls, /controlSize\(ControlSize\.NORMAL\)/);
+  // The emphasized fill is also the material colour, so low-power devices keep a legible blue button.
+  assert.match(controls, /new CompatibleMaterialModifier\(\s*\$r\('app\.color\.hita_primary_fill'\), true, true, \$r\('app\.color\.hita_primary_fill'\), false\)/);
+  // Busy states toggle isEnabled; a material that switched off with it would reset the fill to the Button default blue.
+  assert.match(controls, /new CompatibleMaterialModifier\(\s*\$r\('app\.color\.hita_surface_soft'\), false, true, undefined, false\)/);
+  assert.match(controls, /\.attributeModifier\(this\.primary \? this\.emphasizedMaterial : this\.normalMaterial\)/);
+  assert.doesNotMatch(controls, /CompatibleMaterialModifier\([^)]*this\.isEnabled/);
+  assert.match(controls, /\.enabled\(this\.isEnabled\)/);
+  assert.match(controls, /fontColor\(this\.primary \? \$r\('sys\.color\.font_on_primary'\) : HitaColors\.primary\)/);
+  assert.doesNotMatch(controls, /hita_immersive_hero_tint|Color\.White/);
+  assert.match(controls, /\.onClick\(\(\) => this\.onPress\(\)\)/);
 });

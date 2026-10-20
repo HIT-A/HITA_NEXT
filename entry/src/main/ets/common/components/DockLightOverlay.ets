@@ -1,7 +1,5 @@
 import { FrameCallback } from '@kit.ArkUI';
-import {
-  DockLightController, DockLightPlayer, DockFlowSample, sampleDockFlow
-} from '../util/DockLightEffect';
+import { DockFlowMotion, DockLightController, DockLightPlayer } from '../util/DockLightEffect';
 import { ImmersiveLightEnvelope } from '../util/ImmersiveLightEffect';
 
 class DockLightFrame extends FrameCallback {
@@ -26,16 +24,13 @@ export struct DockLightOverlay {
   private ready: boolean = false;
   private running: boolean = false;
   private envelope: ImmersiveLightEnvelope = new ImmersiveLightEnvelope();
-  private center: number = 106;
-  private flowFrom: number = -1;
-  private flowTo: number = -1;
-  private flowStartedMs: number = 0;
+  private motion: DockFlowMotion = new DockFlowMotion();
   private pressed: boolean = false;
   private player: DockLightPlayer = {
     transfer: (from: number, to: number) => this.transfer(from, to),
     stop: () => this.stop(),
     press: (source: number) => this.press(source),
-    move: (x: number) => { this.center = x; },
+    move: (x: number) => this.follow(x),
     release: (cancelled: boolean) => this.release(cancelled)
   };
 
@@ -54,7 +49,7 @@ export struct DockLightOverlay {
     this.running = false;
     this.pressed = false;
     this.envelope.reset();
-    this.flowFrom = -1;
+    this.motion.settle();
     if (this.ready) {
       this.canvas.clearRect(0, 0, 212, 56);
     }
@@ -66,18 +61,31 @@ export struct DockLightOverlay {
       this.envelope.press(nowMs);
       this.envelope.release(nowMs);
     }
-    this.flowFrom = from;
-    this.flowTo = to;
-    this.flowStartedMs = nowMs;
+    // A light still flowing keeps its position and velocity and turns toward the new tab.
+    if (!this.motion.isMoving()) this.motion.jump(DockLightOverlay.slot(from));
+    this.motion.retarget(DockLightOverlay.slot(to), nowMs);
     this.animate();
   }
 
   private press(source: number): void {
-    this.flowFrom = -1;
-    this.center = (source + 0.5) * 212 / 3;
+    // A rapid second tap must not snap the travelling light back onto the tapped tab.
+    if (!this.motion.isMoving()) this.motion.jump(DockLightOverlay.slot(source));
     this.pressed = true;
     this.envelope.press(Date.now());
     this.animate();
+  }
+
+  private follow(x: number): void {
+    if (this.motion.isMoving()) {
+      this.motion.retarget(x, Date.now());
+      this.animate();
+    } else {
+      this.motion.jump(x);
+    }
+  }
+
+  private static slot(index: number): number {
+    return (index + 0.5) * 212 / 3;
   }
 
   private release(cancelled: boolean): void {
@@ -96,15 +104,12 @@ export struct DockLightOverlay {
       }
       const nowMs: number = Date.now();
       this.canvas.clearRect(0, 0, 212, 56);
-      if (this.flowFrom >= 0) {
-        const sample: DockFlowSample = sampleDockFlow(this.flowFrom, this.flowTo, nowMs - this.flowStartedMs, 212);
-        this.center = sample.center;
-      }
+      const center: number = this.motion.step(nowMs);
       this.canvas.save();
       this.clipCapsule();
-      this.drawGlow(this.center, this.envelope.sample(nowMs), 45);
+      this.drawGlow(center, this.envelope.sample(nowMs), 45);
       this.canvas.restore();
-      if (this.pressed || this.envelope.needsFrame(nowMs)) {
+      if (this.pressed || this.envelope.needsFrame(nowMs) || this.motion.isMoving()) {
         this.getUIContext().postFrameCallback(frame);
       } else {
         this.running = false;
@@ -141,7 +146,7 @@ export struct DockLightOverlay {
       .accessibilityLevel('no-hide-descendants')
       .onReady(() => {
         this.ready = true;
-        if (this.pressed || this.envelope.needsFrame(Date.now())) this.animate();
+        if (this.pressed || this.envelope.needsFrame(Date.now()) || this.motion.isMoving()) this.animate();
       })
   }
 }

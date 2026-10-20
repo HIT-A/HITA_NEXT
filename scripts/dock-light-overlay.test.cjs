@@ -107,3 +107,27 @@ test('held Dock light grows to full intensity, tracks the finger, fades smoothly
   assert.ok(h.clearCount() > cleared);
   assert.equal(h.frames.length, 0);
 });
+
+test('a rapid second page change bends the flowing light toward the new tab without teleporting', () => {
+  const h = harness();
+  h.controller.press(0);
+  h.advance(30);
+  h.controller.release(false);
+  h.controller.transfer(0, 2);
+  h.advance(60);
+  const turning = h.draws.at(-1).x;
+  assert.ok(turning > 212 * 0.5 / 3 + 5, 'light has left the first tab');
+  // Second tap lands on the middle tab while the light is still travelling right.
+  h.controller.press(2);
+  h.controller.release(false);
+  h.controller.transfer(2, 0);
+  const after = h.draws.length;
+  h.advance(600);
+  const path = h.draws.slice(after).map(draw => draw.x);
+  let maxJump = Math.abs(path[0] - turning);
+  for (let i = 1; i < path.length; i++) maxJump = Math.max(maxJump, Math.abs(path[i] - path[i - 1]));
+  assert.ok(maxJump < 30, 'no teleport: largest per-frame step ' + maxJump);
+  assert.ok(Math.abs(path[0] - turning) < 30, 'continues from where the light was');
+  assert.ok(Math.abs(path.at(-1) - 212 * 0.5 / 3) < 1, 'settles on the final tab');
+  assert.equal(h.frames.length, 0);
+});

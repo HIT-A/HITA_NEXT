@@ -15,6 +15,8 @@ const slice = (start, end) => {
 function harness() {
   const queued = [];
   const intervals = [];
+  const intervalPeriods = [];
+  const clearedIntervals = [];
   const code = `
     class Home {
       currentTab = 0;
@@ -45,6 +47,8 @@ function harness() {
       refreshSummaries() { this.refreshes++; }
       ${slice('  private closeActiveSheet()', '  private requestCalendarExport()')}
       ${slice('  private startClock()', '  async refreshSummaries(')}
+      ${slice('  private static eventStatus(', '  private static statusColor(')}
+      ${slice('  private static durationText(', '  private static campusName(')}
       ${slice('  private selectTab(', '  private dockPageInset()')}
     }`;
   const output = ts.transpileModule(code, {
@@ -56,10 +60,11 @@ function harness() {
   };
   const clock = { day: 'today', printDate() { return this.day; } };
   const page = new Function('context', 'TimetableMarqueeCallback', 'drawTimetablePlaces', 'TAB_TIMETABLE',
-    'setInterval', 'EasTimeTools', output + '; return new Home();')(
+    'setInterval', 'clearInterval', 'EasTimeTools', 'EasEventType', output + '; return new Home();')(
     context, class { constructor(callback) { this.run = callback; } },
-    () => 1200, 1, callback => { intervals.push(callback); return 1; }, clock);
-  return { page, queued, intervals, clock };
+    () => 1200, 1, (callback, period) => { intervals.push(callback); intervalPeriods.push(period); return 1; },
+    id => clearedIntervals.push(id), clock, { CLASS: 'CLASS' });
+  return { page, queued, intervals, intervalPeriods, clearedIntervals, clock };
 }
 
 test('returning to the cached timetable resumes labels without repainting the full grid', () => {
@@ -129,11 +134,12 @@ test('finishing on another page or hiding the page never starts background label
   }
 });
 
-test('the clock updates Today without repainting a static grid and still refreshes at midnight', () => {
-  const { page, intervals, clock } = harness();
+test('the home clock updates course progress every second without repainting the static grid', () => {
+  const { page, intervals, intervalPeriods, clock } = harness();
   page.startClock();
   page.startClock();
   assert.equal(intervals.length, 1);
+  assert.equal(intervalPeriods[0], 1000);
   for (let i = 0; i < 4; i++) intervals[0]();
   assert.equal(page.highlights, 4);
   assert.equal(page.paints, 0);
@@ -143,6 +149,28 @@ test('the clock updates Today without repainting a static grid and still refresh
   assert.equal(page.refreshes, 1);
   intervals[0]();
   assert.equal(page.refreshes, 1);
+});
+
+test('today upcoming and ongoing course countdowns show whole minutes', () => {
+  const { page } = harness();
+  const home = page.constructor;
+  const next = { from: 120_000 };
+  const active = { type: 'CLASS', from: -60_000, to: 120_000 };
+  assert.equal(home.countdownText(next, 0), '2分钟 后开始');
+  assert.equal(home.eventStatusText(active, 0), '进行中 · 2分钟 后下课');
+  assert.equal(home.eventStatusText(active, 60_000), '进行中 · 1分钟 后下课');
+});
+
+test('the home clock stops while hidden and can start again when shown', () => {
+  const { page, intervals, intervalPeriods, clearedIntervals } = harness();
+  page.startClock();
+  page.stopClock();
+  assert.deepEqual(clearedIntervals, [1]);
+  assert.equal(page.clockTimer, -1);
+  page.startClock();
+  assert.equal(intervals.length, 2);
+  assert.deepEqual(intervalPeriods, [1000, 1000]);
+  assert.match(slice('  onPageHide()', '  private async onSessionRevisionChanged'), /this\.stopClock\(\)/);
 });
 
 test('data, appearance, wallpaper, week and geometry changes still repaint the timetable', () => {
@@ -159,4 +187,6 @@ test('data, appearance, wallpaper, week and geometry changes still repaint the t
   assert.match(tab, /height !== this\.timetableChromeH[\s\S]*this\.onTimetableArea/);
   assert.match(home, /onAnimationStart[\s\S]*?this\.tabTransitionRunning = true;[\s\S]*?this\.stopTimetableMarquee\(\)/);
   assert.match(home, /onAnimationEnd[\s\S]*?this\.finishTabAnimation\(index\)/);
+  assert.match(home, /Home\.durationText\(this\.activeClass\.to - this\.nowTick\)/);
+  assert.match(home, /Text\(Home\.eventStatusText\(event, this\.nowTick\)\)/);
 });

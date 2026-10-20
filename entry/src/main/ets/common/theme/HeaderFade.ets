@@ -18,6 +18,18 @@ export class HeaderFade {
     return Math.max(0, Math.min(1, scrollOffset / HeaderFade.DISTANCE));
   }
 
+  /** ARGB 颜色叠在 rgb（'r,g,b'）底色上的合成结果，同样以 'r,g,b' 返回。 */
+  static blendRgb(rgb: string, argb: number): string {
+    const base: number[] = rgb.split(',').map((part: string): number => Number(part.trim()));
+    const alpha: number = ((argb >>> 24) & 255) / 255;
+    const top: number[] = [(argb >>> 16) & 255, (argb >>> 8) & 255, argb & 255];
+    const mixed: number[] = [];
+    for (let i: number = 0; i < 3; i++) {
+      mixed.push(Math.round(top[i] * alpha + base[i] * (1 - alpha)));
+    }
+    return mixed.join(',');
+  }
+
   /** rgb 形如 '244,247,252'。 */
   static rgba(rgb: string, alpha: number): string {
     return 'rgba(' + rgb + ',' + alpha.toFixed(3) + ')';

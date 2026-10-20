@@ -10,6 +10,8 @@ export const WIDGET_BG_MAX_SCALE: number = 4;
 /** 实测 2×2 卡片约 1:1，2×4 卡片约 2.15:1。 */
 export const WIDGET_BG_COMPACT_ASPECT: number = 1;
 export const WIDGET_BG_WIDE_ASPECT: number = 2.15;
+/** 系统服务卡片圆角资源的预览基准（vp）。 */
+export const WIDGET_CARD_CORNER_RADIUS: number = 24;
 export const WIDGET_BG_COMPACT_OUTPUT_W: number = 600;
 export const WIDGET_BG_COMPACT_OUTPUT_H: number = 600;
 export const WIDGET_BG_WIDE_OUTPUT_W: number = 1290;

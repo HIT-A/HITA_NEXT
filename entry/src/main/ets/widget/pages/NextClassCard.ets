@@ -1,7 +1,6 @@
 import { NextClassModel, NextClassView } from '../../feature/widget/NextClassModel';
 
 const storage: LocalStorage = new LocalStorage();
-const NEXT_CLASS_CARD_RADIUS: number = 24;
 
 @Entry(storage)
 @Component
@@ -14,20 +13,38 @@ struct NextClassCard {
   @LocalStorageProp('bgCompact') bgCompact: string = '';
   @LocalStorageProp('bgWide') bgWide: string = '';
   @State view: NextClassView = new NextClassView();
+  @State title: string = '还没有课表';
+  @State timeLabel: string = '';
   @State place: string = '地点待定';
   @State teacher: string = '教师待定';
   @State countdown: string = '—';
   @State countdownUnit: string = '打开应用添加课表';
   @State isOngoing: boolean = false;
   @State progressPercent: number = 0;
+  // TextTimer never runs on its own: without start() onTimer is never dispatched.
+  private ticker: TextTimerController = new TextTimerController();
 
   aboutToAppear(): void {
     this.refreshDisplay();
   }
 
+  private startTicker(): void {
+    this.ticker.reset();
+    this.ticker.start();
+  }
+
+  private onTick(elapsedTime: number): void {
+    this.refreshDisplay();
+    // A count-up timer is not meant to run for days on a launcher; restart it periodically.
+    if (elapsedTime >= 43200) this.startTicker();
+  }
+
   private refreshDisplay(): void {
     const nextView: NextClassView = NextClassModel.view(
       this.scheduleJson, this.hasTimetable, this.dataState, Date.now());
+    // Name, place, teacher and time are switched together from the same selected course.
+    this.title = nextView.title;
+    this.timeLabel = nextView.timeLabel;
     this.place = nextView.place;
     this.teacher = nextView.teacher;
     this.countdown = nextView.countdown;
@@ -111,7 +128,7 @@ struct NextClassCard {
         .width(compact ? 44 : 52)
         .height(compact ? 44 : 52)
         .color('#2365B2')
-      Text(this.progressPercent.toString() + '%')
+      Text(Math.floor(this.progressPercent).toString() + '%')
         .fontSize(compact ? 10 : 12)
         .fontWeight(FontWeight.Bold)
         .fontColor('#182230')
@@ -124,15 +141,17 @@ struct NextClassCard {
     .flexShrink(0)
   }
 
+  // Builder string arguments are passed by value and never re-render, so the row reads the
+  // course fields from state itself; otherwise place/teacher stay on the first course shown.
   @Builder
-  metadataRow(icon: Resource, value: string, compact: boolean) {
+  metadataRow(icon: Resource, isTeacher: boolean, compact: boolean) {
     Row({ space: compact ? 4 : 6 }) {
       SymbolGlyph(icon)
         .fontSize(compact ? 11 : 13)
         .fontColor(['#687180'])
         .width(compact ? 14 : 17)
         .height(compact ? 14 : 18)
-      Text(value)
+      Text(isTeacher ? this.teacher : this.place)
         .fontSize(compact ? 10 : 12)
         .fontWeight(FontWeight.Medium)
         .fontColor('#515A67')
@@ -154,7 +173,7 @@ struct NextClassCard {
           .fontColor(['#687180'])
           .width(compact ? 14 : 17)
           .height(compact ? 18 : 20)
-        Text(this.view.title)
+        Text(this.title)
           .fontSize(compact ? 14 : 16)
           .fontWeight(FontWeight.Bold)
           .fontColor('#182230')
@@ -169,19 +188,19 @@ struct NextClassCard {
         if (compact) {
           Row({ space: 6 }) {
             Column() {
-              this.metadataRow($r('sys.symbol.pin'), this.place, true)
+              this.metadataRow($r('sys.symbol.pin'), false, true)
             }
             .layoutWeight(1)
             Column() {
-              this.metadataRow($r('sys.symbol.person_crop_circle_fill'), this.teacher, true)
+              this.metadataRow($r('sys.symbol.person_crop_circle_fill'), true, true)
             }
             .layoutWeight(1)
           }
           .width('100%')
           .alignItems(VerticalAlign.Center)
         } else {
-          this.metadataRow($r('sys.symbol.pin'), this.place, false)
-          this.metadataRow($r('sys.symbol.person_crop_circle_fill'), this.teacher, false)
+          this.metadataRow($r('sys.symbol.pin'), false, false)
+          this.metadataRow($r('sys.symbol.person_crop_circle_fill'), true, false)
         }
         Row({ space: compact ? 4 : 6 }) {
           SymbolGlyph($r('sys.symbol.clock'))
@@ -189,7 +208,7 @@ struct NextClassCard {
             .fontColor(['#687180'])
             .width(compact ? 14 : 17)
             .height(compact ? 14 : 16)
-          Text(this.view.startLabel)
+          Text(this.timeLabel)
             .fontSize(compact ? 10 : 11)
             .fontWeight(FontWeight.Medium)
             .fontColor('#515A67')
@@ -236,16 +255,18 @@ struct NextClassCard {
       .padding(12)
       .width('100%')
       .height('100%')
-      // Keep the minute tick outside the content's height and touch layout.
-      TextClock()
-        .format('HH:mm')
-        .fontSize(1)
-        .opacity(0)
-        .width(1)
-        .height(1)
+      // The second ticker for the progress ring. It must keep a real render area and
+      // non-zero opacity, otherwise the form engine treats it as invisible and stops it.
+      TextTimer({ isCountDown: false, controller: this.ticker })
+        .format('ss')
+        .fontSize(8)
+        .fontColor('#01000001')
+        .width(12)
+        .height(12)
         .position({ x: 0, y: 0 })
         .hitTestBehavior(HitTestMode.None)
-        .onDateChange((): void => this.refreshDisplay())
+        .onAppear((): void => this.startTicker())
+        .onTimer((_utc: number, elapsedTime: number): void => this.onTick(elapsedTime))
     }
     .width('100%')
     .height('100%')
@@ -255,7 +276,7 @@ struct NextClassCard {
     .backgroundImageSize(ImageSize.Cover)
     .backgroundImagePosition(Alignment.Center)
     // A single opaque surface and clip share the same outline. No inset backplate.
-    .borderRadius(NEXT_CLASS_CARD_RADIUS)
+    .borderRadius($r('sys.float.ohos_id_corner_radius_card'))
     .clip(true)
     .onClick((): void => this.openApp())
     .onAppear((): void => this.refreshDisplay())

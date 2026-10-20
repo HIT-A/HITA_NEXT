@@ -44,18 +44,25 @@ export class NextClassWidgetService {
     }, 300);
   }
 
-  static async load(context: common.Context): Promise<NextClassSnapshot> {
+  /** fromCardProcess: the form extension must bypass its stale per-process preferences cache. */
+  static async load(context: common.Context, fromCardProcess: boolean = false): Promise<NextClassSnapshot> {
     try {
       const rdb = RdbHelper.getInstance();
       await rdb.init(context);
-      const selection = TimetableSelectionStore.getInstance();
-      await selection.init(context);
-      const selectedId = await selection.load();
+      let selectedId: string;
+      if (fromCardProcess) {
+        selectedId = await TimetableSelectionStore.loadLatest(context);
+      } else {
+        const selection = TimetableSelectionStore.getInstance();
+        await selection.init(context);
+        selectedId = await selection.load();
+      }
       let timetable: EasTimetable | undefined = selectedId.length > 0 ?
         await rdb.getTimetableById(selectedId) : undefined;
       if (timetable === undefined) timetable = await TimetableResolver.getForDisplay(rdb);
       const events: EasEventItem[] = timetable === undefined ? [] : await rdb.getEventsOfTimetable(timetable.id);
-      return NextClassModel.snapshot(events, timetable !== undefined);
+      return NextClassModel.snapshot(events, timetable !== undefined, Date.now(),
+        timetable === undefined ? '' : timetable.id);
     } catch (error) {
       hilog.warn(0x0000, 'NextClassWidget', 'load failed: %{public}s', String(error));
       const snapshot = new NextClassSnapshot();
@@ -64,12 +71,13 @@ export class NextClassWidgetService {
     }
   }
 
+  /** Called only by NextClassFormAbility, which runs in the card's own process. */
   static async refreshForm(context: common.Context, formId: string): Promise<void> {
     let revision: number;
     let snapshot: NextClassSnapshot;
     do {
       revision = NextClassWidgetService.revision;
-      snapshot = await NextClassWidgetService.load(context);
+      snapshot = await NextClassWidgetService.load(context, true);
     } while (revision !== NextClassWidgetService.revision);
     await NextClassWidgetService.publish(context, formId, snapshot);
   }

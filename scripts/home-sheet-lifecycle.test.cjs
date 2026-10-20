@@ -71,6 +71,8 @@ function harness() {
       getUIContext() { return context; }
       stopTimetableMarquee() {}
       startTimetableMarquee() {}
+      stopClock() {}
+      startClock() {}
       async refreshSummaries() {}
       willDisappear() { ${callback('onWillDisappear')} }
       didDisappear() { ${callback('onDisappear')} }

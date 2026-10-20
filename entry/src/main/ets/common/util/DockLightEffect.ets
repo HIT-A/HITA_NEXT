@@ -59,6 +59,70 @@ export class DockLightController {
   }
 }
 
+/** Stiffness of the flowing light; settles a full-width travel well inside one tap envelope. */
+export const DOCK_FLOW_OMEGA: number = 24;
+
+/**
+ * Critically damped follower for the flowing light. Retargeting keeps the current position and velocity,
+ * so a rapid page change bends the light toward the new tab instead of restarting it at the old one.
+ */
+export class DockFlowMotion {
+  private position: number = 106;
+  private velocity: number = 0;
+  private target: number = 106;
+  private lastMs: number = -1;
+  private moving: boolean = false;
+
+  current(): number {
+    return this.position;
+  }
+
+  isMoving(): boolean {
+    return this.moving;
+  }
+
+  jump(x: number): void {
+    this.position = x;
+    this.target = x;
+    this.velocity = 0;
+    this.moving = false;
+    this.lastMs = -1;
+  }
+
+  retarget(x: number, nowMs: number): void {
+    if (!this.moving) {
+      this.velocity = 0;
+      this.lastMs = nowMs;
+    }
+    this.target = x;
+    this.moving = true;
+  }
+
+  step(nowMs: number): number {
+    if (!this.moving) {
+      return this.position;
+    }
+    // Exact critically damped solution, so frame drops cannot destabilise or overshoot it.
+    const dt: number = Math.max(0, Math.min(0.05, (nowMs - this.lastMs) / 1000));
+    this.lastMs = nowMs;
+    const w: number = DOCK_FLOW_OMEGA;
+    const x0: number = this.position - this.target;
+    const v0: number = this.velocity;
+    const decay: number = Math.exp(-w * dt);
+    const x: number = (x0 + (v0 + w * x0) * dt) * decay;
+    this.velocity = (v0 - (v0 + w * x0) * w * dt) * decay;
+    this.position = this.target + x;
+    if (Math.abs(x) < 0.5 && Math.abs(this.velocity) < 20) {
+      this.jump(this.target);
+    }
+    return this.position;
+  }
+
+  settle(): void {
+    this.jump(this.target);
+  }
+}
+
 export interface DockFlowSample {
   center: number;
   tail: number;
