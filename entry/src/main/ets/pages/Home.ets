@@ -39,11 +39,13 @@ import { CurrentClassSelection } from '../common/model/timetable/CurrentClassSel
 import { DOW_FULL, EasTimeTools } from '../common/util/EasTimeTools';
 import { EasCampus, EasSession } from '../feature/eas/EasSession';
 import { EasSessionStore, EAS_SESSION_REVISION_KEY } from '../feature/eas/EasSessionStore';
+import { attachEasSilentRenewal } from '../feature/eas/webLogin/EasSilentLoginWeb';
 import { SheetContent } from '../common/components/SheetContent';
 import { EasApiClient } from '../feature/eas/EasApiClient';
 import { EasDataProvider } from '../feature/eas/EasDataProvider';
 import { EasSessionStatus } from '../feature/eas/EasSessionStatus';
-import { EasImportResult, EasTimetableImporter } from '../feature/eas/EasTimetableImporter';
+import { EasImportResult, EasTimetableImporter, EasTimetableUpdate } from '../feature/eas/EasTimetableImporter';
+import { TimetableUpdateDialog } from '../feature/timetable/views/TimetableUpdateDialog';
 import { EasUserMessages } from '../feature/eas/EasUserMessages';
 import { EasLoginPage } from '../feature/eas/webLogin/EasLoginPage';
 import { TimetableResolver } from '../feature/timetable/data/TimetableResolver';
@@ -80,6 +82,8 @@ import {
 } from '../feature/timetable/views/TimetableWeekDraw';
 
 const DAY_MS: number = 24 * 60 * 60 * 1000;
+/** 打开应用或回到前台时，距上次检查同一张课表至少间隔这么久；重启应用后仍然有效。 */
+const TIMETABLE_UPDATE_INTERVAL_MS: number = 60 * 60 * 1000;
 const COLOR_PRIMARY: Resource = $r('app.color.hita_primary');
 const COLOR_SURFACE: ResourceColor = $r('app.color.hita_page');
 const COLOR_CARD: ResourceColor = $r('app.color.hita_surface');
@@ -201,6 +205,10 @@ struct Home {
   @State timetableAnimationDuration: number = 0;
   @State timetableAnimating: boolean = false;
   private importRequested: boolean = false;
+  private timetableUpdateChecking: boolean = false;
+  private timetableUpdatePrompting: boolean = false;
+  private pendingTimetableUpdate: EasTimetableUpdate | undefined = undefined;
+  private timetableUpdateDialog: CustomDialogController | undefined = undefined;
   private clockTimer: number = -1;
   private lastReminderDispatchAt: number = 0;
   @State @Watch('updateTimetableSystemBars') private pageVisible: boolean = false;
@@ -271,6 +279,7 @@ struct Home {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.NONE);
     const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
     await EasSessionStore.getInstance().init(ctx);
+    attachEasSilentRenewal(this.getUIContext());
     await TimetableSelectionStore.getInstance().init(ctx);
     await ClassReminderStore.getInstance().init(ctx);
     this.classReminderEnabled = await ClassReminderStore.getInstance().loadEnabled();
@@ -300,6 +309,7 @@ struct Home {
     }
     await this.refreshSummaries();
     this.startClock();
+    this.checkTimetableUpdate();
   }
 
   async onPageShow(): Promise<void> {
@@ -312,6 +322,7 @@ struct Home {
     const preserveWeek: boolean = this.returningFromCourseEditor;
     this.returningFromCourseEditor = false;
     await this.refreshSummaries(preserveWeek);
+    this.checkTimetableUpdate();
   }
 
   onPageHide(): void {
@@ -1394,6 +1405,74 @@ struct Home {
       this.importing = false;
       await this.refreshSummaries();
     }
+  }
+
+  /**
+   * 打开应用或回到前台时检查当前教务课表在教务端是否有变化。只读取不写库，
+   * 有变化时列出并由用户决定是否更新；网络或登录问题静默跳过。
+   */
+  private async checkTimetableUpdate(): Promise<void> {
+    if (this.pendingTimetableUpdate !== undefined) {
+      this.promptTimetableUpdate();
+      return;
+    }
+    const timetable: EasTimetable | undefined = this.currentTimetable;
+    const now: number = Date.now();
+    if (this.timetableUpdateChecking || this.importing || timetable === undefined ||
+      !EasTimetableImporter.isEasTimetable(timetable) || timetable.endTime < now) {
+      return;
+    }
+    this.timetableUpdateChecking = true;
+    try {
+      const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
+      const update: EasTimetableUpdate | undefined = await EasTimetableImporter.checkForUpdate(ctx, timetable,
+        TIMETABLE_UPDATE_INTERVAL_MS);
+      if (update !== undefined) {
+        this.pendingTimetableUpdate = update;
+        this.promptTimetableUpdate();
+      }
+    } catch (_) {
+      // 过期、离线等情况由教务功能页面各自提示；启动检查不打扰用户。
+    } finally {
+      this.timetableUpdateChecking = false;
+    }
+  }
+
+  /** 页面空闲时弹出变化清单；正在操作弹层或切页时留到下次显示页面。 */
+  private promptTimetableUpdate(): void {
+    const update: EasTimetableUpdate | undefined = this.pendingTimetableUpdate;
+    if (update === undefined || this.timetableUpdatePrompting || this.importing || !this.canOpenSheet()) {
+      return;
+    }
+    this.pendingTimetableUpdate = undefined;
+    if (this.currentTimetable?.id !== update.timetable.id) {
+      return;
+    }
+    this.timetableUpdatePrompting = true;
+    const ctx: common.Context = this.getUIContext().getHostContext() as common.Context;
+    this.timetableUpdateDialog = new CustomDialogController({
+      builder: TimetableUpdateDialog({
+        changes: update.changes,
+        onApply: async () => {
+          await EasTimetableImporter.applyUpdate(ctx, update);
+          this.timetableUpdatePrompting = false;
+          this.getUIContext().getPromptAction().showToast({ message: '课表已更新' });
+          await this.refreshSummaries();
+        },
+        onDismiss: async () => {
+          this.timetableUpdatePrompting = false;
+          await EasTimetableImporter.dismissUpdate(ctx, update);
+        }
+      }),
+      // 返回键关闭不算选择，下次检查仍会提醒。
+      cancel: () => {
+        this.timetableUpdatePrompting = false;
+      },
+      customStyle: true,
+      autoCancel: false,
+      alignment: DialogAlignment.Center
+    });
+    this.timetableUpdateDialog.open();
   }
 
   /** Edited courses keep their id; the key must change with every displayed field or the row is reused stale. */
