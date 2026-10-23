@@ -208,7 +208,7 @@ test('function-centre secondary pages use the same transparent header', () => {
   const pages = ['NoticesPage', 'ScorePage', 'ExamPage',
     'ImportTimetablePage', 'TimetableManagerPage', 'TimetableDetailPage', 'PortalsPage'];
   for (const page of pages) {
-    const source = read(page === 'ImportTimetablePage' ? 'pages/ImportTimetablePanel.ets' : `pages/${page}.ets`);
+    const source = read(page === 'ImportTimetablePage' ? 'feature/timetable/views/ImportTimetablePanel.ets' : `pages/${page}.ets`);
     const build = source.slice(source.indexOf('  build()'));
     assert.match(build, /HeaderFadeMask\(\{[\s\S]*?headerHeight: HEADER_HEIGHT/, page);
     assert.match(build, /Row\(\s*(?:\{[^{}\n]*\}\s*)?\)\s*\{\s*HeaderBackButton\(\{[\s\S]*?\.height\(HEADER_HEIGHT\)[\s\S]*?\.hitTestBehavior\(HitTestMode\.Transparent\)/, page);

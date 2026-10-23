@@ -4,7 +4,8 @@ const path = require('node:path');
 const test = require('node:test');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '../entry/src/main/ets');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+// Sources are checked out with CRLF; the slice markers below are written with \n.
+const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
 function load(file) {
   const mod = { exports: {} };
   const code = ts.transpileModule(read(file), {

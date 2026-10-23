@@ -324,9 +324,9 @@ test('database startup no longer rewrites saved dates to a hard-coded autumn Mon
 
 test('import page ignores late calendar responses after changing the selected term', async () => {
   const pending = [];
-  const { ImportTimetablePanel } = load('pages/ImportTimetablePanel.ets', {
-    '../common/db/RdbHelper': { RdbHelper: { getInstance: () => ({ init: async () => {} }) } },
-    '../feature/eas/EasTimetableImporter': { EasTimetableImporter: {
+  const { ImportTimetablePanel } = load('feature/timetable/views/ImportTimetablePanel.ets', {
+    '../../../common/db/RdbHelper': { RdbHelper: { getInstance: () => ({ init: async () => {} }) } },
+    '../../eas/EasTimetableImporter': { EasTimetableImporter: {
       loadStartDate: async (db, provider, session, term) =>
         new Promise(resolve => pending.push({ term, resolve })),
       scheduleStructure: () => []
@@ -351,7 +351,7 @@ test('import page ignores late calendar responses after changing the selected te
 });
 
 test('manual date selection uses Monday, and cannot race an in-flight calendar request', () => {
-  const { ImportTimetablePanel } = load('pages/ImportTimetablePanel.ets');
+  const { ImportTimetablePanel } = load('feature/timetable/views/ImportTimetablePanel.ets');
   const page = new ImportTimetablePanel();
   const pickers = [];
   page.getUIContext = () => ({ showDatePickerDialog: picker => pickers.push(picker) });

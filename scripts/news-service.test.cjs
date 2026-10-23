@@ -20,7 +20,9 @@ const feed = items => tag('rss', tag('channel', items));
 const EasCampus = { BENBU: 'BENBU', SHENZHEN: 'SHENZHEN', WEIHAI: 'WEIHAI' };
 const blogListHtml = `<main><div class="divide-y border-y">
   <div class="group relative flex flex-col"><a class="absolute inset-0" href="/blog/macbook-guide">
-    <span class="sr-only">MacBook 配置指北</span></a><div><h2 class="font-medium">MacBook 配置指北</h2></div>
+    <span class="sr-only">MacBook 配置指北</span></a><div><h2 class="font-medium">MacBook 配置指北</h2>
+    <p class="text-sm">如何正确使用一台 MacBook</p><div class="mt-2"><a href="/blog/tags/%E7%94%B5%E8%84%91">#<!-- -->电脑设置</a>
+    <a href="/blog/tags/%E6%95%88%E7%8E%87">#<!-- -->效率工具</a><a href="/blog/tags/%E6%95%88%E7%8E%87">#效率工具</a></div></div>
     <time dateTime="2026-09-14T00:00:00.000Z">2026 年 9 月 14 日</time></div>
   <div class="group relative flex flex-col"><a href="/blog/no-standard-answer">
     <span class="sr-only">大学从来没有标准答案</span></a><div><h2>大学从来没有标准答案</h2></div>
@@ -89,7 +91,7 @@ test('blog XML tokens preserve CDATA, decoded entities, multiple authors and pub
       ...field('pubDate', 'Mon, 14 Sep 2026 00:00:00 GMT'),
       ...field('author', '作者甲'),
       ...field('author', '作者乙'),
-      ...field('description', 'This is not the title'),
+      ...field('description', '<p>摘要 &amp; 说明</p>', 'CDSECT'),
       ...field('content:encoded', '<h1>正文与 <item> 标签不应进入列表</h1>', 'CDSECT')
     ]),
     ...item('相对链接', '/blog/second', [...field('dc:creator', '作者丙'), ...field('pubDate', 'invalid')])
@@ -97,8 +99,9 @@ test('blog XML tokens preserve CDATA, decoded entities, multiple authors and pub
   const { NewsService } = loadService({ events });
   const result = NewsService.parseBlogFeed('feed body');
   assert.deepEqual(result.map(entry => ({ ...entry })), [
-    { title: '课程 <攻略>& 笔记', url: 'https://hoa.moe/blog/guide?a=1&b=2', department: '作者甲、作者乙', date: '2026-09-14' },
-    { title: '相对链接', url: 'https://hoa.moe/blog/second', department: '作者丙', date: '' }
+    { title: '课程 <攻略>& 笔记', url: 'https://hoa.moe/blog/guide?a=1&b=2', department: '作者甲、作者乙', date: '2026-09-14',
+      summary: '摘要 & 说明', tags: [] },
+    { title: '相对链接', url: 'https://hoa.moe/blog/second', department: '作者丙', date: '', summary: '', tags: [] }
   ]);
 });
 
@@ -135,8 +138,10 @@ test('HOA blog list parses its lightweight cards, dates and only same-site artic
     <a href="https://evil.example/blog/a"><span class="sr-only">外链</span></a><h2>外链</h2><time dateTime="2026-01-01"></time>
   </div></main>`);
   assert.deepEqual(NewsService.parseBlogList(html).map(value => ({ ...value })), [
-    { url: 'https://hoa.moe/blog/macbook-guide', title: 'MacBook 配置指北', department: 'HOA', date: '2026-09-14' },
-    { url: 'https://hoa.moe/blog/no-standard-answer', title: '大学从来没有标准答案', department: 'HOA', date: '2026-09-12' }
+    { url: 'https://hoa.moe/blog/macbook-guide', title: 'MacBook 配置指北', department: 'HOA', date: '2026-09-14',
+      summary: '如何正确使用一台 MacBook', tags: ['电脑设置', '效率工具'] },
+    { url: 'https://hoa.moe/blog/no-standard-answer', title: '大学从来没有标准答案', department: 'HOA', date: '2026-09-12',
+      summary: '', tags: [] }
   ]);
   assert.throws(() => NewsService.parseBlogList('<html>Service unavailable</html>'), /Unrecognized/);
 });
@@ -181,7 +186,7 @@ test('notifications retain the original HTML source, metadata parsing and page-n
   assert.equal(result.hasMore, true);
   assert.deepEqual({ ...result.items[0] }, {
     title: '课程 & 考试通知', url: 'https://today.hit.edu.cn/article/2026/10/05/123',
-    department: '教务处', date: '2026-10-05'
+    department: '教务处', date: '2026-10-05', summary: '', tags: []
   });
   await NewsService.fetchCategory('10', 2);
   assert.deepEqual(state.requests.map(request => request.url),
@@ -244,8 +249,10 @@ test('Shenzhen notifications start at page one, preserve full titles and dates, 
   assert.equal(result.ok, true);
   assert.equal(result.hasMore, true);
   assert.deepEqual(result.items.map(value => ({ ...value })), [
-    { url: 'http://info.hitsz.edu.cn/info/1053/12345.htm', title: '课程 & 考试完整通知', date: '2026-10-11', department: '' },
-    { url: 'http://info.hitsz.edu.cn/info/1053/12346.htm', title: '2026年10月20日活动通知', date: '2026-10-09', department: '' }
+    { url: 'http://info.hitsz.edu.cn/info/1053/12345.htm', title: '课程 & 考试完整通知', date: '2026-10-11', department: '',
+      summary: '', tags: [] },
+    { url: 'http://info.hitsz.edu.cn/info/1053/12346.htm', title: '2026年10月20日活动通知', date: '2026-10-09', department: '',
+      summary: '', tags: [] }
   ]);
   await NewsService.fetchCategory('10', 2, EasCampus.SHENZHEN);
   const last = await NewsService.fetchCategory('10', 307, EasCampus.SHENZHEN);

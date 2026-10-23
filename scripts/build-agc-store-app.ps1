@@ -19,7 +19,8 @@ $OldSdkHome = $env:DEVECO_SDK_HOME
 $OldJavaHome = $env:JAVA_HOME
 $env:NODE_PATH = Join-Path $DevEcoHome 'sdk\default\openharmony\ets\build-tools\ets-loader\node_modules'
 
-Add-Type -AssemblyName System.Security.Cryptography.Pkcs
+# PowerShell 7 ships SignedCms in its own assembly; Windows PowerShell 5.1 has it in System.Security.
+try { Add-Type -AssemblyName System.Security.Cryptography.Pkcs } catch { Add-Type -AssemblyName System.Security }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 function Read-Profile([string]$Path) {
   $Cms = [System.Security.Cryptography.Pkcs.SignedCms]::new()

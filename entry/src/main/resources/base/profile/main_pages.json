@@ -5,6 +5,8 @@
     "pages/NewsPage",
     "pages/PortalsPage",
     "pages/NoticesPage",
+    "pages/AppAboutPage",
+    "pages/PrivacyPolicyPage",
     "pages/ScorePage",
     "pages/CreditPage",
     "pages/EmptyClassroomPage",

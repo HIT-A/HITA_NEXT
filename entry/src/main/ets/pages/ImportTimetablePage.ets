@@ -1,5 +1,5 @@
 /** Android-style timetable import route. */
-import { ImportTimetablePanel } from './ImportTimetablePanel';
+import { ImportTimetablePanel } from '../feature/timetable/views/ImportTimetablePanel';
 
 @Entry
 @Component

@@ -188,16 +188,42 @@ test('card-process refreshes bypass the stale per-process selection cache', asyn
   service.load = async (_context, fromCardProcess) => { calls.push(fromCardProcess); return { scheduleJson: '[]' }; };
   await service.refreshForm({}, 'card');
   assert.deepEqual(calls, [true]);
-  const removed = [];
-  const store = { get: async () => 'latest' };
+  // Evicting the shared preferences cache let detached instances flush the old selection back to disk,
+  // so the card reads a mirror file that every selection write keeps current.
+  const files = new Map();
+  const fileIo = {
+    OpenMode: { CREATE: 1, WRITE_ONLY: 2, TRUNC: 4 },
+    accessSync: p => files.has(p),
+    readTextSync: p => files.get(p),
+    openSync: p => ({ fd: p }),
+    writeSync: (fd, text) => files.set(fd, text),
+    closeSync() {},
+    renameSync: (from, to) => { files.set(to, files.get(from)); files.delete(from); }
+  };
+  const data = new Map([['active_timetable_id', 'old']]);
+  const store = {
+    get: async (key, fallback) => data.has(key) ? data.get(key) : fallback,
+    put: async (key, value) => data.set(key, value),
+    delete: async key => data.delete(key),
+    flush: async () => {}
+  };
   const { TimetableSelectionStore } = load('feature/timetable/data/TimetableSelectionStore.ets', {
+    '@kit.CoreFileKit': { fileIo },
     '@kit.ArkData': { preferences: {
-      removePreferencesFromCacheSync: (_context, options) => removed.push(options.name),
-      getPreferences: async () => { assert.equal(removed.length, 1); return store; }
+      removePreferencesFromCacheSync: () => assert.fail('the shared preferences cache must never be evicted'),
+      getPreferences: async () => store
     } }
   });
-  assert.equal(await TimetableSelectionStore.loadLatest({}), 'latest');
-  assert.deepEqual(removed, ['hitanext_store']);
+  const context = { getApplicationContext: () => ({ filesDir: '/app' }) };
+  assert.equal(await TimetableSelectionStore.loadLatest(context), '', 'no mirror yet');
+  const selection = new TimetableSelectionStore();
+  await selection.init(context);
+  assert.equal(await TimetableSelectionStore.loadLatest(context), 'old', 'init seeds the mirror from preferences');
+  await selection.save('latest');
+  assert.equal(await TimetableSelectionStore.loadLatest(context), 'latest');
+  assert.ok(!files.has('/app/active_timetable_id.txt.tmp'), 'writes go through a renamed temp file');
+  await selection.clear();
+  assert.equal(await TimetableSelectionStore.loadLatest(context), '');
 });
 test('refreshes each published card and tolerates a card removed during refresh', async () => {
   const published = [];

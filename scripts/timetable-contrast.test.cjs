@@ -17,6 +17,7 @@ function load(name) {
     if (key === '@kit.ImageKit') return { get image() { return nativeImage; } };
     if (key === '@kit.CoreFileKit') return { get fileIo() { return nativeFiles; } };
     if (key === '@kit.ArkData') return { preferences: { getPreferences: async () => prefs } };
+    if (key === '@kit.PerformanceAnalysisKit') return { hilog: { warn() {} } };
     return load(path.resolve(path.dirname(file), key + '.ets'));
   };
   new Function('require', 'module', 'exports', output)(req, mod, mod.exports);

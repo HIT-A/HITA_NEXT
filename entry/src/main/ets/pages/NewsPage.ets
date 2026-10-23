@@ -11,6 +11,7 @@ import { HeaderFadeMask } from '../common/components/HeaderFadeMask';
 import { HeaderFade } from '../common/theme/HeaderFade';
 import { NAV_BAR_INSET_FALLBACK, STATUS_BAR_INSET_FALLBACK } from '../common/theme/StatusBarInset';
 import { NewsCategory, NewsItem, NewsPage as NewsPageResult, NewsService } from '../feature/news/NewsService';
+import { NewsPresentation, NewsRowModel } from '../feature/news/NewsPresentation';
 import { EasCampus } from '../feature/eas/EasSession';
 import { EasSessionStore } from '../feature/eas/EasSessionStore';
 
@@ -21,6 +22,9 @@ const COLOR_TEXT_PRIMARY: ResourceColor = $r('app.color.hita_text');
 const COLOR_TEXT_SECONDARY: ResourceColor = $r('app.color.hita_text_secondary');
 const COLOR_TEXT_HINT: ResourceColor = $r('app.color.hita_text_secondary_5a6880');
 const COLOR_NAV_ACTIVE: ResourceColor = $r('app.color.hita_selected');
+const COLOR_TAG_BG: ResourceColor = $r('app.color.hita_text_secondary_808080');
+const COLOR_TAG_TEXT: ResourceColor = $r('app.color.hita_surface');
+const AVATAR_SIZE: number = 46;
 
 @Entry
 @Component
@@ -233,17 +237,26 @@ struct NewsPage {
   newsList() {
     Stack({ alignContent: Alignment.Top }) {
       Refresh({ refreshing: $$this.refreshing }) {
-        List({ space: 10, scroller: this.newsScroller }) {
+        List({ scroller: this.newsScroller }) {
           if (deviceInfo.apiAvailable('26.0.0')) {
             ListItem() {
               Column().height(112 + this.statusBarInset);
             }
           }
-          ForEach(this.items, (item: NewsItem) => {
+          // One shared surface: the first and last rows round its corners.
+          ForEach(this.items, (item: NewsItem, index: number) => {
             ListItem() {
-              this.newsRow(item);
+              this.newsRow(item, this.rowModel(item), index === this.items.length - 1);
             }
-          }, (item: NewsItem) => item.url);
+            .backgroundColor(COLOR_CARD)
+            .borderRadius({
+              topLeft: index === 0 ? 20 : 0, topRight: index === 0 ? 20 : 0,
+              bottomLeft: index === this.items.length - 1 ? 20 : 0,
+              bottomRight: index === this.items.length - 1 ? 20 : 0
+            })
+            .clip(true);
+          }, (item: NewsItem, index: number) => item.url + (index === this.items.length - 1 ? '#last' : '') +
+            (index === 0 ? '#first' : ''));
           ListItem() {
             this.listFooter();
           }
@@ -331,41 +344,113 @@ struct NewsPage {
     .alignItems(HorizontalAlign.Center);
   }
 
+  private rowModel(item: NewsItem): NewsRowModel {
+    return NewsPresentation.row(item, NewsService.CATEGORIES[this.selected].id === 'blog', this.campus, Date.now());
+  }
+
+  /**
+   * Message-list layout (HITA Aura): source avatar, bold title with a semantic date, then the
+   * tag and source in grey and, for blog posts, an excerpt. Rows share one surface and are
+   * separated by dividers inset past the avatar.
+   */
   @Builder
-  newsRow(item: NewsItem) {
+  newsRow(item: NewsItem, row: NewsRowModel, last: boolean) {
     Column() {
-      Text(item.title)
-        .fontSize(15)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(COLOR_TEXT_PRIMARY)
-        .lineHeight(22)
-        .maxLines(3)
-        .textOverflow({ overflow: TextOverflow.Ellipsis });
       Row() {
-        if (item.department.length > 0) {
-          Text(item.department)
-            .fontSize(11)
-            .fontColor(COLOR_PRIMARY)
-            .backgroundColor(COLOR_NAV_ACTIVE)
-            .borderRadius(9)
-            .padding({ left: 7, right: 7, top: 2, bottom: 2 })
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .constraintSize({ maxWidth: '60%' });
+        Stack() {
+          Text(row.avatarText)
+            .fontSize(NewsPresentation.avatarFontSize(row.avatarText))
+            .lineHeight(row.avatarText.includes('\n') ? 13 : 18)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+            .textAlign(TextAlign.Center)
+            .maxLines(row.avatarText.includes('\n') ? 2 : 1)
+            .wordBreak(WordBreak.BREAK_ALL);
         }
-        Blank();
-        Text(item.date)
-          .fontSize(12)
-          .fontColor(COLOR_TEXT_HINT);
+        .width(AVATAR_SIZE)
+        .height(AVATAR_SIZE)
+        .borderRadius(AVATAR_SIZE / 2)
+        .flexShrink(0)
+        .linearGradient({
+          angle: 180,
+          colors: [[row.avatarColors[0], 0], [row.avatarColors[1], 1]]
+        })
+        .accessibilityLevel('no');
+
+        Column() {
+          // Title first, as on iOS; the date sits on its first line.
+          Row() {
+            Text(row.title)
+              .fontSize(16)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(COLOR_TEXT_PRIMARY)
+              .lineHeight(22)
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1);
+            if (row.date.length > 0) {
+              Text(row.date)
+                .fontSize(13)
+                .lineHeight(22)
+                .fontColor(COLOR_TEXT_HINT)
+                .flexShrink(0)
+                .margin({ left: 8 });
+            }
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Top);
+
+          // Secondary line: inline tag chip, then the publishing department or author.
+          Text() {
+            if (row.tag.length > 0) {
+              Span(row.tag)
+                .fontSize(11)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_TAG_TEXT)
+                .textBackgroundStyle({ color: COLOR_TAG_BG, radius: 4 });
+              Span('  ')
+                .fontSize(13);
+            }
+            Span(row.source)
+              .fontSize(13)
+              .fontColor(COLOR_TEXT_SECONDARY);
+          }
+          .width('100%')
+          .lineHeight(20)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ top: 4 });
+
+          if (row.body.length > 0) {
+            Text(row.body)
+              .fontSize(14)
+              .lineHeight(20)
+              .fontColor(COLOR_TEXT_SECONDARY)
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+              .margin({ top: 2 });
+          }
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: 12 });
       }
       .width('100%')
-      .margin({ top: 8 });
+      .alignItems(VerticalAlign.Top)
+      .padding({ left: 14, right: 14, top: 12, bottom: 12 });
+
+      if (!last) {
+        Divider()
+          .strokeWidth(0.5)
+          .color($r('app.color.hita_divider_edf1f7'))
+          .margin({ left: 14 + AVATAR_SIZE + 12, right: 14 });
+      }
     }
     .width('100%')
-    .alignItems(HorizontalAlign.Start)
-    .padding({ left: 16, right: 16, top: 14, bottom: 12 })
-    .backgroundColor(COLOR_CARD)
-    .borderRadius(16)
+    .accessibilityGroup(true)
+    .accessibilityText(row.title + '，' + row.source +
+      (row.date.length > 0 ? '，' + row.date : ''))
     .onClick(() => {
       this.open(item.url, item.title);
     });

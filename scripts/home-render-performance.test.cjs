@@ -47,7 +47,6 @@ function harness() {
       refreshSummaries() { this.refreshes++; }
       ${slice('  private closeActiveSheet()', '  private requestCalendarExport()')}
       ${slice('  private startClock()', '  async refreshSummaries(')}
-      ${slice('  private static eventStatus(', '  private static statusColor(')}
       ${slice('  private static durationText(', '  private static campusName(')}
       ${slice('  private selectTab(', '  private dockPageInset()')}
     }`;
@@ -154,11 +153,23 @@ test('the home clock updates course progress every second without repainting the
 test('today upcoming and ongoing course countdowns show whole minutes', () => {
   const { page } = harness();
   const home = page.constructor;
-  const next = { from: 120_000 };
-  const active = { type: 'CLASS', from: -60_000, to: 120_000 };
-  assert.equal(home.countdownText(next, 0), '2分钟 后开始');
-  assert.equal(home.eventStatusText(active, 0), '进行中 · 2分钟 后下课');
-  assert.equal(home.eventStatusText(active, 60_000), '进行中 · 1分钟 后下课');
+  const contains = function (ts) { return ts >= this.from && ts <= this.to; };
+  page.nextClass = { from: 120_000, to: 600_000 };
+  assert.equal(page.heroMinutesLeft(), 2);
+  assert.equal(page.heroCountdownSuffix(), ' 后上课');
+  page.nowTick = 61_000;
+  assert.equal(page.heroMinutesLeft(), 1, 'partial minutes round up');
+  page.activeClass = { from: -60_000, to: 7_380_000 };
+  page.nowTick = 0;
+  assert.equal(page.heroMinutesLeft(), 123, 'the ongoing class counts down to its end');
+  assert.equal(page.heroCountdownSuffix(), ' 后下课');
+  page.nowTick = 8_000_000;
+  assert.equal(page.heroMinutesLeft(), 0, 'never negative');
+  const soon = { type: 'CLASS', from: 120_000, to: 600_000, containsTimestamp: contains };
+  assert.equal(home.todayChipText(soon, 0), '2分钟后');
+  assert.equal(home.todayChipText(soon, 300_000), '进行中');
+  assert.equal(home.todayChipText(soon, 700_000), '已结束');
+  assert.equal(home.todayChipText(soon, -3_600_000), '', 'no chip for classes far ahead');
 });
 
 test('the home clock stops while hidden and can start again when shown', () => {
@@ -187,6 +198,7 @@ test('data, appearance, wallpaper, week and geometry changes still repaint the t
   assert.match(tab, /height !== this\.timetableChromeH[\s\S]*this\.onTimetableArea/);
   assert.match(home, /onAnimationStart[\s\S]*?this\.tabTransitionRunning = true;[\s\S]*?this\.stopTimetableMarquee\(\)/);
   assert.match(home, /onAnimationEnd[\s\S]*?this\.finishTabAnimation\(index\)/);
-  assert.match(home, /Home\.durationText\(this\.activeClass\.to - this\.nowTick\)/);
-  assert.match(home, /Text\(Home\.eventStatusText\(event, this\.nowTick\)\)/);
+  // Countdowns re-render from nowTick on each clock tick instead of repainting the grid.
+  assert.match(home, /Span\(\(this\.heroMinutesLeft\(\) % 60\)\.toString\(\)\)/);
+  assert.match(home, /Text\(Home\.todayChipText\(event, this\.nowTick\)\)/);
 });

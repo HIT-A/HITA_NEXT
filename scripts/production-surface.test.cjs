@@ -73,9 +73,14 @@ test('production modules contain no generators or executable parser fixtures', (
 
 test('today empty state has no login or timetable management actions', () => {
   const home = fs.readFileSync(path.join(etsRoot, 'pages/Home.ets'), 'utf8');
-  const today = home.slice(home.indexOf('  emptyToday()'), home.indexOf('  eventRow('));
+  const empty = home.indexOf('  emptyToday()');
+  assert.ok(empty >= 0 && home.indexOf('  eventRow(', empty) > empty, 'emptyToday precedes eventRow');
+  const today = home.slice(empty, home.indexOf('  eventRow(', empty));
   assert.match(today, /还没有可展示的课表/);
   assert.doesNotMatch(today, /emptyTimetableActions|Button\(|openSessionSheet|pushUrl/);
+  // The hero card and the exam card are also on the Today tab; neither offers account or import actions.
+  const hero = home.slice(home.indexOf('  todayHeroCard()'), home.indexOf('  todaySectionHeader()'));
+  assert.doesNotMatch(hero, /emptyTimetableActions|openSessionSheet|ImportTimetablePage|TimetableManagerPage/);
 });
 
 test('timetable empty state and more page retain timetable workflows', () => {
@@ -101,10 +106,13 @@ test('local search and its empty section are not reachable or shipped', () => {
   }
 });
 
-test('classroom lookup opens the registered query page', () => {
+test('classroom lookup opens the query page as a sheet from More and keeps its route', () => {
   const home = fs.readFileSync(path.join(etsRoot, 'pages/Home.ets'), 'utf8');
-  assert.match(home, /'空教室'/);
-  assert.match(home, /url:\s*'pages\/EmptyClassroomPage'/);
+  assert.match(home, /'空教室',\s*'[^']*', \(\) => \{\s*this\.openAcademicPanel\(4\);/);
+  assert.match(home, /this\.academicPanelKind === 4\) \{\s*EmptyClassroomPage\(\{ presentedAsSheet: true, onClose: \(\) => this\.closeActiveSheet\(\) \}\)/);
+  // The standalone route stays registered for direct navigation.
+  const pages = JSON.parse(fs.readFileSync(path.join(etsRoot, '../resources/base/profile/main_pages.json'), 'utf8'));
+  assert.ok(pages.src.includes('pages/EmptyClassroomPage'));
 });
 
 test('academic errors expose only known user messages, never internal diagnostics', () => {

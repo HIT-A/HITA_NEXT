@@ -10,11 +10,13 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 test('only Today event cards use the API 26-capable material branch; heading and empty state stay unchanged', () => {
   const home = read('pages/Home.ets');
   const today = home.slice(home.indexOf('  tabToday()'), home.indexOf('  todayHeader()'));
-  assert.match(today, /this\.todaySectionHeader\(\);\s*if \(this\.todayItems\.length === 0\) \{\s*this\.emptyToday\(\)/);
+  // No timetable: text-only empty state. Otherwise the heading appears only above a non-empty list.
+  assert.match(today, /if \(!this\.hasTimetable\) \{\s*ListItem\(\) \{\s*this\.emptyToday\(\);/);
+  assert.match(today, /\} else if \(this\.todayItems\.length > 0\) \{\s*ListItem\(\) \{\s*this\.todaySectionHeader\(\);/);
   assert.match(today, /ForEach\(this\.todayItems, \(event: EasEventItem\) => \{\s*ListItem\(\) \{\s*if \(CompatibleSheetMaterial\.isEnabled\(\)\) \{\s*ImmersiveEventCard/);
-  assert.match(today, /ImmersiveEventCard\(\{ content: \(\) => \{ this\.eventRow\(event, true\); \} \}\)\s*\} else \{\s*this\.eventRow\(event\)/);
+  assert.match(today, /ImmersiveEventCard\(\{ content: \(\) => \{ this\.eventRow\(event, true\); \} \}\)[\s\S]*?\} else \{\s*this\.eventRow\(event\)/);
   assert.match(today, /\}, \(event: EasEventItem\) => Home\.todayItemKey\(event\)\)/);
-  assert.doesNotMatch(home.slice(home.indexOf('  todaySectionHeader()'), home.indexOf('  emptyToday()')),
+  assert.doesNotMatch(home.slice(home.indexOf('  todaySectionHeader()'), home.indexOf('  eventRow(')),
     /ImmersiveEventCard|CompatibleMaterialModifier|systemMaterial/);
 });
 
@@ -59,9 +61,9 @@ test('measured card height ignores invalid values and updates when event content
 test('card text, status colors, time rail and progress remain in the original content layer', () => {
   const home = read('pages/Home.ets');
   const row = home.slice(home.indexOf('  eventRow('), home.indexOf('  emptyTimetableActions()'));
-  for (const source of ['EasTimeTools.printTime(event.from)', "Text('已结束')",
-    'Home.typeTag(event.type)', 'Home.eventStatus(event, this.nowTick)',
-    'event.place.length > 0', 'event.teacher.length > 0',
+  for (const source of ['EasTimeTools.printTime(event.from)', 'EasTimeTools.printTime(event.to)',
+    'Home.todayChipText(event, this.nowTick)', 'Home.todayChipColor(event, this.nowTick)',
+    'Home.placeTeacher(event)', 'timetableBlockColor(event.color)',
     'Progress({ value: event.getProgress(this.nowTick) * 100']) {
     assert.ok(row.includes(source), source);
   }

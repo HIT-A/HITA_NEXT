@@ -151,7 +151,7 @@ test('more opens the reusable timetable importer as an expanded sheet while pres
   assert.match(more, /'导入课表',[\s\S]*?this\.openImportTimetableSheet\(\)/);
   assert.match(home, /private openImportTimetableSheet\(\): void \{\s*if \(!this\.canOpenSheet\(\)\) \{\s*return;\s*\}\s*this\.importTimetableSheetOpen = true;\s*this\.activeSheetVisible = true;/);
   assert.match(home, /ImportTimetablePanel\(\{\s*presentedAsSheet: true,[\s\S]*?onClose: \(\) => this\.closeActiveSheet\(\),[\s\S]*?onImported: \(\) => \{ void this\.refreshSummaries\(\); \}/);
-  const panel = read('ets/pages/ImportTimetablePanel.ets');
+  const panel = read('ets/feature/timetable/views/ImportTimetablePanel.ets');
   assert.match(panel, /\.padding\(\{ top: this\.presentedAsSheet \? 0 : this\.statusBarInset \}\)/);
   assert.match(panel, /CompatibleSheetMaterial\.bodyColor\(PAGE_BG\)/);
   assert.match(panel, /new CompatibleLightModifier\(24, this\.presentedAsSheet &&\s*CompatibleSheetMaterial\.isEnabled\(\), true\)/);

@@ -29,6 +29,10 @@ export class NewsItem {
   title: string = '';
   department: string = '';
   date: string = '';
+  /** Blog excerpt; campus notice lists only publish titles. */
+  summary: string = '';
+  /** Blog tags without the leading "#". */
+  tags: string[] = [];
 }
 
 export class NewsPage {
@@ -173,6 +177,9 @@ export class NewsService {
         item.url = 'https://hoa.moe' + path;
         item.title = title;
         item.department = 'HOA';
+        const summary: RegExpExecArray | null = /<p\b[^>]*>([\s\S]*?)<\/p>/i.exec(match[2]);
+        item.summary = summary === null ? '' : NewsService.cleanText(summary[1]);
+        item.tags = NewsService.blogTags(match[2]);
         const date: string = NewsService.attribute(match[3], 'datetime');
         const dateMatch: RegExpExecArray | null = /^(\d{4}-\d{2}-\d{2})/.exec(date);
         item.date = dateMatch === null ? '' : dateMatch[1];
@@ -185,6 +192,22 @@ export class NewsService {
       throw new Error('Unrecognized blog list');
     }
     return items;
+  }
+
+  /** HOA renders tags as same-site links whose text is "#" + name. */
+  private static blogTags(card: string): string[] {
+    const tags: string[] = [];
+    const links: RegExp = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+    let link: RegExpExecArray | null = links.exec(card);
+    while (link !== null) {
+      const href: string = NewsService.attribute(link[1], 'href');
+      const name: string = NewsService.cleanText(link[2]).replace(/^#\s*/, '');
+      if (href.startsWith('/blog/tags/') && name.length > 0 && tags.indexOf(name) < 0) {
+        tags.push(name);
+      }
+      link = links.exec(card);
+    }
+    return tags;
   }
 
   static noticeUrl(campus: EasCampus, page: number): string {
@@ -268,7 +291,7 @@ export class NewsService {
         } else if (event === xml.EventType.TEXT || event === xml.EventType.CDSECT ||
           event === xml.EventType.ENTITY_REFERENCE || event === xml.EventType.WHITESPACE) {
           if (path.length === 4 && path[0] === 'rss' && path[1] === 'channel' && path[2] === 'item' &&
-            ['title', 'link', 'pubDate', 'author', 'creator', 'dc:creator'].includes(path[3])) {
+            ['title', 'link', 'pubDate', 'author', 'creator', 'dc:creator', 'description'].includes(path[3])) {
             fieldText += info.getText();
           }
         } else if (event === xml.EventType.END_TAG) {
@@ -292,6 +315,10 @@ export class NewsService {
                   if (value.length > 0) {
                     current.department += (current.department.length > 0 ? '、' : '') + value;
                   }
+                  break;
+                case 'description':
+                  // The excerpt may carry inline markup; keep plain text only.
+                  current.summary = NewsService.cleanText(value);
                   break;
               }
             } else if (path.length === 3 && current.title.length > 0 &&

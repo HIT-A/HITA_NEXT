@@ -18,14 +18,15 @@ function campusPortals() {
   return mod.exports;
 }
 
-test('assistant, news and campus links are registered routes in More, after academic tools and before settings', () => {
+test('assistant, news and campus links are registered routes in More, after academic tools and settings', () => {
   const home = read('pages/Home.ets');
   const more = home.slice(home.indexOf('  tabMine()'), home.indexOf('  userCard()'));
   const academic = more.indexOf("this.moreSectionTitle('教务功能')");
-  const extras = more.indexOf("this.moreSectionTitle('更多')");
   const settings = more.indexOf("this.moreSectionTitle('设置')");
-  assert.ok(academic >= 0 && academic < extras && extras < settings);
-  const section = more.slice(extras, settings);
+  const extras = more.indexOf("this.moreSectionTitle('更多')");
+  assert.ok(academic >= 0 && academic < settings && settings < extras);
+  // 更多 is the last section; it runs to the end of the scroll content.
+  const section = more.slice(extras, more.indexOf('Blank().height(this.dockPageInset()', extras));
   const routes = JSON.parse(fs.readFileSync(path.join(root, '../resources/base/profile/main_pages.json'))).src;
   for (const [page, label, symbol] of [
     ['AssistantPage', '助手', 'AI_message'], ['NewsPage', '资讯', 'doc_text'],

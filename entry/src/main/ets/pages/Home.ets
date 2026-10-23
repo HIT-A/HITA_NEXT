@@ -56,7 +56,7 @@ import { TimetableBackgroundStore } from '../feature/timetable/data/TimetableBac
 import { WidgetBackgroundStore } from '../feature/widget/WidgetBackgroundStore';
 import { NextClassWidgetService } from '../feature/widget/NextClassWidgetService';
 import { WidgetBackgroundPage } from '../feature/widget/WidgetBackgroundPage';
-import { ImportTimetablePanel } from './ImportTimetablePanel';
+import { ImportTimetablePanel } from '../feature/timetable/views/ImportTimetablePanel';
 import { ExamPage } from './ExamPage';
 import { ScorePage } from './ScorePage';
 import { CreditPage } from './CreditPage';
@@ -2257,7 +2257,7 @@ struct Home {
 
         if (!this.hasTimetable) {
           ListItem() {
-            this.todayNoTimetable();
+            this.emptyToday();
           }
         } else if (this.todayItems.length > 0) {
           ListItem() {
@@ -2266,10 +2266,10 @@ struct Home {
           ForEach(this.todayItems, (event: EasEventItem) => {
             ListItem() {
               if (CompatibleSheetMaterial.isEnabled()) {
-                ImmersiveEventCard({ content: () => { this.todayEventRow(event, true); } })
+                ImmersiveEventCard({ content: () => { this.eventRow(event, true); } })
                   .opacity(event.to <= this.nowTick ? 0.55 : 1)
               } else {
-                this.todayEventRow(event);
+                this.eventRow(event);
               }
             }
           }, (event: EasEventItem) => Home.todayItemKey(event));
@@ -2487,18 +2487,18 @@ struct Home {
     .padding({ left: 4, right: 4, top: 4 });
   }
 
+  /** Text only: import and management entries live on the timetable tab and the More page. */
   @Builder
-  todayNoTimetable() {
+  emptyToday() {
     Column() {
-      Text('还没有课表')
+      Text('还没有可展示的课表')
         .fontSize(16)
         .fontWeight(FontWeight.Medium)
         .fontColor(COLOR_TEXT_PRIMARY);
-      Text('登录教务导入，或在课表管理里手动创建')
+      Text('可在“更多”中导入或新建课表')
         .fontSize(13)
         .fontColor(COLOR_TEXT_SECONDARY)
-        .margin({ top: 6, bottom: 16 });
-      this.emptyTimetableActions();
+        .margin({ top: 6 });
     }
     .width('100%')
     .padding({ top: 28, bottom: 28 })
@@ -2506,7 +2506,7 @@ struct Home {
   }
 
   @Builder
-  todayEventRow(event: EasEventItem, immersive: boolean = false) {
+  eventRow(event: EasEventItem, immersive: boolean = false) {
     Row() {
       Row()
         .width(4)
@@ -3036,6 +3036,16 @@ struct Home {
           .backgroundColor(COLOR_CARD)
           .borderRadius(16);
 
+          this.moreSectionTitle('设置');
+          Column() {
+            this.classReminderSettings();
+            this.appearanceSettings();
+          }
+          .width('100%')
+          .padding({ top: 4, bottom: 4 })
+          .backgroundColor(COLOR_CARD)
+          .borderRadius(16);
+
           this.moreSectionTitle('更多');
           Column() {
             this.moreNavigationRow($r('sys.symbol.AI_message'), '助手',
@@ -3050,19 +3060,13 @@ struct Home {
               '校园网站与课程攻略', () => {
                 this.getUIContext().getRouter().pushUrl({ url: 'pages/PortalsPage' });
               });
-          }
-          .width('100%')
-          .padding({ top: 4, bottom: 4 })
-          .backgroundColor(COLOR_CARD)
-          .borderRadius(16);
-
-          this.moreSectionTitle('设置');
-          Column() {
-            this.classReminderSettings();
-            this.appearanceSettings();
             this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '公告',
               '版本更新 · 服务与故障通知', () => {
                 this.getUIContext().getRouter().pushUrl({ url: 'pages/NoticesPage' });
+              });
+            this.moreNavigationRow($r('sys.symbol.info_circle'), '关于',
+              '关于HITA NEXT', () => {
+                this.getUIContext().getRouter().pushUrl({ url: 'pages/AppAboutPage' });
               });
           }
           .width('100%')
