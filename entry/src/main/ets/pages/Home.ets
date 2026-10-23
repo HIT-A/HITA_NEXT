@@ -56,6 +56,11 @@ import { TimetableBackgroundStore } from '../feature/timetable/data/TimetableBac
 import { WidgetBackgroundStore } from '../feature/widget/WidgetBackgroundStore';
 import { NextClassWidgetService } from '../feature/widget/NextClassWidgetService';
 import { WidgetBackgroundPage } from '../feature/widget/WidgetBackgroundPage';
+import { ImportTimetablePanel } from './ImportTimetablePanel';
+import { ExamPage } from './ExamPage';
+import { ScorePage } from './ScorePage';
+import { CreditPage } from './CreditPage';
+import { EmptyClassroomPage } from './EmptyClassroomPage';
 import { TimetableWallpaperSampler } from '../feature/timetable/data/TimetableWallpaperSampler';
 import { TimetableDisplayOptions } from '../feature/timetable/data/TimetableDisplayOptions';
 import { TimetableDisplayStore } from '../feature/timetable/data/TimetableDisplayStore';
@@ -150,6 +155,9 @@ struct Home {
   @State widgetMenuExpanded: boolean = false;
   @State widgetBackgroundSet: boolean = false;
   @State widgetBackgroundSheetOpen: boolean = false;
+  @State importTimetableSheetOpen: boolean = false;
+  @State academicPanelOpen: boolean = false;
+  @State academicPanelKind: number = 0;
   @State widgetBackgroundDirty: boolean = false;
   @State widgetBackgroundBusy: boolean = false;
   private widgetBackgroundConfirmDismiss: ((dismiss: () => void, springBack: () => void) => void) | undefined =
@@ -1266,7 +1274,8 @@ struct Home {
   private canOpenSheet(): boolean {
     return !this.skippingCourse && this.pageVisible && !this.tabTransitionRunning && !this.activeSheetVisible &&
       !this.sessionSheetOpen && !this.loginSheetOpen && !this.courseSheetOpen &&
-      !this.calendarExportSheetOpen && !this.timetableDisplayOpen && !this.widgetBackgroundSheetOpen;
+      !this.calendarExportSheetOpen && !this.timetableDisplayOpen && !this.widgetBackgroundSheetOpen &&
+      !this.importTimetableSheetOpen && !this.academicPanelOpen;
   }
 
   private closeActiveSheet(): void {
@@ -1283,6 +1292,23 @@ struct Home {
     this.widgetBackgroundDirty = false;
     this.widgetBackgroundBusy = false;
     this.widgetBackgroundSheetOpen = true;
+    this.activeSheetVisible = true;
+  }
+
+  private openImportTimetableSheet(): void {
+    if (!this.canOpenSheet()) {
+      return;
+    }
+    this.importTimetableSheetOpen = true;
+    this.activeSheetVisible = true;
+  }
+
+  private openAcademicPanel(kind: number): void {
+    if (!this.canOpenSheet() || kind < 1 || kind > 4) {
+      return;
+    }
+    this.academicPanelKind = kind;
+    this.academicPanelOpen = true;
     this.activeSheetVisible = true;
   }
 
@@ -1987,11 +2013,13 @@ struct Home {
       this.selectedNav = index;
     })
     .bindSheet($$this.activeSheetVisible, this.activeSheet(), CompatibleSheetMaterial.options({
-      height: this.widgetBackgroundSheetOpen ? SheetSize.LARGE :
+      height: this.widgetBackgroundSheetOpen || this.importTimetableSheetOpen || this.academicPanelOpen ? SheetSize.LARGE :
         (this.loginSheetOpen ? SheetSize.LARGE : SheetSize.FIT_CONTENT),
       // The first detent is the initial selection, so start expanded and allow collapsing to medium.
-      detents: this.widgetBackgroundSheetOpen ? [SheetSize.LARGE, SheetSize.MEDIUM] : undefined,
-      scrollSizeMode: this.widgetBackgroundSheetOpen ? ScrollSizeMode.CONTINUOUS : undefined,
+      detents: this.widgetBackgroundSheetOpen || this.importTimetableSheetOpen || this.academicPanelOpen ?
+        [SheetSize.LARGE, SheetSize.MEDIUM] : undefined,
+      scrollSizeMode: this.widgetBackgroundSheetOpen || this.importTimetableSheetOpen || this.academicPanelOpen ?
+        ScrollSizeMode.CONTINUOUS : undefined,
       dragBar: true,
       // Every sheet owns its header control; the system close bubble overlaps
       // the web login toolbar's trailing actions.
@@ -2015,6 +2043,9 @@ struct Home {
         this.sessionSheetOpen = false;
         this.loginSheetOpen = false;
         this.widgetBackgroundSheetOpen = false;
+        this.importTimetableSheetOpen = false;
+        this.academicPanelOpen = false;
+        this.academicPanelKind = 0;
         this.widgetBackgroundDirty = false;
         this.widgetBackgroundBusy = false;
         this.widgetBackgroundConfirmDismiss = undefined;
@@ -2027,7 +2058,9 @@ struct Home {
         this.finishCourseSheetDismissal();
       }
     }, this.loginSheetOpen || this.sessionSheetOpen || this.courseSheetOpen || this.timetableDisplayOpen ||
-      this.calendarExportSheetOpen || this.widgetBackgroundSheetOpen, !this.timetableDisplayOpen));
+      this.calendarExportSheetOpen || this.widgetBackgroundSheetOpen || this.importTimetableSheetOpen ||
+      this.academicPanelOpen,
+    !this.timetableDisplayOpen));
   }
 
   @Builder
@@ -2052,7 +2085,8 @@ struct Home {
 
   @Builder
   activeSheet() {
-    SheetContent({ fillHeight: this.loginSheetOpen || this.widgetBackgroundSheetOpen }) {
+    SheetContent({ fillHeight: this.loginSheetOpen || this.widgetBackgroundSheetOpen || this.importTimetableSheetOpen ||
+      this.academicPanelOpen }) {
       if (this.loginSheetOpen) {
         EasLoginPage({
           campusCode: this.loginCampusCode,
@@ -2092,6 +2126,26 @@ struct Home {
         })
           .width('100%')
           .height('100%');
+      } else if (this.importTimetableSheetOpen) {
+        ImportTimetablePanel({
+          presentedAsSheet: true,
+          onClose: () => this.closeActiveSheet(),
+          onImported: () => { void this.refreshSummaries(); }
+        })
+          .width('100%')
+          .height('100%');
+      } else if (this.academicPanelOpen && this.academicPanelKind === 1) {
+        ExamPage({ presentedAsSheet: true, onClose: () => this.closeActiveSheet() })
+          .width('100%').height('100%');
+      } else if (this.academicPanelOpen && this.academicPanelKind === 2) {
+        ScorePage({ presentedAsSheet: true, onClose: () => this.closeActiveSheet() })
+          .width('100%').height('100%');
+      } else if (this.academicPanelOpen && this.academicPanelKind === 3) {
+        CreditPage({ presentedAsSheet: true, onClose: () => this.closeActiveSheet() })
+          .width('100%').height('100%');
+      } else if (this.academicPanelOpen && this.academicPanelKind === 4) {
+        EmptyClassroomPage({ presentedAsSheet: true, onClose: () => this.closeActiveSheet() })
+          .width('100%').height('100%');
       } else if (this.timetableDisplayOpen) {
         TimetableDisplaySettings({
           options: this.timetableDisplay,
@@ -2941,7 +2995,7 @@ struct Home {
             this.desktopWidgetSettings();
             this.moreNavigationRow($r('sys.symbol.repeat_1'), '导入课表',
               this.importing ? '正在从教务系统同步' : '从教务系统同步当前学期', () => {
-                this.getUIContext().getRouter().pushUrl({ url: 'pages/ImportTimetablePage' });
+                this.openImportTimetableSheet();
               });
             this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '导入 ICS 课表',
               '从日历文件导入课程', () => {
@@ -2962,21 +3016,19 @@ struct Home {
           Column() {
             this.moreNavigationRow($r('sys.symbol.calendar'), '考试',
               '查询教务考试或手动添加安排', () => {
-                this.getUIContext().getRouter().pushUrl({ url: 'pages/ExamPage' });
+                this.openAcademicPanel(1);
               });
             this.moreNavigationRow($r('sys.symbol.doc_plaintext'), '成绩管理',
               '按学期查询成绩、官方统计与本地均分', () => {
-                this.getUIContext().getRouter().pushUrl({ url: 'pages/ScorePage' });
+                this.openAcademicPanel(2);
               });
             this.moreNavigationRow($r('sys.symbol.graduationcap'), '学分查询',
               '培养方案完成度与分类学分统计', () => {
-                this.getUIContext().getRouter().pushUrl({ url: 'pages/CreditPage' });
+                this.openAcademicPanel(3);
               });
             this.moreNavigationRow($r('sys.symbol.magnifyingglass'), '空教室',
               '查询可用教室与空闲时段', () => {
-                this.getUIContext().getRouter().pushUrl({
-                  url: 'pages/EmptyClassroomPage'
-                });
+                this.openAcademicPanel(4);
               });
           }
           .width('100%')
@@ -3095,7 +3147,7 @@ struct Home {
             .fontColor(COLOR_TEXT_PRIMARY)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis });
-          Text('下一节课倒计时 · 地点 · 教师')
+          Text('下一节课倒计时')
             .fontSize(12)
             .fontColor(COLOR_TEXT_SECONDARY)
             .margin({ top: 2 })
